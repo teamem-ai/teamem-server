@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# environment / secrets — never commit credentials
+.env
+.env.*
+!.env.example
+
+# test coverage
+coverage/
+
+# logs
+*.log
+
+# OS noise
+.DS_Store

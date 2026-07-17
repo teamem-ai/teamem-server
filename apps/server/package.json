@@ -1,0 +1,14 @@
+{
+  "name": "@teamem/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "teamem portal server — ingestion API, compile engine, MCP endpoint, GitHub connector",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@teamem/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "teamem portal web UI — onboarding, members & roles, knowledge browsing, settings",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
