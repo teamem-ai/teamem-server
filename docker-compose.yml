@@ -1,0 +1,105 @@
+# teamem portal — self-hosted deployment topology (DRAFT)
+#
+# Three containers, no Redis: the compile queue is pg-boss, which lives
+# inside Postgres. One fewer service to operate than comparable stacks.
+#
+#   Standard (3 containers — postgres + server + worker):
+#     POSTGRES_PASSWORD='<strong>' docker compose up -d
+#
+#   All-in-one (2 containers — server embeds the compile worker):
+#     POSTGRES_PASSWORD='<strong>' TEAMEM_ALL_IN_ONE=true \
+#       docker compose up -d postgres server
+#
+#   Scale compile throughput:
+#     docker compose up -d --scale worker=3
+#
+# ── Honest status ────────────────────────────────────────────────────────
+# Pre-M0: only `docker compose up -d postgres` is functional today.
+# The server and worker services are the wiring target for M0 (their
+# Dockerfile and entrypoints land with the first real implementation).
+# Per project rule, nothing here pretends to work before it does.
+# ─────────────────────────────────────────────────────────────────────────
+#
+# Secrets policy (deliberate): POSTGRES_PASSWORD has NO default — compose
+# refuses to start without one. Do not expose this file's ports to the
+# public internet without putting real TLS/auth in front.
+
+name: teamem
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-teamem}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required (no default, pick a strong one)}
+      POSTGRES_DB: ${POSTGRES_DB:-teamem}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Enables the pgvector extension on first boot (semantic retrieval).
+      # Drizzle migrations also ensure it, so pre-existing volumes are fine.
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-teamem} -d $${POSTGRES_DB:-teamem}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  server:
+    # M0 wires this up. Until then this service is a topology draft:
+    # the Dockerfile does not exist yet and the build will fail — by design.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # M3 will publish images; self-builders keep using `build:` above.
+    # image: ghcr.io/teamem-ai/teamem-server:${TEAMEM_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-teamem}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-teamem}
+      # Single-process mode: when true, the server embeds the pg-boss
+      # compile worker — bring up only `postgres server` and skip `worker`.
+      TEAMEM_ALL_IN_ONE: ${TEAMEM_ALL_IN_ONE:-false}
+      # LLM provider keys (BYO). M0 reads env; M2 moves provider config
+      # into the portal UI. TEAMEM_-prefixed on purpose: never inherit
+      # ambient ANTHROPIC_API_KEY/OPENAI_API_KEY from the host shell.
+      TEAMEM_ANTHROPIC_API_KEY: ${TEAMEM_ANTHROPIC_API_KEY:-}
+      TEAMEM_OPENAI_API_KEY: ${TEAMEM_OPENAI_API_KEY:-}
+      TEAMEM_OPENROUTER_API_KEY: ${TEAMEM_OPENROUTER_API_KEY:-}
+      TEAMEM_OPENAI_COMPAT_BASE_URL: ${TEAMEM_OPENAI_COMPAT_BASE_URL:-}
+      TEAMEM_OPENAI_COMPAT_API_KEY: ${TEAMEM_OPENAI_COMPAT_API_KEY:-}
+    ports:
+      # Container listens on 8080; override the host port via TEAMEM_PORT.
+      - "${TEAMEM_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    # pg-boss compile consumer (F1 cheap-model extraction → F2 strong-model
+    # merge). Shares the server image; only the entrypoint differs.
+    # Skip this service entirely when TEAMEM_ALL_IN_ONE=true.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # image: ghcr.io/teamem-ai/teamem-server:${TEAMEM_VERSION:-latest}
+    command: ["node", "apps/server/dist/worker.js"]
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-teamem}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-teamem}
+      TEAMEM_ANTHROPIC_API_KEY: ${TEAMEM_ANTHROPIC_API_KEY:-}
+      TEAMEM_OPENAI_API_KEY: ${TEAMEM_OPENAI_API_KEY:-}
+      TEAMEM_OPENROUTER_API_KEY: ${TEAMEM_OPENROUTER_API_KEY:-}
+      TEAMEM_OPENAI_COMPAT_BASE_URL: ${TEAMEM_OPENAI_COMPAT_BASE_URL:-}
+      TEAMEM_OPENAI_COMPAT_API_KEY: ${TEAMEM_OPENAI_COMPAT_API_KEY:-}
+
+volumes:
+  pgdata:

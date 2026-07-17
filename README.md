@@ -36,6 +36,30 @@ pnpm typecheck   # tsc --noEmit across packages
 pnpm test        # vitest
 ```
 
+## Self-hosted deployment (topology draft)
+
+Three containers, no Redis — the compile queue is [pg-boss](https://github.com/timgit/pg-boss),
+which lives inside Postgres:
+
+```sh
+cp .env.example .env             # fill in POSTGRES_PASSWORD (no default, on purpose)
+
+# Standard: postgres + server + worker
+docker compose up -d
+
+# All-in-one: server embeds the compile worker (2 containers)
+TEAMEM_ALL_IN_ONE=true docker compose up -d postgres server
+
+# Scale compile throughput
+docker compose up -d --scale worker=3
+```
+
+**Current status:** only the `postgres` service (with pgvector enabled) is
+functional today — verified: container healthy, `vector` extension active,
+cosine-distance queries working. The `server`/`worker` services are the
+wiring target for M0; their Dockerfile and entrypoints land with the first
+real implementation.
+
 ## Tech stack (decided)
 
 TypeScript · Postgres (+ pgvector) · pg-boss · Drizzle ORM · Zod ·
