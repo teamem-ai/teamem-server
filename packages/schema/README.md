@@ -10,8 +10,12 @@ import it freely, without copyleft obligations.
 
 ## Status
 
-Contract v0 is drafted but **not yet frozen**. Zod schemas and TypeScript
-types will be generated here upon contract freeze. Until then this package
-intentionally exports only its contract status marker — no speculative types.
+**Contract v0.2 — FROZEN (2026-07-17, after five review rounds).**
+The Zod schemas in `src/` ARE the contract text ("the appendix is the code"):
+error envelope, cursor, auth vocabulary, ingestion request/response, batch,
+compilations, concept/evidence, event, job, and audit DTOs — each annotated
+with the decision (Q/N) it implements. `src/contract.test.ts` pins the
+frozen decisions as executable checks. Changes from here bump the contract
+version (v0.3); no casual edits.
 
 Build/publish tooling will be added with the first real release.
