@@ -236,3 +236,12 @@ A change is complete only when all of the following are true:
 - Validation reporting is honest; unrun real-dependency tests are not presented as passing.
 
 If a task asks for “acceptance” or “review,” perform read-only checks and report evidence by default. Do not fix code or update documentation unless requested.
+
+## 13. Git and Pull Request Policy
+
+- `main` is the only long-lived integration branch. Never push directly to it; use a short-lived branch and pull request.
+- Follow `docs/GITFLOW.md` for branch names, review gates, release preparation, and emergency handling.
+- Format pull-request titles as `type(scope): imperative summary`; the validated title becomes the squash commit on `main`.
+- Add a DCO sign-off to every pull-request commit with `git commit -s`. Select exactly one `semver:major`, `semver:minor`, `semver:patch`, or `semver:none` label.
+- Do not bypass required checks, unresolved review conversations, or real-Postgres validation. Use squash merge only.
+- Product releases come from annotated immutable `vMAJOR.MINOR.PATCH` tags on `main`. Release automation may publish a GitHub Release and GHCR image, but it must never deploy to a hosted environment.

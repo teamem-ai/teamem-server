@@ -1,0 +1,150 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: teamem_release
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d teamem_release"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/teamem_release
+    steps:
+      - name: Check out the release tag and full history
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Fetch main for ancestry verification
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+      - uses: ./.github/actions/setup-pnpm
+      - name: Verify tag, versions, changelog, and main ancestry
+        run: node .github/scripts/verify-release.mjs '${{ github.ref_name }}'
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Apply committed migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          for migration in apps/server/drizzle/*.sql; do
+            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Test against PostgreSQL/pgvector
+        run: pnpm test
+
+  container:
+    name: publish container
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Require a release-ready Dockerfile
+        run: test -f Dockerfile
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Derive image tags and OCI labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.title=teamem-server
+            org.opencontainers.image.description=Self-hostable team knowledge compiler for AI coding agents
+            org.opencontainers.image.licenses=AGPL-3.0-only
+      - name: Build and publish image
+        id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  github-release:
+    name: publish GitHub Release
+    needs:
+      - verify
+      - container
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      IMAGE_DIGEST: ${{ needs.container.outputs.digest }}
+    steps:
+      - name: Create immutable release record
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes="Container: ghcr.io/${GH_REPO}@${IMAGE_DIGEST}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            existing_notes="$(gh release view "$TAG" --json body --jq .body)"
+            if [[ "$existing_notes" != *"$notes"* ]]; then
+              existing_notes="${existing_notes}"$'\n\n'"${notes}"
+            fi
+            gh release edit "$TAG" --draft=false --latest --notes "$existing_notes"
+          else
+            gh release create "$TAG" \
+              --verify-tag \
+              --latest \
+              --generate-notes \
+              --title "Teamem ${TAG}" \
+              --notes "$notes"
+          fi

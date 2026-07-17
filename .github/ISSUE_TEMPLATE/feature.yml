@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a focused product or engineering improvement
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What real user problem is not solved today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed outcome
+      description: Describe the behavior, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and alternatives
+      description: What is deliberately out of scope, and what alternatives were considered?
+    validations:
+      required: true
+  - type: textarea
+    id: contracts
+    attributes:
+      label: Contract, migration, and security impact
+      description: Note API/DTO, database, tenant, auth, redaction, audit, licensing, and compatibility effects.
+

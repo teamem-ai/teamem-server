@@ -36,6 +36,17 @@ pnpm typecheck   # tsc --noEmit across packages
 pnpm test        # vitest
 ```
 
+Contributions use short-lived branches, signed-off commits, protected pull
+requests, and squash merges into `main`. See [CONTRIBUTING.md](./CONTRIBUTING.md)
+for the contributor checklist and [docs/GITFLOW.md](./docs/GITFLOW.md) for the
+complete branch, review, GitHub governance, and release policy. Report security
+issues through the private process in [SECURITY.md](./SECURITY.md), not a public
+issue.
+
+Releases are versioned Git tags plus GitHub Releases and GHCR images. This
+repository publishes distributable artifacts; it does not deploy a hosted
+environment.
+
 ## Self-hosted deployment (topology draft)
 
 Three containers, no Redis — the compile queue is [pg-boss](https://github.com/timgit/pg-boss),
