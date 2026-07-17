@@ -23,9 +23,15 @@ importers:
 
   apps/server:
     dependencies:
+      '@teamem/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^26.1.1
