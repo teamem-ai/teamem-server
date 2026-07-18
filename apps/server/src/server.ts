@@ -10,26 +10,12 @@
  *
  * Body limit: 5 MB enforced at the Hono level before any handler runs.
  */
-import { Hono, type Context, type Next } from 'hono';
+import { type Context, type Next } from 'hono';
 import { serve } from '@hono/node-server';
-import { requestContext } from './http/request-context.js';
-import { globalErrorHandler, notFoundHandler, PayloadTooLargeError } from './http/errors.js';
+import { buildApp } from './app.js';
+import { PayloadTooLargeError } from './http/errors.js';
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5 MB batch limit (contract ②)
-
-const app = new Hono().basePath('/');
-
-// ── Global middleware ───────────────────────────────────────────────────────
-// Request-ID: accept incoming x-request-id or generate a UUID (runs first).
-app.use('*', requestContext);
-
-// ── Global error / not-found handlers ───────────────────────────────────────
-app.onError(globalErrorHandler);
-app.notFound(notFoundHandler);
-
-// ── Health check ────────────────────────────────────────────────────────────
-app.get('/healthz', (c) => c.json({ status: 'ok' }));
-
 // ── Body-size guard ─────────────────────────────────────────────────────────
 // Applied per-route rather than globally so /healthz stays lightweight.
 // Ingestion routes will use this middleware explicitly.
@@ -48,6 +34,7 @@ const port = Number(process.env['TEAMEM_PORT'] ?? 8080);
 
 export function startServer(portOverride?: number) {
   const p = portOverride ?? port;
+  const app = buildApp({ dbUrl: process.env['TEAMEM_DATABASE_URL'] });
   const server = serve({ fetch: app.fetch, port: p }, (info) => {
     console.log(`teamem server listening on http://127.0.0.1:${info.port}`);
   });
@@ -73,4 +60,7 @@ if (isMain) {
   }
 }
 
+// Re-export the factory and a default app for backward compatibility with
+// tests that import `app` from './server.js'.
+const app = buildApp();
 export { app };
