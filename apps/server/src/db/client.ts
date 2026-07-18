@@ -14,3 +14,20 @@ export function createDb(connectionString: string) {
 }
 
 export type AppDb = ReturnType<typeof createDb>;
+
+/**
+ * Like {@link createDb}, but exposes the underlying pool and a `close()` so the
+ * composition root can own the connection's lifecycle (open on startup, drain
+ * last on shutdown). `close()` resolves once every pooled socket is released.
+ */
+export function createDbHandle(connectionString: string) {
+  const pool = new Pool({ connectionString });
+  const db = drizzle(pool, { schema });
+  return {
+    db,
+    pool,
+    close: () => pool.end(),
+  };
+}
+
+export type AppDbHandle = ReturnType<typeof createDbHandle>;
