@@ -12,12 +12,15 @@ import {
   cursorPayload,
   decodeCursor,
   encodeCursor,
+  eventSummary,
   evidence,
   ingestEventRequest,
   jobEventResult,
   principalId,
   source,
   teamRole,
+  CONTRACT_ADDITIVE_CHANGES,
+  CONTRACT_STATUS,
   KNOWN_AUDIT_ACTIONS,
   type CursorPayload,
 } from './index.js';
@@ -92,6 +95,36 @@ describe('source (generic connector channel — v0.3 additive, DUA-129)', () => 
       somethingElse: 'nope',
     });
     expect(bad.success).toBe(false);
+  });
+
+  it('a persisted Slack-like actor round-trips through eventSummary (acceptance-review fix: actor.provider is open)', () => {
+    // Closes the exact gap the acceptance review found: source.channel
+    // allowed 'external' but actor.provider was still closed to ['github'],
+    // so a genuinely-persisted Slack/Gmail actor could never pass this DTO.
+    const parsed = eventSummary.safeParse({
+      id: 'evt_01H',
+      projectId: 'prj_abc123',
+      source: { ...base, channel: 'external', connectorKind: 'slack' },
+      actor: {
+        kind: 'human',
+        provider: 'slack',
+        providerUserId: 'U123',
+        displayLogin: 'alice',
+      },
+      actorProvenance: 'webhook_verified',
+      occurredAt: '2026-07-17T00:00:00.000Z',
+      occurredAtProvenance: 'provider',
+      ingestedBy: { credentialId: null, principalId: null },
+      payloadBytes: 37,
+      createdAt: '2026-07-17T00:00:01.000Z',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('the contract honestly reports its status once diverged from the frozen base, with an enumerated changelog', () => {
+    expect(CONTRACT_STATUS).not.toBe('v0.2-frozen');
+    expect(CONTRACT_ADDITIVE_CHANGES.length).toBeGreaterThan(0);
+    expect(CONTRACT_ADDITIVE_CHANGES.some((c) => c.change.includes('DUA-129'))).toBe(true);
   });
 });
 

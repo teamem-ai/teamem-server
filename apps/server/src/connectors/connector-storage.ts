@@ -22,6 +22,7 @@
  * computes the frozen N1 payload hash over the (assumed-redacted) content.
  */
 import { randomUUID, createHash } from 'node:crypto';
+import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
 import {
   sourceKind as sourceKindSchema,
@@ -31,7 +32,7 @@ import {
 } from '@teamem/schema';
 import * as schema from '../db/schema.js';
 import type { AppDb } from '../db/client.js';
-import type { NormalizedActor, NormalizedEvent } from './registry.js';
+import { normalizedEventSchema, type NormalizedActor, type NormalizedEvent } from './registry.js';
 
 const BUILTIN_CONNECTOR_KINDS = new Set(['github', 'cli', 'mcp']);
 const BUILTIN_IDENTITY_PROVIDERS = new Set(['github']);
@@ -47,6 +48,9 @@ export interface ConnectorScope {
 }
 
 export class InvalidNormalizedEventError extends Error {}
+
+/** Same identity, different payload — N1: 409 idempotency_conflict, never a silent overwrite. */
+export class IdempotencyConflictError extends Error {}
 
 function isBuiltinConnectorKind(kind: string): kind is BuiltinChannel {
   return BUILTIN_CONNECTOR_KINDS.has(kind);
@@ -174,35 +178,88 @@ export interface PersistNormalizedEventResult {
   readonly channel: StoredChannel;
   readonly connectorKind: string;
   readonly principalId: string | null;
+  /** true when this call replayed an existing identity+hash match (N1) — no new row was written. */
+  readonly duplicate: boolean;
 }
 
 /**
  * Persists one NormalizedEvent under explicit tenant/project scope,
  * preserving connector identity through to the idempotency constraint
  * (events_idempotency_uq now includes connector_kind — see db/schema.ts).
- * Throws (never silently drops) on a idempotency collision or an invalid
- * built-in eventKind; the caller maps DB errors to the ingestion contract's
- * error codes (out of scope here).
+ *
+ * Cross-boundary validation (project rule — every boundary input goes
+ * through Zod): `event`/`event.actor` are runtime-checked against
+ * `registry.ts`'s schemas, not just typed, since a connector package is
+ * untrusted from the storage layer's point of view.
+ *
+ * Idempotent replay (N1): same identity + same payload hash returns the
+ * original result (`duplicate: true`, no new row, no recompute-as-error);
+ * same identity + different hash throws IdempotencyConflictError. The
+ * pre-check is not itself atomic with the insert — a genuine concurrent
+ * race still falls through to the unique constraint, which remains the
+ * backstop (that raw path is exercised by connector-storage.integration.test.ts).
  */
 export async function persistNormalizedEvent(
   db: AppDb,
   scope: ConnectorScope,
   event: NormalizedEvent,
 ): Promise<PersistNormalizedEventResult> {
-  if (event.connectorKind.length === 0) {
-    throw new InvalidNormalizedEventError('connectorKind must not be empty');
+  const parsed = normalizedEventSchema.safeParse(event);
+  if (!parsed.success) {
+    throw new InvalidNormalizedEventError(
+      `invalid NormalizedEvent: ${z.prettifyError(parsed.error)}`,
+    );
+  }
+  const validEvent = parsed.data;
+
+  const channel = resolveChannel(validEvent.connectorKind);
+  const kind = resolveKind(channel, validEvent.eventKind);
+  const sourceEvent = resolveSourceEvent(channel, validEvent);
+
+  const payloadBytes = Buffer.byteLength(JSON.stringify(validEvent.payload), 'utf8');
+  const payloadHash = createHash('sha256')
+    .update(canonicalJson(validEvent.payload))
+    .digest('hex');
+
+  const existing = await db
+    .select({
+      id: schema.events.id,
+      payloadHash: schema.events.payloadHash,
+      actorPrincipalId: schema.events.actorPrincipalId,
+    })
+    .from(schema.events)
+    .where(
+      and(
+        eq(schema.events.projectId, scope.projectId),
+        eq(schema.events.channel, channel),
+        eq(schema.events.connectorKind, validEvent.connectorKind),
+        eq(schema.events.deliveryId, validEvent.deliveryId),
+        eq(schema.events.itemKey, validEvent.itemKey),
+      ),
+    )
+    .limit(1);
+
+  const existingRow = existing[0];
+  if (existingRow) {
+    if (existingRow.payloadHash === payloadHash) {
+      return {
+        eventId: existingRow.id,
+        channel,
+        connectorKind: validEvent.connectorKind,
+        principalId: existingRow.actorPrincipalId,
+        duplicate: true,
+      };
+    }
+    throw new IdempotencyConflictError(
+      `idempotency_conflict: project '${scope.projectId}' channel '${channel}' ` +
+        `connectorKind '${validEvent.connectorKind}' delivery '${validEvent.deliveryId}' ` +
+        `item '${validEvent.itemKey}' already stored with a different payload hash`,
+    );
   }
 
-  const channel = resolveChannel(event.connectorKind);
-  const kind = resolveKind(channel, event.eventKind);
-  const sourceEvent = resolveSourceEvent(channel, event);
-
-  const principalId = event.actor
-    ? await resolveOrCreatePrincipal(db, scope, event.actor)
+  const principalId = validEvent.actor
+    ? await resolveOrCreatePrincipal(db, scope, validEvent.actor)
     : null;
-
-  const payloadBytes = Buffer.byteLength(JSON.stringify(event.payload), 'utf8');
-  const payloadHash = createHash('sha256').update(canonicalJson(event.payload)).digest('hex');
 
   const [row] = await db
     .insert(schema.events)
@@ -212,21 +269,21 @@ export async function persistNormalizedEvent(
       projectId: scope.projectId,
       channel,
       kind,
-      connectorKind: event.connectorKind,
+      connectorKind: validEvent.connectorKind,
       sourceEvent,
-      sourceAction: event.sourceAction ?? null,
-      deliveryId: event.deliveryId,
-      itemKey: event.itemKey,
-      externalId: event.externalId,
-      url: event.url ?? null,
-      actor: event.actor, // raw claim, preserved verbatim (5.4) — never fabricated
-      actorProvenance: event.actorProvenance,
+      sourceAction: validEvent.sourceAction ?? null,
+      deliveryId: validEvent.deliveryId,
+      itemKey: validEvent.itemKey,
+      externalId: validEvent.externalId,
+      url: validEvent.url ?? null,
+      actor: validEvent.actor, // raw claim, preserved verbatim (5.4) — never fabricated
+      actorProvenance: validEvent.actorProvenance,
       actorPrincipalId: principalId,
-      occurredAt: new Date(event.occurredAt),
-      occurredAtProvenance: event.occurredAtProvenance,
+      occurredAt: new Date(validEvent.occurredAt),
+      occurredAtProvenance: validEvent.occurredAtProvenance,
       ingestedByCredentialId: null, // filled by the ingestion layer (out of scope)
       ingestedByPrincipalId: null,
-      payload: event.payload,
+      payload: validEvent.payload,
       payloadBytes,
       payloadHash,
       payloadSchemaVersion: PAYLOAD_SCHEMA_VERSION,
@@ -241,7 +298,8 @@ export async function persistNormalizedEvent(
   return {
     eventId: row.id,
     channel,
-    connectorKind: event.connectorKind,
+    connectorKind: validEvent.connectorKind,
     principalId,
+    duplicate: false,
   };
 }

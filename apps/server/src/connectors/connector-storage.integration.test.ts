@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDb, type AppDb } from '../db/client.js';
 import {
+  IdempotencyConflictError,
   InvalidNormalizedEventError,
   persistNormalizedEvent,
   resolveOrCreatePrincipal,
@@ -155,11 +156,55 @@ describe.skipIf(!url)('connector-storage (generic persistence seam, live Postgre
     ).rejects.toThrow(InvalidNormalizedEventError);
   });
 
-  it('failure: replaying the same connector/delivery/item collides (idempotency preserved)', async () => {
+  it('success: replaying the same connector/delivery/item with the same payload returns the original result (N1)', async () => {
+    const first = await persistNormalizedEvent(db, scope, slackLikeEvent());
+    expect(first.duplicate).toBe(false);
+
+    const replay = await persistNormalizedEvent(db, scope, slackLikeEvent());
+    expect(replay.duplicate).toBe(true);
+    expect(replay.eventId).toBe(first.eventId);
+    expect(replay.principalId).toBe(first.principalId);
+
+    const { rows } = await db.execute(
+      `SELECT count(*)::int AS n FROM events WHERE delivery_id = 'Ev123' AND connector_kind = 'slack'`,
+    );
+    expect(rows[0]).toMatchObject({ n: 1 }); // no duplicate row written
+  });
+
+  it('failure: same identity with a different payload is an idempotency_conflict, not a silent overwrite (N1)', async () => {
     await persistNormalizedEvent(db, scope, slackLikeEvent());
-    await expect(persistNormalizedEvent(db, scope, slackLikeEvent())).rejects.toMatchObject({
-      cause: { constraint: 'events_idempotency_uq' },
-    });
+    await expect(
+      persistNormalizedEvent(db, scope, slackLikeEvent({ payload: { text: 'different content' } })),
+    ).rejects.toThrow(IdempotencyConflictError);
+  });
+
+  it('failure: a concurrent-style raw collision still hits the DB constraint as a backstop', async () => {
+    // Exercises the actual unique index directly (bypassing the app-level
+    // pre-check) — the DB remains the ultimate backstop against races.
+    await db.execute(`
+      INSERT INTO events (id, team_id, project_id, channel, kind, connector_kind,
+        delivery_id, item_key, external_id, actor_provenance, occurred_at,
+        occurred_at_provenance, payload, payload_bytes, payload_hash,
+        payload_schema_version, envelope_version)
+      VALUES ('evt_raw_race', 'team_conn', 'prj_conn', 'external', 'external_event', 'slack',
+        'Ev-race', 'root', 'x', 'unknown', now(), 'server', '{}', 2, 'race-hash', 1, 1)
+    `);
+    await expect(
+      db.execute(`
+        INSERT INTO events (id, team_id, project_id, channel, kind, connector_kind,
+          delivery_id, item_key, external_id, actor_provenance, occurred_at,
+          occurred_at_provenance, payload, payload_bytes, payload_hash,
+          payload_schema_version, envelope_version)
+        VALUES ('evt_raw_race_2', 'team_conn', 'prj_conn', 'external', 'external_event', 'slack',
+          'Ev-race', 'root', 'x', 'unknown', now(), 'server', '{}', 2, 'different-hash', 1, 1)
+      `),
+    ).rejects.toMatchObject({ cause: { constraint: 'events_idempotency_uq' } });
+  });
+
+  it('failure: an invalid NormalizedEvent (empty deliveryId) is rejected at the boundary by Zod, not by the DB', async () => {
+    await expect(
+      persistNormalizedEvent(db, scope, slackLikeEvent({ deliveryId: '' })),
+    ).rejects.toThrow(InvalidNormalizedEventError);
   });
 
   it('REQUIRED counterexample: a slack-like and a gmail-like event sharing delivery/item id do not collide or merge identity', async () => {
