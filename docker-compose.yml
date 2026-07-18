@@ -66,6 +66,10 @@ services:
       # Single-process mode: when true, the server embeds the pg-boss
       # compile worker — bring up only `postgres server` and skip `worker`.
       TEAMEM_ALL_IN_ONE: ${TEAMEM_ALL_IN_ONE:-false}
+      # GitHub App / webhook
+      TEAMEM_GITHUB_WEBHOOK_SECRET: ${TEAMEM_GITHUB_WEBHOOK_SECRET:-}
+      TEAMEM_GITHUB_APP_ID: ${TEAMEM_GITHUB_APP_ID:-}
+      TEAMEM_GITHUB_INSTALLATION_ID: ${TEAMEM_GITHUB_INSTALLATION_ID:-}
       # LLM provider keys (BYO). M0 reads env; M2 moves provider config
       # into the portal UI. TEAMEM_-prefixed on purpose: never inherit
       # ambient ANTHROPIC_API_KEY/OPENAI_API_KEY from the host shell.
