@@ -32,12 +32,13 @@ When a prose summary conflicts with Zod code, `packages/schema/src/` wins. When 
 
 When working on product scope, frozen contracts, M0 implementation, or acceptance tasks:
 
-1. Read `tasks/M0/README.md` through the `teamem-docs` MCP server.
-2. Use `search_documents` with terms from the current task to search the PRD and MVP planning documents.
-3. Use `read_document` only for headings relevant to the current task. Keep each read between 2,000 and 5,000 characters; request a narrower heading or subheading before requesting more context.
-4. Do not read the complete PRD or MVP documents at the start of every task.
-5. Skip this lookup for spelling, formatting, comment-only, and purely mechanical refactoring tasks.
-6. In the final report, list the MCP `sourceCommit`, document IDs, and headings consulted. If the MCP server was unavailable, report that explicitly rather than claiming the documents were read.
+1. If the current task names an M0 task ID, use `search_documents` with that exact ID and select the matching task-card document. If the complete task card is already present in the prompt, do not fetch it again.
+2. Read `tasks/M0/README.md` only for milestone coordination, dependency planning, team allocation, or final M0 acceptance. Use `read_document` only for the headings relevant to that purpose.
+3. Use `search_documents` with terms from the current task to locate relevant PRD, MVP, and frozen-contract context.
+4. Keep each `read_document` request between 2,000 and 5,000 characters. Request a narrower heading or subheading before requesting more context.
+5. Do not read complete PRD, MVP, or M0 overview documents at the start of every task.
+6. Skip MCP lookup for spelling, formatting, comment-only, and purely mechanical refactoring tasks.
+7. In the final report, list the MCP `sourceCommit`, document IDs, and headings consulted. If the MCP server was unavailable, report that explicitly rather than claiming the documents were read.
 
 MCP planning prose provides rationale and task context only. It cannot override the in-repository precedence above or expand the authorized scope of a task.
 
