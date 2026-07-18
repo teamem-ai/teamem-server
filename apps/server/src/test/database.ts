@@ -5,10 +5,11 @@
  * committed migrations already applied (pgvector extension, enums, tables).
  * No mock databases — per project red line.
  *
- * Each test gets a dedicated client from the pool with unique team/project
- * IDs. Tests that need to verify constraint violations use a separate
- * client from the pool so the violation does not abort the test client's
- * session.
+ * Each test runs inside a transaction that is automatically rolled back
+ * when the context is disposed, giving leak-free cleanup even on test
+ * failure. Constraint-violation assertions (expectViolation) use Postgres
+ * savepoints on the SAME connection so they can see uncommitted seed data
+ * while remaining isolated from the outer transaction.
  *
  * Usage:
  *   import { connectDatabase, createTestContext, closeDatabase } from '../test/database.js';
@@ -19,7 +20,7 @@
  *   it('example', async () => {
  *     await using ctx = await createTestContext(pool);
  *     // ctx.teamId, ctx.projectId are unique per test
- *     // all operations use the ctx.exec / ctx.query helpers
+ *     // all changes are rolled back when the context goes out of scope
  *   });
  */
 import { Pool } from 'pg';
@@ -27,18 +28,12 @@ import { Pool } from 'pg';
 export type { Pool } from 'pg';
 
 export interface TestContext {
-  /** Unique team ID for this test run. */
   readonly teamId: string;
-  /** Unique project ID for this test run. */
   readonly projectId: string;
-  /** Execute a SQL statement. */
   exec(sql: string): Promise<void>;
-  /** Execute a SQL query and return rows. */
   query<T extends Record<string, unknown> = Record<string, unknown>>(
     sql: string,
   ): Promise<T[]>;
-  /** Release the underlying client back to the pool. */
-  release(): Promise<void>;
 }
 
 let counter = 0;
@@ -46,35 +41,40 @@ let counter = 0;
 /**
  * Assert that the given SQL violates a named constraint.
  *
- * Acquires a separate client from the pool so the constraint violation
- * does not abort the calling test's session. The separate client is
- * released after the check.
+ * Runs on the test's own connection so it sees uncommitted seed data.
+ * Uses a Postgres savepoint to isolate the violation: if the SQL fails
+ * (expected), ROLLBACK TO SAVEPOINT resets the transaction state; if it
+ * succeeds (unexpected), the savepoint is released and an error is thrown.
+ * Verifies the error message contains the expected constraint name.
  */
 export async function expectViolation(
-  pool: Pool,
+  ctx: TestContext,
   sql: string,
   constraint: string,
 ): Promise<void> {
-  const client = await pool.connect();
+  await ctx.exec('SAVEPOINT sp_violation');
+  let released = false;
   try {
-    await client.query('BEGIN');
-    try {
-      await client.query(sql);
-      throw new Error(
-        `Expected constraint violation "${constraint}" but statement succeeded`,
-      );
-    } catch (err) {
-      if (
-        err instanceof Error &&
-        err.message.includes('Expected constraint violation')
-      ) {
-        throw err;
-      }
-      // Expected: constraint violation — rollback the savepoint transaction
-      await client.query('ROLLBACK');
+    await ctx.exec(sql);
+    // Statement succeeded when it should have violated — release savepoint
+    await ctx.exec('RELEASE SAVEPOINT sp_violation');
+    released = true;
+    throw new Error(
+      `Expected constraint violation "${constraint}" but statement succeeded`,
+    );
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes('Expected constraint violation')) {
+      throw err;
     }
-  } finally {
-    client.release();
+    // Constraint violation — rollback the savepoint to recover transaction state
+    if (!released) {
+      await ctx.exec('ROLLBACK TO SAVEPOINT sp_violation');
+    }
+    if (!(err instanceof Error) || !err.message.includes(constraint)) {
+      throw new Error(
+        `Expected constraint "${constraint}" but got: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 }
 
@@ -90,32 +90,29 @@ export function connectDatabase(): { pool: Pool } {
       'TEST_DATABASE_URL is not set; skipping real-database tests',
     );
   }
-  const pool = new Pool({ connectionString: url });
-  return { pool };
+  return { pool: new Pool({ connectionString: url }) };
 }
 
 /**
- * Create an isolated test context. Each context acquires a dedicated client
- * from the pool with unique team/project IDs.
+ * Create an isolated test context.
  *
- * Returns an async-disposable context (use with `await using`).
- *
- * @example
- *   await using ctx = await createTestContext(pool);
- *   await ctx.exec(`INSERT INTO teams ...`);
+ * All operations run inside a transaction that is automatically rolled
+ * back when the context is disposed (via `await using` or
+ * `Symbol.asyncDispose`). This guarantees leak-free cleanup irrespective
+ * of test success or failure.
  */
 export async function createTestContext(
   pool: Pool,
 ): Promise<TestContext & { [Symbol.asyncDispose](): Promise<void> }> {
   const client = await pool.connect();
+  await client.query('BEGIN');
 
   const id = ++counter;
-  const teamId = `test_team_${id}_${Date.now()}`;
-  const projectId = `test_prj_${id}_${Date.now()}`;
+  const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const teamId = `test_team_${id}_${suffix}`;
+  const projectId = `test_prj_${id}_${suffix}`;
 
-  const ctx: TestContext & {
-    [Symbol.asyncDispose](): Promise<void>;
-  } = {
+  return {
     teamId,
     projectId,
     exec: async (sql: string) => {
@@ -124,18 +121,17 @@ export async function createTestContext(
     query: async <T extends Record<string, unknown> = Record<string, unknown>>(
       sql: string,
     ): Promise<T[]> => {
-      const result = await client.query<T>(sql);
-      return result.rows;
-    },
-    release: async () => {
-      client.release();
+      const { rows } = await client.query<T>(sql);
+      return rows;
     },
     [Symbol.asyncDispose]: async () => {
-      client.release();
+      try {
+        await client.query('ROLLBACK');
+      } finally {
+        client.release();
+      }
     },
   };
-
-  return ctx;
 }
 
 /**

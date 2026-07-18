@@ -20,27 +20,6 @@ import {
 
 const url = process.env['TEST_DATABASE_URL'];
 
-/** FK-safe delete order for test cleanup. */
-const CLEANUP_ORDER: Array<[table: string, where: string]> = [
-  ['job_events', 'team_id'],
-  ['jobs', 'team_id'],
-  ['concept_paths', 'team_id'],
-  ['concept_evidence', 'team_id'],
-  ['concept_contributors', 'team_id'],
-  ['concepts', 'team_id'],
-  ['events', 'team_id'],
-  ['api_keys', 'team_id'],
-  ['principals', 'team_id'],
-  ['projects', 'team_id'],
-  ['teams', 'id'],
-];
-
-async function cleanup(ctx: { exec: (sql: string) => Promise<void>; teamId: string }) {
-  for (const [table, col] of CLEANUP_ORDER) {
-    await ctx.exec(`DELETE FROM ${table} WHERE ${col} = '${ctx.teamId}'`);
-  }
-}
-
 describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
   let pool: Pool;
 
@@ -81,8 +60,6 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
       );
       expect(projects).toHaveLength(1);
       expect(projects[0]!.id).toBe(ctx.projectId);
-
-      await cleanup(ctx);
     });
 
     it('creates a full entity chain: team, project, principal, concept, evidence, path, contributor', async () => {
@@ -101,6 +78,7 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
         VALUES ('pri_test', '${ctx.teamId}', 'human', 'github', '12345',
           'github')
       `);
+
       const conceptUuid = randomUUID();
       await ctx.exec(`
         INSERT INTO concepts (uuid, team_id, project_id, schema_version, type,
@@ -113,8 +91,7 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
         INSERT INTO concept_evidence (team_id, project_id, concept_uuid, kind,
           ref, at)
         VALUES ('${ctx.teamId}', '${ctx.projectId}',
-          '${conceptUuid}', 'manual', 'test-ref',
-          now())
+          '${conceptUuid}', 'manual', 'test-ref', now())
       `);
       await ctx.exec(`
         INSERT INTO concept_paths (team_id, project_id, concept_uuid, path,
@@ -134,17 +111,13 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
       );
       expect(concepts).toHaveLength(1);
       expect(concepts[0]!.title).toBe('Test');
-
-      await cleanup(ctx);
     });
   });
 
   describe('failure path — FK constraints', () => {
-    it('rejects cross-tenant project mismatch (events_project_fk)', async () => {
+    it('rejects event referencing non-existent team (events_team_id_teams_id_fk)', async () => {
       await using ctx = await createTestContext(pool);
-      await using ctx2 = await createTestContext(pool);
 
-      // Create a legitimate team and project in ctx
       await ctx.exec(`
         INSERT INTO teams (id, name) VALUES ('${ctx.teamId}', 'A')
       `);
@@ -153,24 +126,43 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
         VALUES ('${ctx.projectId}', '${ctx.teamId}', 'PA')
       `);
 
-      // Create a foreign team in ctx2
-      await ctx2.exec(`INSERT INTO teams (id, name) VALUES ('${ctx2.teamId}', 'B')`);
-
-      // Cross-tenant: ctx2's team claiming ctx's project → rejected
       await expectViolation(
-        pool,
+        ctx,
         `INSERT INTO events (id, team_id, project_id, channel, kind,
           delivery_id, item_key, external_id, actor_provenance, occurred_at,
           occurred_at_provenance, payload, payload_bytes, payload_hash,
           payload_schema_version, envelope_version, connector_kind)
-        VALUES ('evt_cross', '${ctx2.teamId}', '${ctx.projectId}', 'cli',
-          'cli_init', 'del_cross', 'root', 'x', 'unknown', now(), 'server',
-          '{}', 2, 'h2', 1, 1, 'cli')`,
+        VALUES ('evt_x', 'nonexistent_team', '${ctx.projectId}', 'cli',
+          'cli_init', 'del_x', 'root', 'x', 'unknown', now(), 'server',
+          '{}', 2, 'h', 1, 1, 'cli')`,
+        'events_team_id_teams_id_fk',
+      );
+    });
+
+    it('rejects cross-tenant project reference (events_project_fk)', async () => {
+      await using ctx = await createTestContext(pool);
+
+      // Both teams and project_a exist
+      await ctx.exec(`
+        INSERT INTO teams (id, name) VALUES ('team_a', 'A'), ('team_b', 'B')
+      `);
+      await ctx.exec(`
+        INSERT INTO projects (id, team_id, name)
+        VALUES ('prj_a', 'team_a', 'PA')
+      `);
+
+      // team_b claiming team_a's project → composite FK (team_id, project_id)
+      await expectViolation(
+        ctx,
+        `INSERT INTO events (id, team_id, project_id, channel, kind,
+          delivery_id, item_key, external_id, actor_provenance, occurred_at,
+          occurred_at_provenance, payload, payload_bytes, payload_hash,
+          payload_schema_version, envelope_version, connector_kind)
+        VALUES ('evt_y', 'team_b', 'prj_a', 'cli',
+          'cli_init', 'del_y', 'root', 'x', 'unknown', now(), 'server',
+          '{}', 2, 'h', 1, 1, 'cli')`,
         'events_project_fk',
       );
-
-      await cleanup(ctx);
-      await cleanup(ctx2);
     });
   });
 
@@ -185,30 +177,29 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
         INSERT INTO projects (id, team_id, name)
         VALUES ('${ctx.projectId}', '${ctx.teamId}', 'PA')
       `);
+
       await ctx.exec(`
         INSERT INTO events (id, team_id, project_id, channel, kind,
           delivery_id, item_key, external_id, actor_provenance, occurred_at,
           occurred_at_provenance, payload, payload_bytes, payload_hash,
           payload_schema_version, envelope_version, connector_kind)
         VALUES ('evt1', '${ctx.teamId}', '${ctx.projectId}', 'cli',
-          'cli_init', 'del1', 'root', 'x', 'unknown', now(), 'server',
+          'cli_init', 'del_idem', 'root', 'x', 'unknown', now(), 'server',
           '{}', 2, 'h1', 1, 1, 'cli')
       `);
 
-      // Same (project, channel, connector_kind, delivery_id, item_key) → rejected
+      // Same (project_id, channel, connector_kind, delivery_id, item_key) → rejected
       await expectViolation(
-        pool,
+        ctx,
         `INSERT INTO events (id, team_id, project_id, channel, kind,
           delivery_id, item_key, external_id, actor_provenance, occurred_at,
           occurred_at_provenance, payload, payload_bytes, payload_hash,
           payload_schema_version, envelope_version, connector_kind)
         VALUES ('evt1_dup', '${ctx.teamId}', '${ctx.projectId}', 'cli',
-          'cli_init', 'del1', 'root', 'x2', 'unknown', now(), 'server',
+          'cli_init', 'del_idem', 'root', 'x2', 'unknown', now(), 'server',
           '{}', 2, 'h2', 1, 1, 'cli')`,
         'events_idempotency_uq',
       );
-
-      await cleanup(ctx);
     });
   });
 
@@ -221,14 +212,12 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
       `);
 
       await expectViolation(
-        pool,
+        ctx,
         `INSERT INTO api_keys (id, team_id, name, token_hash, scopes,
           all_projects)
         VALUES ('key_bad', '${ctx.teamId}', 'k', 'h_bad', '{read}', false)`,
         'api_keys_least_privilege_ck',
       );
-
-      await cleanup(ctx);
     });
 
     it('rejects read:payload without read scope (N7)', async () => {
@@ -243,15 +232,13 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
       `);
 
       await expectViolation(
-        pool,
+        ctx,
         `INSERT INTO api_keys (id, team_id, project_id, name, token_hash,
           scopes, all_projects)
         VALUES ('key_bad2', '${ctx.teamId}', '${ctx.projectId}', 'k',
           'h_bad2', '{read:payload}', false)`,
         'api_keys_scope_superset_ck',
       );
-
-      await cleanup(ctx);
     });
   });
 
@@ -280,12 +267,10 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
       await ctx.exec(job(jobId1, 'ingest_batch', 'ik1'));
 
       // Same key + same kind → rejected
-      await expectViolation(pool, job(jobId2, 'ingest_batch', 'ik1'), 'jobs_idempotency_uq');
+      await expectViolation(ctx, job(jobId2, 'ingest_batch', 'ik1'), 'jobs_idempotency_uq');
 
-      // Same key + different kind → legal
+      // Same key + different kind → legal (scoped by kind)
       await ctx.exec(job(jobId3, 'compilation', 'ik1'));
-
-      await cleanup(ctx);
     });
   });
 
@@ -320,9 +305,9 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
           'services/a', true)
       `);
 
-      // Different concept, same path (alias) → rejected (shared namespace)
+      // Different concept, same path → rejected (shared namespace)
       await expectViolation(
-        pool,
+        ctx,
         `INSERT INTO concept_paths (team_id, project_id, concept_uuid, path,
           is_current)
         VALUES ('${ctx.teamId}', '${ctx.projectId}', '${uuid2}',
@@ -332,15 +317,13 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
 
       // Same concept, two current paths → rejected (one current per concept)
       await expectViolation(
-        pool,
+        ctx,
         `INSERT INTO concept_paths (team_id, project_id, concept_uuid, path,
           is_current)
         VALUES ('${ctx.teamId}', '${ctx.projectId}', '${uuid1}',
           'services/a2', true)`,
         'concept_paths_current_uq',
       );
-
-      await cleanup(ctx);
     });
   });
 
@@ -356,14 +339,12 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
         VALUES ('${ctx.projectId}', '${ctx.teamId}', 'PA')
       `);
 
-      // Create a second project in the same team
       const projectId2 = `${ctx.projectId}_2`;
       await ctx.exec(`
         INSERT INTO projects (id, team_id, name)
         VALUES ('${projectId2}', '${ctx.teamId}', 'PA2')
       `);
 
-      // Create an event in project 1
       await ctx.exec(`
         INSERT INTO events (id, team_id, project_id, channel, kind,
           delivery_id, item_key, external_id, actor_provenance, occurred_at,
@@ -374,25 +355,22 @@ describe.skipIf(!url)('database test scaffolding (live Postgres)', () => {
           '{}', 2, 'h1', 1, 1, 'cli')
       `);
 
-      // Create a job in project 2
       const jobUuid = randomUUID();
       await ctx.exec(`
         INSERT INTO jobs (id, team_id, project_id, kind, initiated_by_kind,
           event_count)
-        VALUES ('${jobUuid}', '${ctx.teamId}',
-          '${projectId2}', 'ingest_event', 'credential', 1)
+        VALUES ('${jobUuid}', '${ctx.teamId}', '${projectId2}',
+          'ingest_event', 'credential', 1)
       `);
 
-      // job_events claiming event from project 1 for a job in project 2 → rejected
+      // job_events claiming an event from project 1 for a job in project 2
       await expectViolation(
-        pool,
+        ctx,
         `INSERT INTO job_events (team_id, project_id, job_id, event_id)
         VALUES ('${ctx.teamId}', '${projectId2}',
           '${jobUuid}', 'evt_je')`,
         'job_events_event_fk',
       );
-
-      await cleanup(ctx);
     });
   });
 });
