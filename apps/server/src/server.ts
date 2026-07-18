@@ -13,9 +13,9 @@
 import { type Context, type Next } from 'hono';
 import { serve } from '@hono/node-server';
 import { buildApp } from './app.js';
+import { PayloadTooLargeError } from './http/errors.js';
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5 MB batch limit (contract ②)
-
 // ── Body-size guard ─────────────────────────────────────────────────────────
 // Applied per-route rather than globally so /healthz stays lightweight.
 // Ingestion routes will use this middleware explicitly.
@@ -23,10 +23,7 @@ export function enforceBodyLimit(limit = MAX_BODY_BYTES) {
   return async (c: Context, next: Next) => {
     const contentLength = c.req.header('content-length');
     if (contentLength && Number(contentLength) > limit) {
-      return c.json(
-        { error: { code: 'payload_too_large', message: `Body exceeds ${limit} bytes` } },
-        413,
-      );
+      throw new PayloadTooLargeError(`Body exceeds ${limit} bytes`);
     }
     await next();
   };
@@ -52,6 +49,15 @@ const isMain =
 
 if (isMain) {
   startServer();
+
+  // All-in-one mode: embed the pg-boss compile worker in the server
+  // process. Used with `TEAMEM_ALL_IN_ONE=true` — bring up only
+  // `postgres server` and skip the `worker` container.
+  if (process.env['TEAMEM_ALL_IN_ONE'] === 'true') {
+    void import('./worker.js').then(() => {
+      console.log('teamem compile worker embedded in server process');
+    });
+  }
 }
 
 // Re-export the factory and a default app for backward compatibility with
