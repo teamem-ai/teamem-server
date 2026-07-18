@@ -12,11 +12,15 @@ import {
   cursorPayload,
   decodeCursor,
   encodeCursor,
+  eventSummary,
   evidence,
   ingestEventRequest,
   jobEventResult,
   principalId,
+  source,
   teamRole,
+  CONTRACT_ADDITIVE_CHANGES,
+  CONTRACT_STATUS,
   KNOWN_AUDIT_ACTIONS,
   type CursorPayload,
 } from './index.js';
@@ -52,6 +56,92 @@ describe('ingest (contract ②)', () => {
     const rest: Record<string, unknown> = { ...validIngest };
     delete rest['idempotencyKey'];
     expect(ingestEventRequest.safeParse(rest).success).toBe(false);
+  });
+});
+
+describe('source (generic connector channel — v0.3 additive, DUA-129)', () => {
+  const base = {
+    kind: 'external_event',
+    deliveryId: 'Ev123',
+    itemKey: 'root',
+    externalId: 'C042/p1746992',
+  } as const;
+
+  it('accepts a private-connector event on the generic external channel with connectorKind', () => {
+    const parsed = source.safeParse({
+      ...base,
+      channel: 'external',
+      connectorKind: 'slack',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('still accepts built-in channels without connectorKind (no field bloat)', () => {
+    const parsed = source.safeParse({
+      channel: 'cli',
+      kind: 'cli_init',
+      deliveryId: 'idem-1',
+      itemKey: 'root',
+      externalId: 'org/repo:src/auth.ts',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects unknown fields — connectorKind is the only new surface (strict object)', () => {
+    const bad = source.safeParse({
+      ...base,
+      channel: 'external',
+      connectorKind: 'slack',
+      somethingElse: 'nope',
+    });
+    expect(bad.success).toBe(false);
+  });
+
+  it('rejects channel=external with no connectorKind (acceptance-review fix: was a silent pass)', () => {
+    const bad = source.safeParse({ ...base, channel: 'external' });
+    expect(bad.success).toBe(false);
+  });
+
+  it('rejects a built-in channel carrying a connectorKind (acceptance-review fix: was a silent pass)', () => {
+    const bad = source.safeParse({
+      channel: 'cli',
+      kind: 'cli_init',
+      deliveryId: 'idem-1',
+      itemKey: 'root',
+      externalId: 'org/repo:src/auth.ts',
+      connectorKind: 'cli',
+    });
+    expect(bad.success).toBe(false);
+  });
+
+  it('a persisted Slack-like actor round-trips through eventSummary (acceptance-review fix: actor.provider is open)', () => {
+    // Closes the exact gap the acceptance review found: source.channel
+    // allowed 'external' but actor.provider was still closed to ['github'],
+    // so a genuinely-persisted Slack/Gmail actor could never pass this DTO.
+    const parsed = eventSummary.safeParse({
+      id: 'evt_01H',
+      projectId: 'prj_abc123',
+      source: { ...base, channel: 'external', connectorKind: 'slack' },
+      actor: {
+        kind: 'human',
+        provider: 'slack',
+        providerUserId: 'U123',
+        displayLogin: 'alice',
+      },
+      actorProvenance: 'webhook_verified',
+      occurredAt: '2026-07-17T00:00:00.000Z',
+      occurredAtProvenance: 'provider',
+      ingestedBy: { credentialId: null, principalId: null },
+      payloadBytes: 37,
+      createdAt: '2026-07-17T00:00:01.000Z',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('the contract honestly reports its status once diverged from the frozen base, with an enumerated changelog', () => {
+    expect(CONTRACT_STATUS).not.toBe('v0.2-frozen');
+    expect(CONTRACT_ADDITIVE_CHANGES.length).toBeGreaterThan(0);
+    expect(CONTRACT_ADDITIVE_CHANGES.some((c) => c.change.includes('DUA-129'))).toBe(true);
   });
 });
 
