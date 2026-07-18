@@ -12,10 +12,18 @@ import { credentialId, principalId } from './common.js';
  * The subject claimed by the source event. `kind` is the subject type and
  * `provider` is the identity provider — deliberately separate dimensions
  * (N2: bots/service accounts are legitimate subjects).
+ *
+ * `provider` is an open string (v0.3 additive, DUA-129), not a closed enum:
+ * it is a RAW CLAIM (general rule — preserve original facts verbatim), and
+ * connectors outside the built-in registry (private Slack/Gmail/… packages
+ * implementing `connectors/registry.ts`) must be able to persist and later
+ * return a real actor claim without a further contract bump per provider.
+ * This mirrors `NormalizedActor.provider: string` in the connector producer
+ * contract — there is exactly one open representation, not two.
  */
 export const actor = z.strictObject({
   kind: z.enum(['human', 'service']),
-  provider: z.enum(['github']), // additive registry — future: slack, …
+  provider: z.string().min(1),
   providerUserId: z.string().min(1), // stable numeric id; logins are mutable
   displayLogin: z.string().optional(), // display snapshot only, never identity
 });

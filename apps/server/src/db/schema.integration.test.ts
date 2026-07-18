@@ -46,12 +46,12 @@ describe.skipIf(!url)('schema tenant & idempotency invariants (live Postgres)', 
   });
 
   const eventInsert = (id: string, team: string, project: string, delivery = 'dk1') => `
-    INSERT INTO events (id, team_id, project_id, channel, kind, delivery_id,
-      item_key, external_id, actor_provenance, occurred_at,
+    INSERT INTO events (id, team_id, project_id, channel, kind, connector_kind,
+      delivery_id, item_key, external_id, actor_provenance, occurred_at,
       occurred_at_provenance, payload, payload_bytes, payload_hash,
-      payload_schema_version, envelope_version, connector_kind)
-    VALUES ('${id}', '${team}', '${project}', 'cli', 'cli_init', '${delivery}',
-      'root', 'x', 'unknown', now(), 'server', '{}', 2, 'h1', 1, 1, 'cli')`;
+      payload_schema_version, envelope_version)
+    VALUES ('${id}', '${team}', '${project}', 'cli', 'cli_init', 'cli', '${delivery}',
+      'root', 'x', 'unknown', now(), 'server', '{}', 2, 'h1', 1, 1)`;
 
   it('review issue 1: cross-tenant project mismatch is rejected (composite FK)', async () => {
     // team_b claiming team_a's project — accepted by the old schema.

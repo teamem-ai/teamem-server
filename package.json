@@ -9,9 +9,20 @@
     "node": ">=20"
   },
   "scripts": {
+    "dev": "pnpm --filter @teamem/server dev",
+    "build": "pnpm --filter @teamem/server build",
+    "start": "pnpm --filter @teamem/server start",
+    "worker": "pnpm --filter @teamem/server worker",
     "lint": "eslint .",
     "typecheck": "pnpm -r run typecheck",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "db:generate": "pnpm --filter @teamem/server db:generate",
+    "db:migrate": "pnpm --filter @teamem/server db:migrate",
+    "bootstrap": "pnpm --filter @teamem/server bootstrap",
+    "test:integration": "pnpm --filter @teamem/server test:integration",
+    "test:e2e": "pnpm --filter @teamem/server test:e2e",
+    "test:compose": "pnpm --filter @teamem/server test:compose",
+    "m0:f1-reliability": "pnpm --filter @teamem/server m0:f1-reliability"
   },
   "devDependencies": {
     "eslint": "^9.31.0",

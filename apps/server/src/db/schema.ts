@@ -43,8 +43,14 @@ import {
 // ── Enums (Q1 note: pgEnum chosen over text+CHECK — ALTER TYPE ADD VALUE is
 //    the cheap migration path for additive changes) ─────────────────────────
 export const principalKind = pgEnum('principal_kind', ['human', 'service']);
-export const identityProvider = pgEnum('identity_provider', ['github']);
-export const sourceChannel = pgEnum('source_channel', ['github', 'cli', 'mcp']);
+// 'external' (v0.3 additive, DUA-129): generic bucket for identity providers
+// outside the built-in registry (private Slack/Gmail/… connectors). The real
+// open provider string lives in principals.provider_kind — see below.
+export const identityProvider = pgEnum('identity_provider', ['github', 'external']);
+// 'external' (v0.3 additive, DUA-129): generic bucket for connectors outside
+// the built-in three. The real open connectorKind lives in
+// events.connector_kind — see below.
+export const sourceChannel = pgEnum('source_channel', ['github', 'cli', 'mcp', 'external']);
 export const sourceKind = pgEnum('source_kind', [
   'github_commit',
   'github_pr',
@@ -52,6 +58,7 @@ export const sourceKind = pgEnum('source_kind', [
   'github_pr_comment',
   'cli_init',
   'mcp_write',
+  'external_event', // paired with channel='external' (v0.3 additive, DUA-129)
 ]);
 export const actorProvenance = pgEnum('actor_provenance', [
   'webhook_verified',
@@ -168,14 +175,25 @@ export const principals = pgTable(
       .references(() => teams.id),
     kind: principalKind('kind').notNull(),
     provider: identityProvider('provider').notNull(),
+    // v0.3 additive (DUA-129): the real open identity-provider string, always
+    // populated (== provider for the built-in 'github' value; the actual
+    // provider, e.g. 'slack', when provider='external'). Kept out of the
+    // idempotency-bearing FK/enum surface so unknown providers never need a
+    // migration to be resolvable, while still preventing two different
+    // external providers from colliding on the same providerUserId.
+    providerKind: text('provider_kind').notNull(),
     providerUserId: text('provider_user_id').notNull(), // stable numeric id
     displayLogin: text('display_login'), // mutable, display only
     createdAt: createdAt(),
   },
   (t) => [
+    // Hardened (v0.3, DUA-129): providerKind added so two different external
+    // providers sharing a providerUserId cannot be confused for one another
+    // under the generic 'external' bucket.
     uniqueIndex('principals_identity_uq').on(
       t.teamId,
       t.provider,
+      t.providerKind,
       t.providerUserId,
     ),
     // Composite-FK target for tenant-consistent attribution.
@@ -238,7 +256,14 @@ export const events = pgTable(
     projectId: text('project_id').notNull(),
     channel: sourceChannel('channel').notNull(), // raw channel fact (N1)
     kind: sourceKind('kind').notNull(), // parse result — NOT part of idempotency
-    sourceEvent: text('source_event'), // raw provider event name (Q6)
+    // v0.3 additive (DUA-129): the connector's real open identity, always
+    // populated (== channel for the three built-in channels; the actual
+    // connectorKind, e.g. 'slack'/'gmail', when channel='external'). Part of
+    // the idempotency tuple below so two different private connectors
+    // sharing the generic external channel cannot collide on delivery ID.
+    connectorKind: text('connector_kind').notNull(),
+    sourceEvent: text('source_event'), // raw provider event name (Q6; also
+    // carries the connector's real open eventKind when channel='external')
     sourceAction: text('source_action'), // raw provider action (Q6)
     deliveryId: text('delivery_id').notNull(),
     itemKey: text('item_key').notNull(), // sub-item id; 'root' when unsplit
@@ -271,10 +296,15 @@ export const events = pgTable(
       columns: [t.teamId, t.actorPrincipalId],
       foreignColumns: [principals.teamId, principals.id],
     }),
-    // N1: four-element idempotent identity on raw source facts.
+    // N1: four-element idempotent identity on raw source facts, hardened
+    // (v0.3, DUA-129) with connectorKind so two private connectors sharing
+    // the generic 'external' channel cannot collide on delivery ID — for the
+    // three built-in channels connectorKind == channel, so existing rows and
+    // behavior are unaffected.
     uniqueIndex('events_idempotency_uq').on(
       t.projectId,
       t.channel,
+      t.connectorKind,
       t.deliveryId,
       t.itemKey,
     ),
