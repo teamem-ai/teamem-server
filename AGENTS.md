@@ -19,7 +19,7 @@ The product's value is not “storing more observations.” It continuously comp
 
 ## 2. In-Repository Specifications and Precedence
 
-This file contains the product boundaries, Q1-Q11/N1-N8 decisions, M0-M3 milestones, and validation rules required for coding. It does not depend on files outside the repository. Interpret in-repository specifications in this order:
+This file contains the product boundaries, Q1-Q11/N1-N8 decisions, M0-M3 milestones, and validation rules required for coding. The repository remains self-contained for implementation and validation; private planning context is supplementary. Interpret in-repository specifications in this order:
 
 1. `packages/schema/src/`: the frozen v0.2 executable DTO specification; highest precedence.
 2. `apps/server/src/db/schema.ts` and committed migrations: the current database reality, which must remain consistent with the DTOs and the invariants in this file.
@@ -27,6 +27,19 @@ This file contains the product boundaries, Q1-Q11/N1-N8 decisions, M0-M3 milesto
 4. `README.md`, tests, and code comments: useful for understanding the current state, but they cannot independently override the first three sources.
 
 When a prose summary conflicts with Zod code, `packages/schema/src/` wins. When the database implementation conflicts with the frozen contract, do not treat the current implementation as the new specification. Do not casually edit a frozen contract. Propose an explicit v0.3 change, enumerate the database, API, compiler, UI, MCP, CLI, export, and external compatibility impact, and add migrations and contract tests.
+
+### 2.1 Private Planning Context
+
+When working on product scope, frozen contracts, M0 implementation, or acceptance tasks:
+
+1. Read `tasks/M0/README.md` through the `teamem-docs` MCP server.
+2. Use `search_documents` with terms from the current task to search the PRD and MVP planning documents.
+3. Use `read_document` only for headings relevant to the current task. Keep each read between 2,000 and 5,000 characters; request a narrower heading or subheading before requesting more context.
+4. Do not read the complete PRD or MVP documents at the start of every task.
+5. Skip this lookup for spelling, formatting, comment-only, and purely mechanical refactoring tasks.
+6. In the final report, list the MCP `sourceCommit`, document IDs, and headings consulted. If the MCP server was unavailable, report that explicitly rather than claiming the documents were read.
+
+MCP planning prose provides rationale and task context only. It cannot override the in-repository precedence above or expand the authorized scope of a task.
 
 ## 3. Repository and License Boundaries
 
