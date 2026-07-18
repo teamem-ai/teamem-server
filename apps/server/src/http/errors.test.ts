@@ -6,8 +6,9 @@
  * Security boundary: a thrown error containing SECRET=abc123 must never
  *   appear in the serialized response body.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import {
   AppError,
   InvalidRequestError,
@@ -172,6 +173,96 @@ describe('globalErrorHandler', () => {
   });
 });
 
+// ── Global error handler — HTTPException mapping (P1 fix) ───────────────────
+
+describe('globalErrorHandler — HTTPException mapping', () => {
+  it('401 → unauthorized (not invalid_request)', async () => {
+    const app = createTestApp();
+    app.get('/test', () => {
+      throw new HTTPException(401);
+    });
+
+    const res = await app.request('/test');
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error.code).toBe('unauthorized');
+    expect(body.error.message).toBe('Unauthorized');
+  });
+
+  it('403 → forbidden', async () => {
+    const app = createTestApp();
+    app.get('/test', () => {
+      throw new HTTPException(403);
+    });
+
+    const res = await app.request('/test');
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe('forbidden');
+  });
+
+  it('404 → not_found', async () => {
+    const app = createTestApp();
+    app.get('/test', () => {
+      throw new HTTPException(404);
+    });
+
+    const res = await app.request('/test');
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error.code).toBe('not_found');
+  });
+
+  it('405 → invalid_request with status 400', async () => {
+    const app = createTestApp();
+    app.get('/test', () => {
+      throw new HTTPException(405);
+    });
+
+    const res = await app.request('/test');
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe('invalid_request');
+  });
+
+  it('429 → rate_limited', async () => {
+    const app = createTestApp();
+    app.get('/test', () => {
+      throw new HTTPException(429);
+    });
+
+    const res = await app.request('/test');
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.error.code).toBe('rate_limited');
+  });
+
+  it('503 → internal with status 500 (not 503)', async () => {
+    const app = createTestApp();
+    app.get('/test', () => {
+      throw new HTTPException(503);
+    });
+
+    const res = await app.request('/test');
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error.code).toBe('internal');
+    expect(body.error.message).toBe('Internal error');
+  });
+
+  it('413 → payload_too_large', async () => {
+    const app = createTestApp();
+    app.get('/test', () => {
+      throw new HTTPException(413);
+    });
+
+    const res = await app.request('/test');
+    expect(res.status).toBe(413);
+    const body = await res.json();
+    expect(body.error.code).toBe('payload_too_large');
+  });
+});
+
 // ── Global error handler — unknown errors ───────────────────────────────────
 
 describe('globalErrorHandler — unknown errors', () => {
@@ -246,42 +337,62 @@ describe('enforceBodyLimit integration', () => {
   });
 });
 
-// ── Security: secret leak prevention ────────────────────────────────────────
+// ── Secret leak prevention — P1 fixes ───────────────────────────────────────
 
 describe('secret leak prevention', () => {
-  it('an error containing SECRET=abc123 never appears in the serialized response', async () => {
+  it('P1: AppError with SECRET=abc123 in message never appears in response', async () => {
     const app = createTestApp();
     app.get('/test', () => {
-      throw new InternalError('Internal error');
-    });
-
-    const res = await app.request('/test');
-    const text = await res.text();
-    expect(text).not.toContain('SECRET=abc123');
-    expect(text).not.toContain('abc123');
-  });
-
-  it('domain error messages are safe — no stack traces', async () => {
-    const app = createTestApp();
-    app.get('/test', () => {
-      const err = new AppError('internal', 'Internal error');
-      // Simulate a stack trace being attached
-      err.stack = 'Error: SECRET=abc123\n    at /app/secret.ts:42\n    SQL: SELECT * FROM users';
-      throw err;
+      throw new AppError('internal', 'SECRET=abc123');
     });
 
     const res = await app.request('/test');
     const body = await res.json();
     expect(JSON.stringify(body)).not.toContain('SECRET=abc123');
-    expect(JSON.stringify(body)).not.toContain('SELECT *');
-    expect(JSON.stringify(body)).not.toContain('secret.ts');
+    expect(body.error.message).toBe('SECRET=[REDACTED]');
   });
 
-  it('unknown error does not expose original message or stack', async () => {
+  it('P1: AppError with SECRET in details never appears in response', async () => {
     const app = createTestApp();
     app.get('/test', () => {
-      const err = new Error('API key sk-1234567890abcdef failed');
-      err.stack = 'Error: API key sk-1234567890abcdef\n    at connector.ts:100';
+      throw new AppError('internal', 'failed', { original: 'SECRET=xyz789' });
+    });
+
+    const res = await app.request('/test');
+    const body = await res.json();
+    expect(JSON.stringify(body)).not.toContain('xyz789');
+    expect(body.error.details?.original).toBe('SECRET=[REDACTED]');
+  });
+
+  it('P1: prefixed key pattern in AppError message is redacted', async () => {
+    const app = createTestApp();
+    app.get('/test', () => {
+      throw new AppError('internal', 'key_abcdef1234567890123456 went wrong');
+    });
+
+    const res = await app.request('/test');
+    const body = await res.json();
+    expect(body.error.message).not.toContain('key_abcdef1234567890123456');
+  });
+
+  it('P1: unknown error with SECRET=abc123 does not leak to response', async () => {
+    const app = createTestApp();
+    app.get('/test', () => {
+      throw new Error('SECRET=abc123');
+    });
+
+    const res = await app.request('/test');
+    const body = await res.json();
+    expect(JSON.stringify(body)).not.toContain('SECRET=abc123');
+    expect(JSON.stringify(body)).not.toContain('abc123');
+    expect(body.error.message).toBe('Internal error');
+  });
+
+  it('P1: unknown error does not expose original message, stack, or SQL', async () => {
+    const app = createTestApp();
+    app.get('/test', () => {
+      const err = new Error('API key sk-1234567890abcdef failed at 10.0.0.5:5432');
+      err.stack = 'Error: got SQL SELECT * FROM users\n    at connector.ts:100';
       throw err;
     });
 
@@ -290,6 +401,26 @@ describe('secret leak prevention', () => {
     const serialized = JSON.stringify(body);
     expect(serialized).not.toContain('sk-1234567890abcdef');
     expect(serialized).not.toContain('connector.ts');
+    expect(serialized).not.toContain('SELECT *');
+    expect(serialized).not.toContain('10.0.0.5');
     expect(body.error.message).toBe('Internal error');
+  });
+
+  it('P1: console.error receives redacted message (no raw secrets in logs)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const app = createTestApp();
+      app.get('/test', () => {
+        throw new Error('SECRET=abc123');
+      });
+
+      await app.request('/test');
+      expect(spy).toHaveBeenCalledOnce();
+      const logged = spy.mock.calls[0]?.[0] as string;
+      expect(logged).toContain('SECRET=[REDACTED]');
+      expect(logged).not.toContain('SECRET=abc123');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

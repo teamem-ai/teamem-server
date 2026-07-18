@@ -138,6 +138,55 @@ export class InternalError extends AppError {
 // ── Request-scoped context keys ─────────────────────────────────────────────
 export const REQUEST_ID_KEY = 'requestId';
 
+// ── Redaction helpers ───────────────────────────────────────────────────────
+// Defense-in-depth: strip known secret patterns before data reaches clients
+// or server logs. These are not a substitute for the design-level rule that
+// domain error messages must never contain secrets — they are a last-resort
+// catch for accidental leakage.
+
+const REDACTED = '[REDACTED]';
+
+/** Patterns that match env-var-style secrets like `SECRET=abc123`. */
+const ENV_SECRET_RE = /[A-Z][A-Z_]+=[^\s"'`,\]}]*/g;
+
+/** Patterns that match prefixed API keys / tokens (sk-, pk_, whsec_, key_). */
+const PREFIXED_KEY_RE = /\b(?:sk|pk|wh|key|cred|pri)[_-][a-zA-Z0-9]{16,}/g;
+
+/** Strip common secret patterns from a string destined for the client. */
+function redactForClient(s: string): string {
+  return s
+    .replace(ENV_SECRET_RE, (m) => {
+      const eq = m.indexOf('=');
+      return m.slice(0, eq + 1) + REDACTED;
+    })
+    .replace(PREFIXED_KEY_RE, REDACTED);
+}
+
+/** Strip common secret patterns from a string destined for server logs. */
+function redactForLog(s: string): string {
+  return s
+    .replace(ENV_SECRET_RE, (m) => {
+      const eq = m.indexOf('=');
+      return m.slice(0, eq + 1) + REDACTED;
+    })
+    .replace(PREFIXED_KEY_RE, REDACTED);
+}
+
+/** Redact details values recursively. */
+function redactDetails(details: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(details)) {
+    if (typeof v === 'string') {
+      out[k] = redactForClient(v);
+    } else if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
+      out[k] = redactDetails(v as Record<string, unknown>);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Build a frozen error envelope for the given request context. */
@@ -149,8 +198,34 @@ export function buildErrorResponse(
 ): ErrorResponse {
   return {
     requestId,
-    error: { code, message, ...(details !== undefined ? { details } : {}) },
+    error: {
+      code,
+      message: redactForClient(message),
+      ...(details !== undefined ? { details: redactDetails(details) } : {}),
+    },
   };
+}
+
+// ── HTTP → error-code mapping ───────────────────────────────────────────────
+// Maps Hono HTTPException status codes to frozen error codes.
+// The response status is always derived from errorCodeToStatus[code] so that
+// the client sees a consistent code/status pair — never a raw 401 with an
+// invalid_request code.
+
+const httpStatusToCode: Record<number, ErrorCode> = {
+  400: 'invalid_request',
+  401: 'unauthorized',
+  403: 'forbidden',
+  404: 'not_found',
+  405: 'invalid_request',
+  409: 'conflict',
+  413: 'payload_too_large',
+  415: 'invalid_request',
+  429: 'rate_limited',
+};
+
+function httpStatusToErrorCode(status: number): ErrorCode {
+  return httpStatusToCode[status] ?? (status >= 500 ? 'internal' : 'invalid_request');
 }
 
 // ── Hono global error handler ───────────────────────────────────────────────
@@ -161,32 +236,36 @@ export function buildErrorResponse(
 export function globalErrorHandler(err: Error, c: Context): Response {
   const requestId = (c.get(REQUEST_ID_KEY) as string) ?? 'unknown';
 
-  // AppError: trusted domain error with a safe message and frozen code
+  // AppError: domain error with frozen code — message should be safe but is
+  // still run through redactForClient as defense in depth.
   if (err instanceof AppError) {
     const status = errorCodeToStatus[err.code] as number;
     const body = buildErrorResponse(requestId, err.code, err.message, err.details);
     return c.json(body, status as never);
   }
 
-  // Hono HTTPException: e.g. method not allowed
+  // Hono HTTPException: map through stable code table, then derive status
+  // from the code — never preserve the raw exception status verbatim.
   if (err instanceof HTTPException) {
-    const status = err.status;
-    let code: ErrorCode;
-    if (status === 404) {
-      code = 'not_found';
-    } else if (status === 405) {
-      code = 'invalid_request';
-    } else if (status >= 400 && status < 500) {
-      code = 'invalid_request';
-    } else {
-      code = 'internal';
-    }
-    const body = buildErrorResponse(requestId, code, 'Request failed');
+    const code = httpStatusToErrorCode(err.status);
+    const status = errorCodeToStatus[code] as number;
+    const defaultMessages: Partial<Record<ErrorCode, string>> = {
+      unauthorized: 'Unauthorized',
+      forbidden: 'Forbidden',
+      not_found: 'Not found',
+      conflict: 'Conflict',
+      payload_too_large: 'Payload too large',
+      rate_limited: 'Rate limited',
+      internal: 'Internal error',
+    };
+    const body = buildErrorResponse(requestId, code, defaultMessages[code] ?? 'Bad request');
     return c.json(body, status as never);
   }
 
-  // Unknown error: never expose internals
-  console.error('Unhandled error:', err);
+  // Unknown error: never expose internals in the response or in logs
+  const safeLogMessage = redactForLog(err.message);
+  const safeLogStack = err.stack ? redactForLog(err.stack) : '(no stack)';
+  console.error(`Unhandled error: ${safeLogMessage}\n${safeLogStack}`);
   const body = buildErrorResponse(requestId, 'internal', 'Internal error');
   return c.json(body, 500 as never);
 }
