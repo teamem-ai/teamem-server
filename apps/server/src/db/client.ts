@@ -68,3 +68,19 @@ export async function checkDbConnectivity(db: AppDb): Promise<void> {
 export async function closeDb(db: AppDb): Promise<void> {
   await db.$client.end();
 }
+
+/**
+ * Like {@link createDb}, but exposes the underlying pool and a `close()` so the
+ * composition root can own the connection's lifecycle (open on startup, drain
+ * last on shutdown). `close()` resolves once every pooled socket is released.
+ */
+export function createDbHandle(connectionString: string, options: CreateDbOptions = {}) {
+  const db = createDb(connectionString, options);
+  return {
+    db,
+    pool: db.$client,
+    close: () => closeDb(db),
+  };
+}
+
+export type AppDbHandle = ReturnType<typeof createDbHandle>;
