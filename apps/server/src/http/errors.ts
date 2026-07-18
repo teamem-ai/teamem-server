@@ -5,8 +5,16 @@
  * All error responses conform to the `errorResponse` shape defined in
  * `@teamem/schema`'s common.ts: `{ requestId, error: { code, message, details? } }`.
  *
- * Security: the global handler never exposes stack traces, SQL, internal
- * messages, payloads, prompts, secrets, or provider responses to clients.
+ * Security design:
+ *   - Every error code has a fixed DEFAULT_MESSAGE. AppError.message (which a
+ *     programmer might accidentally populate with secrets) NEVER reaches the
+ *     client — the default is always used.
+ *   - AppError.cause holds internal context for debugging and is never
+ *     serialized into the response.
+ *   - Only InvalidRequestError and CursorInvalidError carry `details`, and
+ *     those are run through safeDetails() (handles circular refs, BigInt, etc.).
+ *   - Unknown errors are logged with structured safe fields only — no raw
+ *     err.message, err.stack, payload, SQL, secrets, or provider responses.
  */
 import type { Context } from 'hono';
 import { HTTPException } from 'hono/http-exception';
@@ -35,102 +43,174 @@ export const errorCodeToStatus: Record<z.infer<typeof errorCode>, number> = {
 
 type ErrorCode = z.infer<typeof errorCode>;
 
+// ── Default public messages ─────────────────────────────────────────────────
+// These are the ONLY messages ever returned to the client.  AppError.message
+// (the Error.prototype.message) is an internal-only string that is NEVER
+// serialized into the error envelope — it lives on the object so that Node.js
+// crash / debug output remains useful, but the global handler always uses the
+// code-specific default below.
+
+const DEFAULT_MESSAGE: Record<ErrorCode, string> = {
+  invalid_request: 'Bad request',
+  unauthorized: 'Unauthorized',
+  forbidden: 'Forbidden',
+  not_found: 'Not found',
+  duplicate: 'Duplicate',
+  idempotency_conflict: 'Idempotency conflict',
+  conflict: 'Conflict',
+  payload_too_large: 'Payload too large',
+  cursor_invalid: 'Cursor is invalid or expired',
+  unsupported_version: 'Unsupported version',
+  version_mismatch: 'Version mismatch',
+  rate_limited: 'Rate limited',
+  internal: 'Internal error',
+};
+
+// ── Safe-details helper ─────────────────────────────────────────────────────
+// JSON.parse(JSON.stringify(x)) naturally strips BigInt, undefined values,
+// Symbols, and functions.  A circular reference or BigInt in the details
+// produce a TypeError which is caught → details are dropped silently.
+// Only InvalidRequestError and CursorInvalidError carry details.
+
+function safeDetails(details: unknown): Record<string, string> | undefined {
+  if (typeof details !== 'object' || details === null) return undefined;
+  try {
+    const raw = JSON.parse(JSON.stringify(details));
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (typeof v === 'string') out[k] = v;
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ── Domain error classes ────────────────────────────────────────────────────
-// Each carries a frozen error code. The message must be safe for client
-// exposure — callers must not embed secrets, SQL, or payloads.
+// Each carries:
+//   - code     — frozen error code
+//   - cause    — internal context (never reaches the client)
+//
+// Subclasses that need structured details (InvalidRequestError,
+// CursorInvalidError) expose a `details` property that has been run through
+// safeDetails().
 
 export class AppError extends Error {
   readonly code: ErrorCode;
-  readonly details?: Record<string, unknown>;
+  readonly cause?: unknown;
 
-  constructor(code: ErrorCode, message: string, details?: Record<string, unknown>) {
+  constructor(code: ErrorCode, message = DEFAULT_MESSAGE[code], options?: { cause?: unknown }) {
     super(message);
     this.name = 'AppError';
     this.code = code;
-    this.details = details;
+    this.cause = options?.cause;
   }
 }
 
 export class InvalidRequestError extends AppError {
-  constructor(message: string, details?: Record<string, unknown>) {
-    super('invalid_request', message, details);
+  readonly details?: Record<string, string>;
+
+  constructor(
+    message: string,
+    details?: Record<string, unknown>,
+    options?: { cause?: unknown },
+  ) {
+    super('invalid_request', message, options);
     this.name = 'InvalidRequestError';
+    this.details = safeDetails(details);
   }
 }
 
 export class UnauthorizedError extends AppError {
-  constructor(message = 'Unauthorized') {
-    super('unauthorized', message);
+  constructor(message = DEFAULT_MESSAGE.unauthorized, options?: { cause?: unknown }) {
+    super('unauthorized', message, options);
     this.name = 'UnauthorizedError';
   }
 }
 
 export class ForbiddenError extends AppError {
-  constructor(message = 'Forbidden') {
-    super('forbidden', message);
+  constructor(message = DEFAULT_MESSAGE.forbidden, options?: { cause?: unknown }) {
+    super('forbidden', message, options);
     this.name = 'ForbiddenError';
   }
 }
 
 export class NotFoundError extends AppError {
-  constructor(message = 'Not found') {
-    super('not_found', message);
+  constructor(message = DEFAULT_MESSAGE.not_found, options?: { cause?: unknown }) {
+    super('not_found', message, options);
     this.name = 'NotFoundError';
   }
 }
 
 export class IdempotencyConflictError extends AppError {
-  constructor(message = 'Idempotency conflict') {
-    super('idempotency_conflict', message);
+  constructor(
+    message = DEFAULT_MESSAGE.idempotency_conflict,
+    options?: { cause?: unknown },
+  ) {
+    super('idempotency_conflict', message, options);
     this.name = 'IdempotencyConflictError';
   }
 }
 
 export class ConflictError extends AppError {
-  constructor(message: string) {
-    super('conflict', message);
+  constructor(message: string, options?: { cause?: unknown }) {
+    super('conflict', message, options);
     this.name = 'ConflictError';
   }
 }
 
 export class PayloadTooLargeError extends AppError {
-  constructor(message: string) {
-    super('payload_too_large', message);
+  constructor(message: string, options?: { cause?: unknown }) {
+    super('payload_too_large', message, options);
     this.name = 'PayloadTooLargeError';
   }
 }
 
 export class CursorInvalidError extends AppError {
-  constructor(message = 'Cursor is invalid or expired') {
-    super('cursor_invalid', message);
+  readonly details?: Record<string, string>;
+
+  constructor(
+    message = DEFAULT_MESSAGE.cursor_invalid,
+    details?: Record<string, unknown>,
+    options?: { cause?: unknown },
+  ) {
+    super('cursor_invalid', message, options);
     this.name = 'CursorInvalidError';
+    this.details = safeDetails(details);
   }
 }
 
 export class UnsupportedVersionError extends AppError {
-  constructor(message = 'Unsupported version') {
-    super('unsupported_version', message);
+  constructor(
+    message = DEFAULT_MESSAGE.unsupported_version,
+    options?: { cause?: unknown },
+  ) {
+    super('unsupported_version', message, options);
     this.name = 'UnsupportedVersionError';
   }
 }
 
 export class VersionMismatchError extends AppError {
-  constructor(message = 'Version mismatch') {
-    super('version_mismatch', message);
+  constructor(
+    message = DEFAULT_MESSAGE.version_mismatch,
+    options?: { cause?: unknown },
+  ) {
+    super('version_mismatch', message, options);
     this.name = 'VersionMismatchError';
   }
 }
 
 export class RateLimitedError extends AppError {
-  constructor(message = 'Rate limited') {
-    super('rate_limited', message);
+  constructor(message = DEFAULT_MESSAGE.rate_limited, options?: { cause?: unknown }) {
+    super('rate_limited', message, options);
     this.name = 'RateLimitedError';
   }
 }
 
 export class InternalError extends AppError {
-  constructor(message = 'Internal error') {
-    super('internal', message);
+  constructor(message = DEFAULT_MESSAGE.internal, options?: { cause?: unknown }) {
+    super('internal', message, options);
     this.name = 'InternalError';
   }
 }
@@ -138,70 +218,21 @@ export class InternalError extends AppError {
 // ── Request-scoped context keys ─────────────────────────────────────────────
 export const REQUEST_ID_KEY = 'requestId';
 
-// ── Redaction helpers ───────────────────────────────────────────────────────
-// Defense-in-depth: strip known secret patterns before data reaches clients
-// or server logs. These are not a substitute for the design-level rule that
-// domain error messages must never contain secrets — they are a last-resort
-// catch for accidental leakage.
-
-const REDACTED = '[REDACTED]';
-
-/** Patterns that match env-var-style secrets like `SECRET=abc123`. */
-const ENV_SECRET_RE = /[A-Z][A-Z_]+=[^\s"'`,\]}]*/g;
-
-/** Patterns that match prefixed API keys / tokens (sk-, pk_, whsec_, key_). */
-const PREFIXED_KEY_RE = /\b(?:sk|pk|wh|key|cred|pri)[_-][a-zA-Z0-9]{16,}/g;
-
-/** Strip common secret patterns from a string destined for the client. */
-function redactForClient(s: string): string {
-  return s
-    .replace(ENV_SECRET_RE, (m) => {
-      const eq = m.indexOf('=');
-      return m.slice(0, eq + 1) + REDACTED;
-    })
-    .replace(PREFIXED_KEY_RE, REDACTED);
-}
-
-/** Strip common secret patterns from a string destined for server logs. */
-function redactForLog(s: string): string {
-  return s
-    .replace(ENV_SECRET_RE, (m) => {
-      const eq = m.indexOf('=');
-      return m.slice(0, eq + 1) + REDACTED;
-    })
-    .replace(PREFIXED_KEY_RE, REDACTED);
-}
-
-/** Redact details values recursively. */
-function redactDetails(details: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(details)) {
-    if (typeof v === 'string') {
-      out[k] = redactForClient(v);
-    } else if (v !== null && typeof v === 'object' && !Array.isArray(v)) {
-      out[k] = redactDetails(v as Record<string, unknown>);
-    } else {
-      out[k] = v;
-    }
-  }
-  return out;
-}
-
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Build a frozen error envelope for the given request context. */
+/** Build a frozen error envelope.  Always uses the code's fixed default
+ *  message — never err.message or other potentially-untrusted input. */
 export function buildErrorResponse(
   requestId: string,
   code: ErrorCode,
-  message: string,
   details?: Record<string, unknown>,
 ): ErrorResponse {
   return {
     requestId,
     error: {
       code,
-      message: redactForClient(message),
-      ...(details !== undefined ? { details: redactDetails(details) } : {}),
+      message: DEFAULT_MESSAGE[code],
+      ...(details !== undefined ? { details } : {}),
     },
   };
 }
@@ -230,17 +261,20 @@ function httpStatusToErrorCode(status: number): ErrorCode {
 
 // ── Hono global error handler ───────────────────────────────────────────────
 // Catches any unhandled error from route handlers or middleware and returns
-// a frozen error envelope. Never leaks stack traces, SQL, payloads, prompts,
-// secrets, or provider responses.
+// a frozen error envelope.  NEVER leaks stack traces, SQL, payloads, prompts,
+// secrets, or provider responses — the response message is always the
+// code's DEFAULT_MESSAGE, and logging uses structured safe fields only.
 
 export function globalErrorHandler(err: Error, c: Context): Response {
   const requestId = (c.get(REQUEST_ID_KEY) as string) ?? 'unknown';
 
-  // AppError: domain error with frozen code — message should be safe but is
-  // still run through redactForClient as defense in depth.
+  // AppError: domain error with frozen code.  The response uses the code's
+  // default message — err.message is NEVER echoed to the client.
   if (err instanceof AppError) {
     const status = errorCodeToStatus[err.code] as number;
-    const body = buildErrorResponse(requestId, err.code, err.message, err.details);
+    const body: ErrorResponse = err instanceof InvalidRequestError || err instanceof CursorInvalidError
+      ? buildErrorResponse(requestId, err.code, err.details)
+      : buildErrorResponse(requestId, err.code);
     return c.json(body, status as never);
   }
 
@@ -249,24 +283,22 @@ export function globalErrorHandler(err: Error, c: Context): Response {
   if (err instanceof HTTPException) {
     const code = httpStatusToErrorCode(err.status);
     const status = errorCodeToStatus[code] as number;
-    const defaultMessages: Partial<Record<ErrorCode, string>> = {
-      unauthorized: 'Unauthorized',
-      forbidden: 'Forbidden',
-      not_found: 'Not found',
-      conflict: 'Conflict',
-      payload_too_large: 'Payload too large',
-      rate_limited: 'Rate limited',
-      internal: 'Internal error',
-    };
-    const body = buildErrorResponse(requestId, code, defaultMessages[code] ?? 'Bad request');
+    const body = buildErrorResponse(requestId, code);
     return c.json(body, status as never);
   }
 
-  // Unknown error: never expose internals in the response or in logs
-  const safeLogMessage = redactForLog(err.message);
-  const safeLogStack = err.stack ? redactForLog(err.stack) : '(no stack)';
-  console.error(`Unhandled error: ${safeLogMessage}\n${safeLogStack}`);
-  const body = buildErrorResponse(requestId, 'internal', 'Internal error');
+  // Unknown error: log structured safe fields only — no raw message, stack,
+  // payload, SQL, secrets, or provider responses.
+  console.error(
+    JSON.stringify({
+      event: 'unhandled_error',
+      requestId,
+      errorClass: err.constructor.name,
+      method: c.req.method,
+      pathname: c.req.path,
+    }),
+  );
+  const body = buildErrorResponse(requestId, 'internal');
   return c.json(body, 500 as never);
 }
 
@@ -274,6 +306,6 @@ export function globalErrorHandler(err: Error, c: Context): Response {
 
 export function notFoundHandler(c: Context): Response {
   const requestId = (c.get(REQUEST_ID_KEY) as string) ?? 'unknown';
-  const body = buildErrorResponse(requestId, 'not_found', 'Not found');
+  const body = buildErrorResponse(requestId, 'not_found');
   return c.json(body, 404 as never);
 }
