@@ -110,6 +110,56 @@ function newEventId(): string {
   return `evt_${randomUUID().replace(/-/g, '')}`;
 }
 
+interface ExistingEventRow {
+  readonly id: string;
+  readonly payloadHash: string;
+  readonly actorPrincipalId: string | null;
+}
+
+/**
+ * Looks up an event by its full idempotency identity, always scoped by
+ * team_id AND project_id (red line 5.5) — projectId alone must never be
+ * treated as sufficient scope, even though it happens to be globally unique
+ * today; a caller passing a mismatched scope.teamId must get nothing back,
+ * not another tenant's event (acceptance-review finding, DUA-129).
+ */
+async function findExistingEvent(
+  db: AppDb,
+  scope: ConnectorScope,
+  channel: StoredChannel,
+  connectorKind: string,
+  deliveryId: string,
+  itemKey: string,
+): Promise<ExistingEventRow | undefined> {
+  const rows = await db
+    .select({
+      id: schema.events.id,
+      payloadHash: schema.events.payloadHash,
+      actorPrincipalId: schema.events.actorPrincipalId,
+    })
+    .from(schema.events)
+    .where(
+      and(
+        eq(schema.events.teamId, scope.teamId),
+        eq(schema.events.projectId, scope.projectId),
+        eq(schema.events.channel, channel),
+        eq(schema.events.connectorKind, connectorKind),
+        eq(schema.events.deliveryId, deliveryId),
+        eq(schema.events.itemKey, itemKey),
+      ),
+    )
+    .limit(1);
+  return rows[0];
+}
+
+/** Postgres unique_violation (23505) on a specific named constraint. */
+function isUniqueViolation(err: unknown, constraint: string): boolean {
+  const cause = (err as { cause?: unknown } | null | undefined)?.cause;
+  if (typeof cause !== 'object' || cause === null) return false;
+  const { code, constraint: violated } = cause as { code?: unknown; constraint?: unknown };
+  return code === '23505' && violated === constraint;
+}
+
 function newPrincipalId(): string {
   return `pri_${randomUUID().replace(/-/g, '')}`;
 }
@@ -195,9 +245,11 @@ export interface PersistNormalizedEventResult {
  * Idempotent replay (N1): same identity + same payload hash returns the
  * original result (`duplicate: true`, no new row, no recompute-as-error);
  * same identity + different hash throws IdempotencyConflictError. The
- * pre-check is not itself atomic with the insert — a genuine concurrent
- * race still falls through to the unique constraint, which remains the
- * backstop (that raw path is exercised by connector-storage.integration.test.ts).
+ * pre-check is a fast path, not the sole guarantee: a genuine concurrent
+ * race (two calls both miss the pre-check, one loses the insert) is caught
+ * on the `events_idempotency_uq` violation and resolved the same way —
+ * re-query with full team scope, return the original on a hash match, throw
+ * IdempotencyConflictError otherwise. Any other insert failure rethrows.
  */
 export async function persistNormalizedEvent(
   db: AppDb,
@@ -221,85 +273,94 @@ export async function persistNormalizedEvent(
     .update(canonicalJson(validEvent.payload))
     .digest('hex');
 
-  const existing = await db
-    .select({
-      id: schema.events.id,
-      payloadHash: schema.events.payloadHash,
-      actorPrincipalId: schema.events.actorPrincipalId,
-    })
-    .from(schema.events)
-    .where(
-      and(
-        eq(schema.events.projectId, scope.projectId),
-        eq(schema.events.channel, channel),
-        eq(schema.events.connectorKind, validEvent.connectorKind),
-        eq(schema.events.deliveryId, validEvent.deliveryId),
-        eq(schema.events.itemKey, validEvent.itemKey),
-      ),
-    )
-    .limit(1);
-
-  const existingRow = existing[0];
-  if (existingRow) {
-    if (existingRow.payloadHash === payloadHash) {
+  const resolveReplay = (row: ExistingEventRow): PersistNormalizedEventResult => {
+    if (row.payloadHash === payloadHash) {
       return {
-        eventId: existingRow.id,
+        eventId: row.id,
         channel,
         connectorKind: validEvent.connectorKind,
-        principalId: existingRow.actorPrincipalId,
+        principalId: row.actorPrincipalId,
         duplicate: true,
       };
     }
     throw new IdempotencyConflictError(
-      `idempotency_conflict: project '${scope.projectId}' channel '${channel}' ` +
-        `connectorKind '${validEvent.connectorKind}' delivery '${validEvent.deliveryId}' ` +
-        `item '${validEvent.itemKey}' already stored with a different payload hash`,
+      `idempotency_conflict: team '${scope.teamId}' project '${scope.projectId}' ` +
+        `channel '${channel}' connectorKind '${validEvent.connectorKind}' ` +
+        `delivery '${validEvent.deliveryId}' item '${validEvent.itemKey}' ` +
+        'already stored with a different payload hash',
     );
-  }
+  };
+
+  const existingRow = await findExistingEvent(
+    db,
+    scope,
+    channel,
+    validEvent.connectorKind,
+    validEvent.deliveryId,
+    validEvent.itemKey,
+  );
+  if (existingRow) return resolveReplay(existingRow);
 
   const principalId = validEvent.actor
     ? await resolveOrCreatePrincipal(db, scope, validEvent.actor)
     : null;
 
-  const [row] = await db
-    .insert(schema.events)
-    .values({
-      id: newEventId(),
-      teamId: scope.teamId,
-      projectId: scope.projectId,
+  try {
+    const [row] = await db
+      .insert(schema.events)
+      .values({
+        id: newEventId(),
+        teamId: scope.teamId,
+        projectId: scope.projectId,
+        channel,
+        kind,
+        connectorKind: validEvent.connectorKind,
+        sourceEvent,
+        sourceAction: validEvent.sourceAction ?? null,
+        deliveryId: validEvent.deliveryId,
+        itemKey: validEvent.itemKey,
+        externalId: validEvent.externalId,
+        url: validEvent.url ?? null,
+        actor: validEvent.actor, // raw claim, preserved verbatim (5.4) — never fabricated
+        actorProvenance: validEvent.actorProvenance,
+        actorPrincipalId: principalId,
+        occurredAt: new Date(validEvent.occurredAt),
+        occurredAtProvenance: validEvent.occurredAtProvenance,
+        ingestedByCredentialId: null, // filled by the ingestion layer (out of scope)
+        ingestedByPrincipalId: null,
+        payload: validEvent.payload,
+        payloadBytes,
+        payloadHash,
+        payloadSchemaVersion: PAYLOAD_SCHEMA_VERSION,
+        envelopeVersion: EVENT_ENVELOPE_VERSION,
+      })
+      .returning({ id: schema.events.id });
+
+    if (!row) {
+      throw new Error('event insert returned no row');
+    }
+
+    return {
+      eventId: row.id,
       channel,
-      kind,
       connectorKind: validEvent.connectorKind,
-      sourceEvent,
-      sourceAction: validEvent.sourceAction ?? null,
-      deliveryId: validEvent.deliveryId,
-      itemKey: validEvent.itemKey,
-      externalId: validEvent.externalId,
-      url: validEvent.url ?? null,
-      actor: validEvent.actor, // raw claim, preserved verbatim (5.4) — never fabricated
-      actorProvenance: validEvent.actorProvenance,
-      actorPrincipalId: principalId,
-      occurredAt: new Date(validEvent.occurredAt),
-      occurredAtProvenance: validEvent.occurredAtProvenance,
-      ingestedByCredentialId: null, // filled by the ingestion layer (out of scope)
-      ingestedByPrincipalId: null,
-      payload: validEvent.payload,
-      payloadBytes,
-      payloadHash,
-      payloadSchemaVersion: PAYLOAD_SCHEMA_VERSION,
-      envelopeVersion: EVENT_ENVELOPE_VERSION,
-    })
-    .returning({ id: schema.events.id });
+      principalId,
+      duplicate: false,
+    };
+  } catch (err) {
+    if (!isUniqueViolation(err, 'events_idempotency_uq')) throw err;
 
-  if (!row) {
-    throw new Error('event insert returned no row');
+    // Lost a concurrent race: someone else inserted between our pre-check
+    // and our insert. Resolve exactly like the sequential-replay path.
+    const raced = await findExistingEvent(
+      db,
+      scope,
+      channel,
+      validEvent.connectorKind,
+      validEvent.deliveryId,
+      validEvent.itemKey,
+    );
+    if (!raced) throw err; // constraint fired but row not visible yet — surface the original error
+    return resolveReplay(raced);
   }
-
-  return {
-    eventId: row.id,
-    channel,
-    connectorKind: validEvent.connectorKind,
-    principalId,
-    duplicate: false,
-  };
 }

@@ -51,7 +51,7 @@ export type SourceKind = z.infer<typeof sourceKind>;
 export const publicIngestKind = z.enum(['cli_init']);
 
 /** Source descriptor as stored/returned (server-enriched). */
-export const source = z.strictObject({
+const sourceShape = z.strictObject({
   channel: sourceChannel, // channel fact, server-derived (N1)
   kind: sourceKind,
   event: z.string().optional(), // raw provider event name (Q6, github only;
@@ -72,6 +72,30 @@ export const source = z.strictObject({
   // external channel and colliding delivery IDs cannot be confused for one
   // another.
   connectorKind: z.string().min(1).optional(),
+});
+
+/**
+ * The channel <-> connectorKind pairing is enforced, not merely documented
+ * (acceptance-review finding, DUA-129): a plain optional field let both
+ * `channel='external'` with no connectorKind AND a built-in channel WITH a
+ * connectorKind parse successfully, silently defeating the identity
+ * guarantee the field exists for.
+ */
+export const source = sourceShape.superRefine((val, ctx) => {
+  if (val.channel === 'external' && !val.connectorKind) {
+    ctx.addIssue({
+      code: 'custom',
+      message: "connectorKind is required when channel is 'external'",
+      path: ['connectorKind'],
+    });
+  }
+  if (val.channel !== 'external' && val.connectorKind !== undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'connectorKind must be absent for built-in channels (github/cli/mcp)',
+      path: ['connectorKind'],
+    });
+  }
 });
 export type Source = z.infer<typeof source>;
 

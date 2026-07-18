@@ -97,6 +97,23 @@ describe('source (generic connector channel — v0.3 additive, DUA-129)', () => 
     expect(bad.success).toBe(false);
   });
 
+  it('rejects channel=external with no connectorKind (acceptance-review fix: was a silent pass)', () => {
+    const bad = source.safeParse({ ...base, channel: 'external' });
+    expect(bad.success).toBe(false);
+  });
+
+  it('rejects a built-in channel carrying a connectorKind (acceptance-review fix: was a silent pass)', () => {
+    const bad = source.safeParse({
+      channel: 'cli',
+      kind: 'cli_init',
+      deliveryId: 'idem-1',
+      itemKey: 'root',
+      externalId: 'org/repo:src/auth.ts',
+      connectorKind: 'cli',
+    });
+    expect(bad.success).toBe(false);
+  });
+
   it('a persisted Slack-like actor round-trips through eventSummary (acceptance-review fix: actor.provider is open)', () => {
     // Closes the exact gap the acceptance review found: source.channel
     // allowed 'external' but actor.provider was still closed to ['github'],

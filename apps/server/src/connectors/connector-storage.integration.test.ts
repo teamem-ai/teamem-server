@@ -19,6 +19,7 @@ import {
   persistNormalizedEvent,
   resolveOrCreatePrincipal,
   type ConnectorScope,
+  type PersistNormalizedEventResult,
 } from './connector-storage.js';
 import type { NormalizedEvent } from './registry.js';
 
@@ -31,7 +32,7 @@ describe.skipIf(!url)('connector-storage (generic persistence seam, live Postgre
   beforeAll(async () => {
     db = createDb(url!);
     await db.execute(`
-      INSERT INTO teams (id, name) VALUES ('team_conn', 'Conn')
+      INSERT INTO teams (id, name) VALUES ('team_conn', 'Conn'), ('team_other', 'Other')
       ON CONFLICT (id) DO NOTHING;
       INSERT INTO projects (id, team_id, name) VALUES ('prj_conn', 'team_conn', 'Conn Project')
       ON CONFLICT (id) DO NOTHING;
@@ -41,9 +42,9 @@ describe.skipIf(!url)('connector-storage (generic persistence seam, live Postgre
   afterAll(async () => {
     await db.execute(`
       DELETE FROM events WHERE project_id = 'prj_conn';
-      DELETE FROM principals WHERE team_id = 'team_conn';
+      DELETE FROM principals WHERE team_id IN ('team_conn', 'team_other');
       DELETE FROM projects WHERE id = 'prj_conn';
-      DELETE FROM teams WHERE id = 'team_conn';
+      DELETE FROM teams WHERE id IN ('team_conn', 'team_other');
     `);
   });
 
@@ -265,5 +266,54 @@ describe.skipIf(!url)('connector-storage (generic persistence seam, live Postgre
     expect(a.itemKey).toBe(b.itemKey);
     expect(a.connectorKind).not.toBe(b.connectorKind);
     expect(randomUUID()).not.toBe(randomUUID()); // sanity on the test's own tooling
+  });
+
+  it("SECURITY counterexample: a mismatched teamId never returns another tenant's replayed event", async () => {
+    const real = await persistNormalizedEvent(db, scope, slackLikeEvent());
+    expect(real.duplicate).toBe(false);
+
+    // Same projectId (globally unique) and identical payload, but a
+    // DIFFERENT (genuinely real) team than the one that owns prj_conn.
+    // Before the fix, the replay lookup ignored team_id and would have
+    // returned {duplicate:true, eventId: real.eventId} here with NO error —
+    // leaking team_conn's event id to a caller scoped to team_other. Now it
+    // must throw (the doomed insert fails its team/project FK) rather than
+    // silently hand back the other tenant's identity.
+    const wrongScope: ConnectorScope = { teamId: 'team_other', projectId: 'prj_conn' };
+    let leaked: PersistNormalizedEventResult | undefined;
+    let thrown: unknown;
+    try {
+      leaked = await persistNormalizedEvent(db, wrongScope, slackLikeEvent());
+    } catch (err) {
+      thrown = err;
+    }
+    expect(leaked).toBeUndefined();
+    expect(thrown).toBeDefined();
+    expect(leaked as PersistNormalizedEventResult | undefined).not.toMatchObject({
+      duplicate: true,
+      eventId: real.eventId,
+    });
+
+    // The original event is untouched and still belongs to team_conn only.
+    const { rows } = await db.execute(`SELECT team_id FROM events WHERE id = '${real.eventId}'`);
+    expect(rows[0]).toMatchObject({ team_id: 'team_conn' });
+  });
+
+  it('CONCURRENCY counterexample: two overlapping requests for brand-new identical content both succeed with one shared eventId (N1)', async () => {
+    const event = slackLikeEvent({ deliveryId: 'Ev-concurrent', itemKey: 'root' });
+    const [a, b] = await Promise.all([
+      persistNormalizedEvent(db, scope, event),
+      persistNormalizedEvent(db, scope, event),
+    ]);
+
+    expect(a.eventId).toBe(b.eventId);
+    // Exactly one of the two did the actual insert; the other resolved the
+    // events_idempotency_uq race by re-querying and replaying.
+    expect([a.duplicate, b.duplicate].sort()).toEqual([false, true]);
+
+    const { rows } = await db.execute(
+      `SELECT count(*)::int AS n FROM events WHERE delivery_id = 'Ev-concurrent' AND connector_kind = 'slack'`,
+    );
+    expect(rows[0]).toMatchObject({ n: 1 }); // no duplicate row from the race
   });
 });
