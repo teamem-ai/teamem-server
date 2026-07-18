@@ -6,19 +6,34 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "dev": "tsx watch src/server.ts",
+    "build": "tsup",
+    "start": "node dist/server.js",
+    "worker": "node dist/worker.js",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "bootstrap": "node dist/server.js --bootstrap",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:compose": "docker compose -f ../../docker-compose.yml up -d --wait && vitest run --config vitest.e2e.config.ts; docker compose -f ../../docker-compose.yml down",
+    "m0:f1-reliability": "vitest run --config vitest.f1.config.ts"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
     "@types/pg": "^8.20.0",
     "drizzle-kit": "^0.31.10",
     "pg": "^8.22.0",
+    "tsup": "^8.4.0",
+    "tsx": "^4.20.0",
     "typescript": "^5.8.3",
     "vitest": "^3.2.7"
   },
   "dependencies": {
+    "@hono/node-server": "^1.14.0",
     "@teamem/schema": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "hono": "^4.8.0",
     "zod": "^4.4.3"
   }
 }
