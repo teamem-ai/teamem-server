@@ -1,15 +1,32 @@
-node_modules
-dist
+# Version-control metadata and local configuration must never enter a build.
 .git
-coverage
-*.log
-.DS_Store
+.gitignore
 .env
 .env.*
-!.env.example
-docs
-scripts
-.github
-apps/web
-.claude
+**/.env
+**/.env.*
+
+# Dependencies and generated output are rebuilt from the frozen lockfile.
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
 *.tsbuildinfo
+
+# Local tooling and editor state are not production inputs.
+.DS_Store
+.idea
+.vscode
+.agents
+.codex
+
+# Test output, logs, and temporary files.
+*.log
+tmp
+**/tmp
+test-results
+**/test-results
+playwright-report
+**/playwright-report
