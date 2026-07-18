@@ -1,4 +1,4 @@
-# teamem portal — self-hosted deployment topology (DRAFT)
+# teamem portal — self-hosted deployment topology
 #
 # Three containers, no Redis: the compile queue is pg-boss, which lives
 # inside Postgres. One fewer service to operate than comparable stacks.
@@ -12,13 +12,6 @@
 #
 #   Scale compile throughput:
 #     docker compose up -d --scale worker=3
-#
-# ── Honest status ────────────────────────────────────────────────────────
-# Pre-M0: only `docker compose up -d postgres` is functional today.
-# The server and worker services are the wiring target for M0 (their
-# Dockerfile and entrypoints land with the first real implementation).
-# Per project rule, nothing here pretends to work before it does.
-# ─────────────────────────────────────────────────────────────────────────
 #
 # Secrets policy (deliberate): POSTGRES_PASSWORD has NO default — compose
 # refuses to start without one. Do not expose this file's ports to the
@@ -50,13 +43,9 @@ services:
       retries: 10
 
   server:
-    # M0 wires this up. Until then this service is a topology draft:
-    # the Dockerfile does not exist yet and the build will fail — by design.
     build:
       context: .
       dockerfile: Dockerfile
-    # M3 will publish images; self-builders keep using `build:` above.
-    # image: ghcr.io/teamem-ai/teamem-server:${TEAMEM_VERSION:-latest}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -66,6 +55,10 @@ services:
       # Single-process mode: when true, the server embeds the pg-boss
       # compile worker — bring up only `postgres server` and skip `worker`.
       TEAMEM_ALL_IN_ONE: ${TEAMEM_ALL_IN_ONE:-false}
+      # GitHub App / webhook
+      TEAMEM_GITHUB_WEBHOOK_SECRET: ${TEAMEM_GITHUB_WEBHOOK_SECRET:-}
+      TEAMEM_GITHUB_APP_ID: ${TEAMEM_GITHUB_APP_ID:-}
+      TEAMEM_GITHUB_INSTALLATION_ID: ${TEAMEM_GITHUB_INSTALLATION_ID:-}
       # LLM provider keys (BYO). M0 reads env; M2 moves provider config
       # into the portal UI. TEAMEM_-prefixed on purpose: never inherit
       # ambient ANTHROPIC_API_KEY/OPENAI_API_KEY from the host shell.
@@ -91,7 +84,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # image: ghcr.io/teamem-ai/teamem-server:${TEAMEM_VERSION:-latest}
     command: ["node", "apps/server/dist/worker.js"]
     restart: unless-stopped
     depends_on:

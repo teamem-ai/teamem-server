@@ -24,8 +24,12 @@ describe('HTTP runtime (server.ts)', () => {
   });
 
   it('body > 5MB is rejected with 413 via enforceBodyLimit middleware', async () => {
-    const testApp = (await import('hono')).Hono;
-    const t = new testApp();
+    const { Hono: HonoClass } = await import('hono');
+    const { requestContext } = await import('./http/request-context.js');
+    const { globalErrorHandler } = await import('./http/errors.js');
+    const t = new HonoClass();
+    t.use('*', requestContext);
+    t.onError(globalErrorHandler);
     t.use('*', enforceBodyLimit(100)); // tiny limit for testing
     t.post('/test', (c) => c.json({ ok: true }));
 

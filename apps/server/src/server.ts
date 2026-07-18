@@ -12,10 +12,20 @@
  */
 import { Hono, type Context, type Next } from 'hono';
 import { serve } from '@hono/node-server';
+import { requestContext } from './http/request-context.js';
+import { globalErrorHandler, notFoundHandler, PayloadTooLargeError } from './http/errors.js';
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5 MB batch limit (contract ②)
 
 const app = new Hono().basePath('/');
+
+// ── Global middleware ───────────────────────────────────────────────────────
+// Request-ID: accept incoming x-request-id or generate a UUID (runs first).
+app.use('*', requestContext);
+
+// ── Global error / not-found handlers ───────────────────────────────────────
+app.onError(globalErrorHandler);
+app.notFound(notFoundHandler);
 
 // ── Health check ────────────────────────────────────────────────────────────
 app.get('/healthz', (c) => c.json({ status: 'ok' }));
@@ -27,10 +37,7 @@ export function enforceBodyLimit(limit = MAX_BODY_BYTES) {
   return async (c: Context, next: Next) => {
     const contentLength = c.req.header('content-length');
     if (contentLength && Number(contentLength) > limit) {
-      return c.json(
-        { error: { code: 'payload_too_large', message: `Body exceeds ${limit} bytes` } },
-        413,
-      );
+      throw new PayloadTooLargeError(`Body exceeds ${limit} bytes`);
     }
     await next();
   };
@@ -55,6 +62,15 @@ const isMain =
 
 if (isMain) {
   startServer();
+
+  // All-in-one mode: embed the pg-boss compile worker in the server
+  // process. Used with `TEAMEM_ALL_IN_ONE=true` — bring up only
+  // `postgres server` and skip the `worker` container.
+  if (process.env['TEAMEM_ALL_IN_ONE'] === 'true') {
+    void import('./worker.js').then(() => {
+      console.log('teamem compile worker embedded in server process');
+    });
+  }
 }
 
 export { app };
