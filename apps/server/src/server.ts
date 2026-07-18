@@ -62,6 +62,15 @@ const isMain =
 
 if (isMain) {
   startServer();
+
+  // All-in-one mode: embed the pg-boss compile worker in the server
+  // process. Used with `TEAMEM_ALL_IN_ONE=true` — bring up only
+  // `postgres server` and skip the `worker` container.
+  if (process.env['TEAMEM_ALL_IN_ONE'] === 'true') {
+    void import('./worker.js').then(() => {
+      console.log('teamem compile worker embedded in server process');
+    });
+  }
 }
 
 export { app };
