@@ -16,39 +16,48 @@
  * unknown connectors → the generic external channel).
  */
 
+import { z } from 'zod';
+import { actorProvenance, isoDateTime, occurredAtProvenance } from '@teamem/schema';
+
 /**
  * Actor claim a connector resolves from its raw payload (N2). Identity
  * resolution belongs in the connector — only it can verify a signature and
  * therefore justify `webhook_verified`; pushing it back into the ingestion
  * layer would contradict the frozen N2 direction. `null` means unknown —
  * never fabricated.
+ *
+ * Runtime-validated (not just typed) because this is a cross-boundary input:
+ * a private connector package is untrusted code from the storage layer's
+ * point of view (project rule — every cross-boundary input goes through Zod).
  */
-export interface NormalizedActor {
-  kind: 'human' | 'service';
-  provider: string; // open — "github", future "slack", …
-  providerUserId: string;
-  displayLogin?: string;
-}
+export const normalizedActorSchema = z.strictObject({
+  kind: z.enum(['human', 'service']),
+  provider: z.string().min(1), // open — "github", future "slack", …
+  providerUserId: z.string().min(1),
+  displayLogin: z.string().optional(),
+});
+export type NormalizedActor = z.infer<typeof normalizedActorSchema>;
 
-export interface NormalizedEvent {
+export const normalizedEventSchema = z.strictObject({
   /** Open connector identifier, e.g. "github", "slack". */
-  connectorKind: string;
+  connectorKind: z.string().min(1),
   /** Open connector-specific event identifier, e.g. "pull_request.closed". */
-  eventKind: string;
+  eventKind: z.string().min(1),
   /** Raw provider event/action names, if any (Q6). */
-  sourceEvent?: string;
-  sourceAction?: string;
-  deliveryId: string;
-  itemKey: string; // sub-item id within one delivery; 'root' when unsplit (N1)
-  externalId: string;
-  url?: string;
+  sourceEvent: z.string().optional(),
+  sourceAction: z.string().optional(),
+  deliveryId: z.string().min(1),
+  itemKey: z.string().min(1), // sub-item id within one delivery; 'root' when unsplit (N1)
+  externalId: z.string().min(1),
+  url: z.url().optional(),
   /** Resolved actor claim (N2). null = unknown, never fabricated. */
-  actor: NormalizedActor | null;
-  actorProvenance: 'webhook_verified' | 'credential_bound' | 'client_claimed' | 'unknown';
-  occurredAt: string;
-  occurredAtProvenance: 'provider' | 'client' | 'server';
-  payload: Record<string, unknown>;
-}
+  actor: normalizedActorSchema.nullable(),
+  actorProvenance,
+  occurredAt: isoDateTime,
+  occurredAtProvenance,
+  payload: z.record(z.string(), z.unknown()),
+});
+export type NormalizedEvent = z.infer<typeof normalizedEventSchema>;
 
 export interface WebhookRequest {
   headers: Record<string, string | undefined>;
