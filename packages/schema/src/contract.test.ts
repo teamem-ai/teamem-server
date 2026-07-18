@@ -16,6 +16,7 @@ import {
   ingestEventRequest,
   jobEventResult,
   principalId,
+  source,
   teamRole,
   KNOWN_AUDIT_ACTIONS,
   type CursorPayload,
@@ -52,6 +53,45 @@ describe('ingest (contract ②)', () => {
     const rest: Record<string, unknown> = { ...validIngest };
     delete rest['idempotencyKey'];
     expect(ingestEventRequest.safeParse(rest).success).toBe(false);
+  });
+});
+
+describe('source (generic connector channel — v0.3 additive, DUA-129)', () => {
+  const base = {
+    kind: 'external_event',
+    deliveryId: 'Ev123',
+    itemKey: 'root',
+    externalId: 'C042/p1746992',
+  } as const;
+
+  it('accepts a private-connector event on the generic external channel with connectorKind', () => {
+    const parsed = source.safeParse({
+      ...base,
+      channel: 'external',
+      connectorKind: 'slack',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('still accepts built-in channels without connectorKind (no field bloat)', () => {
+    const parsed = source.safeParse({
+      channel: 'cli',
+      kind: 'cli_init',
+      deliveryId: 'idem-1',
+      itemKey: 'root',
+      externalId: 'org/repo:src/auth.ts',
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects unknown fields — connectorKind is the only new surface (strict object)', () => {
+    const bad = source.safeParse({
+      ...base,
+      channel: 'external',
+      connectorKind: 'slack',
+      somethingElse: 'nope',
+    });
+    expect(bad.success).toBe(false);
   });
 });
 

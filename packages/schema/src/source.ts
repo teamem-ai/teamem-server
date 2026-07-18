@@ -11,11 +11,23 @@ import { z } from 'zod';
  * when the values coincide. N1: idempotent identity is built on the channel,
  * never on `kind` (kind is a parse result; parser changes must not bypass
  * dedup).
+ *
+ * `external` (v0.3 additive, DUA-129): the generic bucket for any connector
+ * outside the built-in three (private Slack/Gmail/… packages implementing
+ * `connectors/registry.ts`'s `Connector` interface). Their real identity is
+ * open-ended (`connectorKind`) and never forced into this closed enum — see
+ * `source.connectorKind` below.
  */
-export const sourceChannel = z.enum(['github', 'cli', 'mcp']);
+export const sourceChannel = z.enum(['github', 'cli', 'mcp', 'external']);
 export type SourceChannel = z.infer<typeof sourceChannel>;
 
-/** Parsed event classification (Q6). */
+/**
+ * Parsed event classification (Q6).
+ *
+ * `external_event` (v0.3 additive, DUA-129): parse-result bucket paired with
+ * `channel: 'external'`. The connector's real open event identifier is
+ * preserved verbatim in `source.event` (not squeezed into this closed enum).
+ */
 export const sourceKind = z.enum([
   'github_commit',
   'github_pr',
@@ -23,6 +35,7 @@ export const sourceKind = z.enum([
   'github_pr_comment',
   'cli_init',
   'mcp_write',
+  'external_event',
 ]);
 export type SourceKind = z.infer<typeof sourceKind>;
 
@@ -41,7 +54,8 @@ export const publicIngestKind = z.enum(['cli_init']);
 export const source = z.strictObject({
   channel: sourceChannel, // channel fact, server-derived (N1)
   kind: sourceKind,
-  event: z.string().optional(), // raw provider event name (Q6, github only)
+  event: z.string().optional(), // raw provider event name (Q6, github only;
+  // also carries the connector's real open eventKind when channel=external)
   action: z.string().optional(), // raw provider action (Q6)
   deliveryId: z.string().min(1), // idempotency identity component (N1):
   // github → X-GitHub-Delivery (connector-filled);
@@ -50,6 +64,14 @@ export const source = z.strictObject({
   // (commit SHA, comment id, …); fixed 'root' when the delivery isn't split
   externalId: z.string().min(1), // human-meaningful ref, e.g. "org/repo#42"
   url: z.url().optional(),
+  // v0.3 additive (DUA-129): the connector's real open identity — REQUIRED
+  // when channel is 'external', absent for the three built-in channels
+  // (whose connectorKind == channel and needs no duplicate field). Part of
+  // the idempotency identity alongside channel/deliveryId/itemKey so two
+  // different private connectors (e.g. slack, gmail) sharing the generic
+  // external channel and colliding delivery IDs cannot be confused for one
+  // another.
+  connectorKind: z.string().min(1).optional(),
 });
 export type Source = z.infer<typeof source>;
 
