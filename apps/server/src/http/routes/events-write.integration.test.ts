@@ -78,7 +78,10 @@ describe.skipIf(!url)('POST /v1/events (live Postgres)', () => {
   });
 
   beforeEach(async () => {
-    // Clean events before each test
+    // Clean in FK dependency order: job_events → events → jobs
+    await db.execute(
+      `DELETE FROM job_events WHERE project_id = '${projectId}'`,
+    );
     await db.execute(
       `DELETE FROM events WHERE project_id = '${projectId}'`,
     );
@@ -439,6 +442,81 @@ describe.skipIf(!url)('POST /v1/events (live Postgres)', () => {
       await db.execute(`DELETE FROM api_keys WHERE id = '${keyId}'`);
       await db.execute(`DELETE FROM projects WHERE id = '${project2}'`);
     }
+  });
+
+  // ── Fix 1: all-projects key cross-team → 404 (anti-enumeration) ───────
+
+  it('returns 404 when all-projects key tries a project in a different team', async () => {
+    // Create a second team with its own project
+    const { randomUUID } = await import('node:crypto');
+    const team2Id = `team_xt_${randomUUID().replace(/-/g, '')}`;
+    const proj2Id = `prj_${randomUUID().replace(/-/g, '')}`;
+    await db.execute(
+      `INSERT INTO teams (id, name) VALUES ('${team2Id}', 'Other Team')`,
+    );
+    await db.execute(
+      `INSERT INTO projects (id, team_id, name) VALUES ('${proj2Id}', '${team2Id}', 'Other Project')`,
+    );
+
+    // Create an all-projects key for our team
+    const { generateApiKeyToken, hashToken } = await import(
+      '../../auth/api-key.js'
+    );
+    const allProjToken = generateApiKeyToken();
+    const allProjHash = hashToken(allProjToken);
+    const keyId = `key_xt_${randomUUID().replace(/-/g, '')}`;
+    await db.execute(
+      `INSERT INTO api_keys (id, team_id, project_id, name, token_hash, scopes, all_projects)
+       VALUES ('${keyId}', '${teamId}', NULL, 'Cross-Team Test Key',
+               '${allProjHash}', ARRAY['events:write']::text[], true)`,
+    );
+
+    try {
+      const body = validBody({ projectId: proj2Id }); // belongs to team2
+      const res = await app.request('/v1/events', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${allProjToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+      // Cross-team → 404, same body as genuinely missing resource
+      expect(res.status).toBe(404);
+      const json = await res.json();
+      expect(json.error.code).toBe('not_found');
+    } finally {
+      await db.execute(`DELETE FROM api_keys WHERE id = '${keyId}'`);
+      await db.execute(`DELETE FROM projects WHERE id = '${proj2Id}'`);
+      await db.execute(`DELETE FROM teams WHERE id = '${team2Id}'`);
+    }
+  });
+
+  // ── Fix 2: duplicate replay preserves the original job ID ──────────────
+
+  it('duplicate replay returns the original jobId when compile=true', async () => {
+    const body = validBody({ options: { compile: true } });
+
+    const res1 = await app.request('/v1/events', {
+      method: 'POST',
+      headers: authHeader(),
+      body: JSON.stringify(body),
+    });
+    expect(res1.status).toBe(202);
+    const json1 = await res1.json();
+    expect(json1.jobId).toBeTruthy();
+
+    // Replay the exact same request — should return the original jobId
+    const res2 = await app.request('/v1/events', {
+      method: 'POST',
+      headers: authHeader(),
+      body: JSON.stringify(body),
+    });
+    expect(res2.status).toBe(200);
+    const json2 = await res2.json();
+    expect(json2.duplicate).toBe(true);
+    expect(json2.eventId).toBe(json1.eventId);
+    expect(json2.jobId).toBe(json1.jobId); // <-- the fix: original jobId, not null
   });
 
   // ── Payload fields preserved correctly ─────────────────────────────────

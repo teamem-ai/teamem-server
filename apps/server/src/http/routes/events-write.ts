@@ -11,15 +11,15 @@ import { ingestEventRequest, type IngestEventResponse, PAYLOAD_SCHEMA_VERSION, E
 import type { Context } from 'hono';
 import type { AppDb } from '../../db/client.js';
 import { insertEvent, IdempotencyConflictError as RepoIdempotencyConflictError } from '../../db/repositories/events.js';
-import { createJob, IdempotencyConflictError as JobIdempotencyConflictError } from '../../db/repositories/jobs.js';
+import { createJob, findJobByIdempotencyKey, IdempotencyConflictError as JobIdempotencyConflictError } from '../../db/repositories/jobs.js';
 import { resolveTokenHash, AuthenticationError } from '../../db/repositories/api-keys.js';
 import { hashToken, parseBearerToken } from '../../auth/api-key.js';
 import { isProjectScope, getTeamId, getProjectId } from '../../auth/scope.js';
 import { stripPrivateTags } from '../../security/private-tags.js';
 import { payloadHash, payloadByteLength } from '../../security/payload-hash.js';
-import { InvalidRequestError, UnauthorizedError, ForbiddenError, InternalError, IdempotencyConflictError, PayloadTooLargeError, REQUEST_ID_KEY } from '../errors.js';
+import { InvalidRequestError, UnauthorizedError, ForbiddenError, NotFoundError, InternalError, IdempotencyConflictError, PayloadTooLargeError, REQUEST_ID_KEY } from '../errors.js';
 import type { CompileQueue } from '../../queue/boss.js';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import * as schema from '../../db/schema.js';
 
 // ── Handler dependencies ────────────────────────────────────────────────────
@@ -107,15 +107,24 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
       );
     }
   } else {
-    // allProjects key — verify the project exists in the team
+    // allProjects key — verify the project exists AND belongs to the key's
+    // team.  Cross-team projects must return 404 (same as genuinely missing,
+    // per anti-enumeration).  Without the team_id filter a team-A key could
+    // submit team-B's projectId, pass this check, and hit a composite-FK
+    // violation inside insertEvent → wrapped as 500 instead of 403/404.
     const projectRows = await db
       .select({ id: schema.projects.id })
       .from(schema.projects)
-      .where(eq(schema.projects.id, req.projectId))
+      .where(
+        and(
+          eq(schema.projects.teamId, teamId),
+          eq(schema.projects.id, req.projectId),
+        ),
+      )
       .limit(1);
     if (projectRows.length === 0) {
-      throw new ForbiddenError(
-        `Project ${req.projectId} not found in team ${teamId}`,
+      throw new NotFoundError(
+        `Project ${req.projectId} not found`,
       );
     }
   }
@@ -169,11 +178,28 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
   const { eventId, status } = eventResult;
 
   if (status === 'duplicate') {
-    // 200 duplicate replay — return original eventId with duplicate: true
+    // 200 duplicate replay — return the ORIGINAL result, not a blank slate.
+    // If the first request had compile=true and created a job, the replay
+    // must include that jobId so the caller sees the same response.
+    let originalJobId: string | null = null;
+    try {
+      const existingJob = await findJobByIdempotencyKey(
+        db,
+        teamId,
+        req.projectId,
+        'ingest_event',
+        `compile:${eventId}`,
+      );
+      originalJobId = existingJob?.id ?? null;
+    } catch {
+      // Best-effort lookup — if it fails, return null (the replay is still
+      // correct; just omits the optional job reference).
+    }
+
     const response: IngestEventResponse = {
       requestId,
       eventId,
-      jobId: null,
+      jobId: originalJobId,
       duplicate: true,
     };
     return c.json(response, 200);
@@ -230,14 +256,14 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
         );
         jobId = err.existingJobId;
       } else {
-        // Job creation failure does not roll back the event.
-        console.error(
-          JSON.stringify({
-            event: 'compile_job_create_failed',
-            requestId,
-            eventId,
-            error: err instanceof Error ? err.message : String(err),
-          }),
+        // Job creation failed for a non-idempotency reason (e.g. FK
+        // violation, connection error).  The event IS persisted, but the
+        // caller asked for compile=true and we could not schedule it.
+        // Fail the request rather than returning 202 jobId:null and
+        // pretending compilation was requested successfully.
+        throw new InternalError(
+          'Failed to create compile job',
+          { cause: err },
         );
       }
     }
