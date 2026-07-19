@@ -12,6 +12,7 @@ import {
   createGitHubApiClient,
   GitHubApiError,
   mapPullRequest,
+  mapPullRequestDetail,
 } from './app-api-client.js';
 import type { GitHubAppCredentialsProvider } from './app-credentials.js';
 
@@ -44,6 +45,18 @@ const openPrFixture = {
   html_url: 'https://github.com/octocat/Hello-World/pull/55',
   head: { sha: 'def789abc012' },
   base: { ref: 'feature/new-endpoint' },
+};
+
+/** PR detail fixture (includes body). */
+const prDetailFixture = {
+  number: 42,
+  title: 'Fix auth bug',
+  state: 'closed',
+  merged_at: '2026-07-15T10:30:00Z',
+  html_url: 'https://github.com/octocat/Hello-World/pull/42',
+  head: { sha: 'abc123def456' },
+  base: { ref: 'main' },
+  body: 'Closes #7 and fixes #12.',
 };
 
 // ── mapPullRequest ───────────────────────────────────────────────────────────
@@ -307,5 +320,95 @@ describe('getPullRequestsForCommit', () => {
       expect(error!.message.length).toBeLessThanOrEqual(300); // message + prefix
       expect(error!.message).not.toContain('x'.repeat(250));
     });
+  });
+});
+
+// ── mapPullRequestDetail ─────────────────────────────────────────────────────
+
+describe('mapPullRequestDetail', () => {
+  it('maps raw detailed PR shape including body', () => {
+    const result = mapPullRequestDetail(prDetailFixture);
+    expect(result).toEqual({
+      number: 42,
+      title: 'Fix auth bug',
+      state: 'closed',
+      mergedAt: '2026-07-15T10:30:00Z',
+      htmlUrl: 'https://github.com/octocat/Hello-World/pull/42',
+      headSha: 'abc123def456',
+      baseRef: 'main',
+      body: 'Closes #7 and fixes #12.',
+    });
+  });
+
+  it('preserves null body', () => {
+    const result = mapPullRequestDetail({ ...prDetailFixture, body: null });
+    expect(result.body).toBeNull();
+  });
+});
+
+// ── getPullRequest ───────────────────────────────────────────────────────────
+
+describe('getPullRequest', () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  let client: ReturnType<typeof createGitHubApiClient>;
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    client = createGitHubApiClient(fakeCredentials(), mockFetch);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns PR detail including body', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => prDetailFixture,
+    });
+
+    const result = await client.getPullRequest('octocat', 'Hello-World', 42);
+
+    expect(result).not.toBeNull();
+    expect(result!.number).toBe(42);
+    expect(result!.body).toBe('Closes #7 and fixes #12.');
+  });
+
+  it('returns null for 404', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => 'Not Found',
+    });
+
+    const result = await client.getPullRequest('octocat', 'nonexistent', 999);
+
+    expect(result).toBeNull();
+  });
+
+  it('calls the correct endpoint', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => prDetailFixture,
+    });
+
+    await client.getPullRequest('octocat', 'Hello-World', 42);
+
+    const url = mockFetch.mock.calls[0]?.[0] as string;
+    expect(url).toBe('https://api.github.com/repos/octocat/Hello-World/pulls/42');
+  });
+
+  it('throws on 401', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => 'Bad credentials',
+    });
+
+    await expect(
+      client.getPullRequest('o', 'r', 1),
+    ).rejects.toThrow(GitHubApiError);
   });
 });

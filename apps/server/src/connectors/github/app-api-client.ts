@@ -58,6 +58,34 @@ interface RawPullRequest {
   base: { ref: string };
 }
 
+/**
+ * Detailed PR shape from GET /repos/{owner}/{repo}/pulls/{number}.
+ * Includes the body field which may contain closing keyword references
+ * to issues (e.g. "Closes #42").
+ */
+export interface GitHubPullRequestDetail {
+  number: number;
+  title: string;
+  state: string;
+  mergedAt: string | null;
+  htmlUrl: string;
+  headSha: string;
+  baseRef: string;
+  /** PR description/body — may contain "Closes #N" references. */
+  body: string | null;
+}
+
+interface RawPullRequestDetail {
+  number: number;
+  title: string;
+  state: string;
+  merged_at: string | null;
+  html_url: string;
+  head: { sha: string };
+  base: { ref: string };
+  body: string | null;
+}
+
 // ── Error types ──────────────────────────────────────────────────────────────
 
 /**
@@ -101,6 +129,18 @@ export interface GitHubApiClient {
     repo: string,
     sha: string,
   ): Promise<GitHubPullRequestRef[] | null>;
+
+  /**
+   * Get full PR details including body.
+   *
+   * Uses `GET /repos/{owner}/{repo}/pulls/{number}`.
+   * Returns null on 404, throws on auth/rate-limit errors.
+   */
+  getPullRequest(
+    owner: string,
+    repo: string,
+    number: number,
+  ): Promise<GitHubPullRequestDetail | null>;
 }
 
 export function createGitHubApiClient(
@@ -181,6 +221,19 @@ export function createGitHubApiClient(
 
       return data.map(mapPullRequest);
     },
+
+    async getPullRequest(
+      owner: string,
+      repo: string,
+      number: number,
+    ): Promise<GitHubPullRequestDetail | null> {
+      const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${encodeURIComponent(String(number))}`;
+      const { data, error } = await request<RawPullRequestDetail>(path);
+
+      if (error) throw error;
+      if (data === null) return null;
+      return mapPullRequestDetail(data);
+    },
   };
 }
 
@@ -194,5 +247,19 @@ export function mapPullRequest(raw: RawPullRequest): GitHubPullRequestRef {
     htmlUrl: raw.html_url,
     headSha: raw.head.sha,
     baseRef: raw.base.ref,
+  };
+}
+
+/** Map a raw detailed PR object to our typed detail. Exported for tests. */
+export function mapPullRequestDetail(raw: RawPullRequestDetail): GitHubPullRequestDetail {
+  return {
+    number: raw.number,
+    title: raw.title,
+    state: raw.state,
+    mergedAt: raw.merged_at,
+    htmlUrl: raw.html_url,
+    headSha: raw.head.sha,
+    baseRef: raw.base.ref,
+    body: raw.body,
   };
 }

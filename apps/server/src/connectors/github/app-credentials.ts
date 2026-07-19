@@ -134,13 +134,19 @@ async function exchangeJwtForToken(
     );
   }
 
-  const data = (await response.json()) as InstallationTokenResponse;
-  if (typeof data.token !== 'string' || typeof data.expires_at !== 'string') {
+  const data = (await response.json()) as Record<string, unknown>;
+  const token = data['token'];
+  const expiresAt = data['expires_at'];
+  if (typeof token !== 'string' || typeof expiresAt !== 'string') {
+    const missing: string[] = [];
+    if (typeof token !== 'string') missing.push('token');
+    if (typeof expiresAt !== 'string') missing.push('expires_at');
     throw new Error(
-      `GitHub App token exchange returned an unexpected shape: ${JSON.stringify(data).slice(0, 200)}`,
+      `GitHub App token exchange returned an unexpected shape: missing or invalid field(s) ${missing.join(', ')} ` +
+      `(got keys: ${Object.keys(data).join(', ') || 'none'})`,
     );
   }
-  return data;
+  return { token, expires_at: expiresAt };
 }
 
 // ── Token cache ─────────────────────────────────────────────────────────────
