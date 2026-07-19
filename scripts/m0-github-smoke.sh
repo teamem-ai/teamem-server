@@ -820,8 +820,9 @@ test_idempotency() {
 
 # ── 8b. Redaction test (§5.3) ──────────────────────────────────────────────
 # Verifies that <private> content is stripped before persistence.
-# Creates a synthetic payload with a <private> tag in the body and confirms
-# the private content does not appear in the stored event.
+# Uses a pull_request_review payload because the comment normalizer does NOT
+# self-redact (unlike push/issue normalizers). This tests the actual redaction
+# pipeline (red line 5.3: receive → validate → stripPrivateTags → persist).
 test_redaction() {
   header "8b. Redaction Verification (§5.3)"
 
@@ -834,30 +835,36 @@ test_redaction() {
   local redact_ts="redact-${TIMESTAMP}"
   local redact_payload="${SMOKE_TMP}/redact-payload.json"
 
-  # Synthetic GitHub issues payload with <private> content in both title and body
+  # Synthetic pull_request_review payload with <private> content in the
+  # review body. The comment normalizer (comments.ts) does NOT self-redact —
+  # it relies on the ingestion pipeline's stripPrivateTags step (§5.3).
+  # If <private> content leaks into the stored payload, redaction is broken.
   jq -n --arg ts "$redact_ts" '{
-    action: "opened",
-    issue: {
+    action: "submitted",
+    pull_request: {
       number: 99999,
-      title: "Public title <private>SECRET_KEY=abc123</private> rest",
-      body: "Normal body <private>INTERNAL_NOTES</private> more text",
-      created_at: "2026-07-19T00:00:00Z",
-      updated_at: "2026-07-19T00:00:00Z",
-      html_url: "https://github.com/test/repo/issues/99999",
-      user: { login: "test-user", id: 12345, type: "User" }
+      title: "Test PR",
+      html_url: "https://github.com/test/repo/pull/99999",
+      user: { login: "pr-author", id: 11111, type: "User" }
+    },
+    review: {
+      id: 88888,
+      body: "Public review start <private>SECRET_TOKEN=xyz789</private> public review end",
+      html_url: "https://github.com/test/repo/pull/99999#pullrequestreview-88888",
+      submitted_at: "2026-07-19T00:00:00Z",
+      user: { login: "reviewer", id: 22222, type: "User" }
     },
     repository: {
       full_name: "test/repo",
       owner: { login: "test" },
       name: "repo"
     },
-    sender: { login: "test-user", id: 12345, type: "User" }
+    sender: { login: "reviewer", id: 22222, type: "User" }
   }' > "$redact_payload"
 
-  info "Delivering synthetic payload with <private> tags..."
-  local resp http_code
-  deliver_payload "issues" "$redact_ts" "$redact_payload"
-  http_code=$?
+  info "Delivering synthetic PR review payload with <private> tags..."
+  deliver_payload "pull_request_review" "$redact_ts" "$redact_payload"
+  local http_code="$DELIVER_HTTP_CODE"
 
   if [[ "$http_code" != "200" ]]; then
     fail "Redaction test: HTTP $http_code — cannot verify"
@@ -868,34 +875,34 @@ test_redaction() {
   local ingested_id
   ingested_id="$(echo "$DELIVER_BODY" | jq -r '.events[0].eventId // empty')"
   if [[ -z "$ingested_id" ]]; then
-    fail "Redaction test: no event produced"
+    fail "Redaction test: no event produced (may need pull_request_review support in endpoint)"
     inc_fail
     return
   fi
 
   info "  Event ID: $ingested_id"
 
-  # Check via psql that private content was stripped
-  local stored_title stored_body
-  stored_title="$(psql "$DATABASE_URL" -t -A -c \
-    "SELECT payload->>'title' FROM events WHERE id = '${ingested_id}'" 2>/dev/null || echo '')"
+  # Check via psql that <private> content was stripped from the stored payload.
+  # The comment normalizer stores the review body in the payload; the ingestion
+  # pipeline must have stripped <private> sections before persist (§5.3).
+  local stored_body
   stored_body="$(psql "$DATABASE_URL" -t -A -c \
     "SELECT payload->>'body' FROM events WHERE id = '${ingested_id}'" 2>/dev/null || echo '')"
 
-  if echo "$stored_title" | grep -q '<private>'; then
-    fail "Redaction (§5.3): <private> tag LEAKED in stored issue title"
-    inc_fail
-  else
-    pass "Redaction (§5.3): <private> stripped from issue title"
-    inc_pass
-  fi
-
   if echo "$stored_body" | grep -q '<private>'; then
-    fail "Redaction (§5.3): <private> tag LEAKED in stored issue body"
+    fail "Redaction (§5.3): <private> tag LEAKED in stored review body — redaction pipeline broken"
+    inc_fail
+  elif echo "$stored_body" | grep -q 'SECRET_TOKEN'; then
+    fail "Redaction (§5.3): SECRET_TOKEN leaked in stored body"
     inc_fail
   else
-    pass "Redaction (§5.3): <private> stripped from issue body"
+    pass "Redaction (§5.3): <private> content stripped from review body"
     inc_pass
+    # Also verify the public parts survived
+    if echo "$stored_body" | grep -q 'Public review start' && echo "$stored_body" | grep -q 'public review end'; then
+      pass "Redaction (§5.3): public content preserved in review body"
+      inc_pass
+    fi
   fi
 
   # Cleanup the synthetic test row
