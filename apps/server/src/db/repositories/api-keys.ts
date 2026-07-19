@@ -67,6 +67,31 @@ export interface AuthContext {
   readonly createdAt: Date;
 }
 
+// ── Scope validation (extracted for unit-testability) ────────────────────────
+
+/**
+ * Validate raw scope strings against the frozen ApiScope Zod enum and enforce
+ * the N7 invariant (read:payload requires read).
+ *
+ * This is called by {@link resolveTokenHash} as a defense-in-depth check; the
+ * primary enforcement is the database CHECK constraint `api_keys_scope_superset_ck`.
+ *
+ * @throws AuthenticationError if scopes are invalid or violate the N7 invariant
+ */
+export function validateApiKeyScopes(rawScopes: string[]): ApiScope[] {
+  const parsedScopes = z.array(apiScope).safeParse(rawScopes);
+  if (!parsedScopes.success) {
+    throw new AuthenticationError('invalid or revoked API key');
+  }
+  const scopes = parsedScopes.data;
+
+  if (scopes.includes('read:payload') && !scopes.includes('read')) {
+    throw new AuthenticationError('invalid or revoked API key');
+  }
+
+  return scopes;
+}
+
 // ── Main resolution function ────────────────────────────────────────────────
 
 /**
@@ -175,19 +200,8 @@ export async function resolveTokenHash(
     scope = projectScope(keyRow.teamId, keyRow.projectId);
   }
 
-  // Step 5: Validate scopes against the frozen Zod enum (defense-in-depth).
-  // The DB CHECK constraint is the primary guarantee; this catches logic errors at the
-  // app boundary before anything downstream consumes potentially invalid data.
-  const parsedScopes = z.array(apiScope).safeParse(keyRow.scopes);
-  if (!parsedScopes.success) {
-    throw new AuthenticationError('invalid or revoked API key');
-  }
-  const scopes = parsedScopes.data;
-
-  // Defense-in-depth: verify the N7 invariant at the application layer.
-  if (scopes.includes('read:payload') && !scopes.includes('read')) {
-    throw new AuthenticationError('invalid or revoked API key');
-  }
+  // Step 5: Validate scopes and enforce the N7 invariant (defense-in-depth).
+  const scopes = validateApiKeyScopes(keyRow.scopes);
 
   return {
     credentialId: keyRow.id,

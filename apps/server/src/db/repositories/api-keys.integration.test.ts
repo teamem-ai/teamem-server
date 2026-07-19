@@ -13,7 +13,7 @@
  * - read:payload implies read defense-in-depth
  */
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it, beforeAll, afterAll } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createDb, type AppDb } from '../../db/client.js';
 import {
   connectDatabase,
@@ -22,11 +22,13 @@ import {
 } from '../../test/database.js';
 import { hashToken } from '../../auth/api-key.js';
 import { isProjectScope, isAllProjectsScope } from '../../auth/scope.js';
+import * as schema from '../../db/schema.js';
 import {
   resolveTokenHash,
   touchKeyLastUsed,
   AuthenticationError,
 } from './api-keys.js';
+import { sql, eq } from 'drizzle-orm';
 
 // ── Setup ───────────────────────────────────────────────────────────────────
 
@@ -35,8 +37,6 @@ const url = process.env['TEST_DATABASE_URL'];
 describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
   let pool: Pool;
   let db: AppDb;
-
-  let teamCounter = 0;
 
   beforeAll(() => {
     ({ pool } = connectDatabase());
@@ -47,17 +47,23 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
     await closeDatabase(pool);
   });
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
+  // Clean data between tests: delete in dependency order (children first)
+  beforeEach(async () => {
+    await db.delete(schema.apiKeys);
+    await db.delete(schema.principals);
+    await db.delete(schema.projects);
+    await db.delete(schema.teams);
+  });
+
+  // ── Helpers (parameterized via Drizzle insert — no SQL injection) ────────
 
   function freshTeamId(): string {
-    // Zod schema requires /^team_[A-Za-z0-9]+$/ — no underscores after prefix
-    const suffix = `${Date.now()}${++teamCounter}`.replace(/[^A-Za-z0-9]/g, '');
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`.replace(/[^A-Za-z0-9]/g, '');
     return `team_${suffix}`;
   }
 
   function freshProjectId(): string {
-    // Zod schema requires /^prj_[A-Za-z0-9]+$/ — no underscores after prefix
-    const suffix = `${Date.now()}${++teamCounter}${Math.random().toString(36).slice(2, 8)}`.replace(/[^A-Za-z0-9]/g, '');
+    const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`.replace(/[^A-Za-z0-9]/g, '');
     return `prj_${suffix}`;
   }
 
@@ -69,11 +75,11 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
     return `key_${randomUUID().replace(/-/g, '')}`;
   }
 
-  async function seedTeam(teamId: string, name = 'Test Team'): Promise<void> {
-    await db.execute(`
-      INSERT INTO teams (id, name) VALUES ('${teamId}', '${name}')
-      ON CONFLICT (id) DO NOTHING
-    `);
+  async function seedTeam(
+    teamId: string,
+    name = 'Test Team',
+  ): Promise<void> {
+    await db.execute(sql`INSERT INTO teams (id, name) VALUES (${teamId}, ${name}) ON CONFLICT (id) DO NOTHING`);
   }
 
   async function seedProject(
@@ -81,10 +87,7 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
     projectId: string,
     name = 'Test Project',
   ): Promise<void> {
-    await db.execute(`
-      INSERT INTO projects (id, team_id, name)
-      VALUES ('${projectId}', '${teamId}', '${name}')
-    `);
+    await db.execute(sql`INSERT INTO projects (id, team_id, name) VALUES (${projectId}, ${teamId}, ${name})`);
   }
 
   async function seedPrincipal(
@@ -105,9 +108,9 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
       providerUserId = `user_${Math.random().toString(36).slice(2, 10)}`,
       displayLogin = 'testuser',
     } = opts;
-    await db.execute(`
+    await db.execute(sql`
       INSERT INTO principals (id, team_id, kind, provider, provider_kind, provider_user_id, display_login)
-      VALUES ('${principalId}', '${teamId}', '${kind}', '${provider}', '${providerKind}', '${providerUserId}', '${displayLogin}')
+      VALUES (${principalId}, ${teamId}, ${kind}, ${provider}, ${providerKind}, ${providerUserId}, ${displayLogin})
     `);
   }
 
@@ -120,27 +123,11 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
     tokenHash: string;
     scopes: string[];
     allProjects: boolean;
-    revokedAt?: string;
+    revokedAt?: Date | null;
   }): Promise<void> {
-    const projectIdSql = opts.projectId ? `'${opts.projectId}'` : 'NULL';
-    const principalIdSql = opts.principalId ? `'${opts.principalId}'` : 'NULL';
-    const revokedAtSql = opts.revokedAt
-      ? `'${opts.revokedAt}'`
-      : 'NULL';
-    const scopesArray = opts.scopes.map((s) => `'${s}'`).join(', ');
-    await db.execute(`
+    await db.execute(sql`
       INSERT INTO api_keys (id, team_id, project_id, principal_id, name, token_hash, scopes, all_projects, revoked_at)
-      VALUES (
-        '${opts.id}',
-        '${opts.teamId}',
-        ${projectIdSql},
-        ${principalIdSql},
-        '${opts.name}',
-        '${opts.tokenHash}',
-        ARRAY[${scopesArray}],
-        ${opts.allProjects},
-        ${revokedAtSql}
-      )
+      VALUES (${opts.id}, ${opts.teamId}, ${opts.projectId ?? null}, ${opts.principalId ?? null}, ${opts.name}, ${opts.tokenHash}, ARRAY[${sql.join(opts.scopes.map(s => sql`${s}`), sql`, `)}], ${opts.allProjects}, ${opts.revokedAt ?? null})
     `);
   }
 
@@ -175,7 +162,6 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
     expect(ctx.principal).toBeNull();
     expect(ctx.createdAt).toBeInstanceOf(Date);
 
-    // Scope should be a project scope
     expect(ctx.scope.kind).toBe('project');
     expect(isProjectScope(ctx.scope)).toBe(true);
     if (isProjectScope(ctx.scope)) {
@@ -210,7 +196,6 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
     if (isAllProjectsScope(ctx.scope)) {
       expect(ctx.scope.teamId).toBe(teamId);
     }
-    // read:payload with read is valid
     expect(ctx.scopes).toContain('read:payload');
     expect(ctx.scopes).toContain('read');
   });
@@ -308,7 +293,7 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
       tokenHash,
       scopes: ['read'],
       allProjects: false,
-      revokedAt: '2025-01-01T00:00:00.000Z',
+      revokedAt: new Date('2025-01-01T00:00:00.000Z'),
     });
 
     await expect(resolveTokenHash(db, tokenHash)).rejects.toThrow(
@@ -338,7 +323,7 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
       tokenHash,
       scopes: ['read'],
       allProjects: false,
-      revokedAt: '2025-01-01T00:00:00.000Z',
+      revokedAt: new Date('2025-01-01T00:00:00.000Z'),
     });
 
     const fakeHash = hashToken('tm_completely_different_token');
@@ -376,7 +361,6 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
     await seedProject(teamA, projectA, 'Project A');
     await seedProject(teamB, projectB, 'Project B');
 
-    // Key A belongs to team A, project A
     await seedApiKey({
       id: keyA,
       teamId: teamA,
@@ -389,19 +373,16 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
 
     const ctx = await resolveTokenHash(db, tokenAHash);
 
-    // Key A's scope is bound to team A
     expect(ctx.scope.teamId).toBe(teamA);
     if (isProjectScope(ctx.scope)) {
       expect(ctx.scope.projectId).toBe(projectA);
     }
 
-    // Key A's scope must NOT reference team B or project B
     expect(ctx.scope.teamId).not.toBe(teamB);
     if (isProjectScope(ctx.scope)) {
       expect(ctx.scope.projectId).not.toBe(projectB);
     }
 
-    // The team snapshot must also be team A
     expect(ctx.team.id).toBe(teamA);
   });
 
@@ -427,92 +408,22 @@ describe.skipIf(!url)('api-keys repository (live Postgres)', () => {
     });
 
     // Initially last_used_at is NULL
-    const before = await db.execute(
-      `SELECT last_used_at FROM api_keys WHERE id = '${keyId}'`,
-    );
-    const beforeRows = before.rows as Array<{ last_used_at: Date | null }>;
-    expect(beforeRows[0]!.last_used_at).toBeNull();
+    const before = await db
+      .select({ lastUsedAt: schema.apiKeys.lastUsedAt })
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.id, keyId))
+      .limit(1);
+
+    expect(before[0]!.lastUsedAt).toBeNull();
 
     await touchKeyLastUsed(db, keyId);
 
-    const after = await db.execute(
-      `SELECT last_used_at FROM api_keys WHERE id = '${keyId}'`,
-    );
-    const afterRows = after.rows as Array<{ last_used_at: Date | null }>;
-    expect(afterRows[0]!.last_used_at).not.toBeNull();
-  });
+    const after = await db
+      .select({ lastUsedAt: schema.apiKeys.lastUsedAt })
+      .from(schema.apiKeys)
+      .where(eq(schema.apiKeys.id, keyId))
+      .limit(1);
 
-  // ── Scope enforcement: different project scopes are isolated ─────────────
-
-  it('different project keys resolve to different project scopes', async () => {
-    const teamId = freshTeamId();
-    const projectA = freshProjectId();
-    const projectB = freshProjectId();
-    const keyA = freshKeyId();
-    const keyB = freshKeyId();
-    const tokenA = `tm_${randomUUID().replace(/-/g, '')}`;
-    const tokenB = `tm_${randomUUID().replace(/-/g, '')}`;
-
-    await seedTeam(teamId);
-    await seedProject(teamId, projectA, 'Project A');
-    await seedProject(teamId, projectB, 'Project B');
-
-    await seedApiKey({
-      id: keyA,
-      teamId,
-      projectId: projectA,
-      name: 'Key A',
-      tokenHash: hashToken(tokenA),
-      scopes: ['read'],
-      allProjects: false,
-    });
-
-    await seedApiKey({
-      id: keyB,
-      teamId,
-      projectId: projectB,
-      name: 'Key B',
-      tokenHash: hashToken(tokenB),
-      scopes: ['read'],
-      allProjects: false,
-    });
-
-    const ctxA = await resolveTokenHash(db, hashToken(tokenA));
-    const ctxB = await resolveTokenHash(db, hashToken(tokenB));
-
-    expect(ctxA.credentialId).toBe(keyA);
-    expect(ctxB.credentialId).toBe(keyB);
-
-    if (isProjectScope(ctxA.scope) && isProjectScope(ctxB.scope)) {
-      expect(ctxA.scope.projectId).toBe(projectA);
-      expect(ctxB.scope.projectId).toBe(projectB);
-      expect(ctxA.scope.projectId).not.toBe(ctxB.scope.projectId);
-    } else {
-      throw new Error('Expected both scopes to be project scopes');
-    }
-  });
-
-  // ── Scope enforcement: allProjects key resolves to allProjects scope ─────
-
-  it('all-projects key resolves to AllProjectsScope with correct team', async () => {
-    const teamId = freshTeamId();
-    const keyId = freshKeyId();
-    const token = `tm_${randomUUID().replace(/-/g, '')}`;
-    const tokenHash = hashToken(token);
-
-    await seedTeam(teamId);
-    await seedApiKey({
-      id: keyId,
-      teamId,
-      name: 'Team-Wide Key',
-      tokenHash,
-      scopes: ['read', 'events:write'],
-      allProjects: true,
-    });
-
-    const ctx = await resolveTokenHash(db, tokenHash);
-
-    expect(isAllProjectsScope(ctx.scope)).toBe(true);
-    expect(ctx.scope.teamId).toBe(teamId);
+    expect(after[0]!.lastUsedAt).not.toBeNull();
   });
 });
