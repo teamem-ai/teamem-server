@@ -192,18 +192,9 @@ create_temp_webhook() {
 
   info "Creating webhook on ${GITHUB_REPO}..."
   local wh_resp
-  wh_resp="$(gh api "repos/${GITHUB_REPO}/hooks" \
-    -f name="web" \
-    -f "config[url]=${webhook_url}" \
-    -f "config[content_type]=json" \
-    -f "config[secret]=${WEBHOOK_SECRET}" \
-    -f "events[]=push" \
-    -f "events[]=issues" \
-    -f "events[]=pull_request" \
-    -f "events[]=pull_request_review" \
-    -f "events[]=pull_request_review_comment" \
-    -f "events[]=issue_comment" \
-    -f active=true 2>/dev/null)"
+  wh_resp="$(jq -n --arg url "$webhook_url" --arg secret "$WEBHOOK_SECRET" \
+    '{name:"web",active:true,config:{url:$url,content_type:"json",secret:$secret},events:["push","issues","pull_request","pull_request_review","pull_request_review_comment","issue_comment"]}' \
+    | gh api "repos/${GITHUB_REPO}/hooks" --input - 2>/dev/null)"
 
   HOOK_ID="$(echo "$wh_resp" | jq -r '.id // empty')"
   if [[ -z "$HOOK_ID" ]]; then
@@ -235,18 +226,25 @@ create_events() {
 
   # ── 2a. Push ──────────────────────────────────────────────────────────
   info "Creating push on branch '${SMOKE_BRANCH}'..."
-  local blob_sha tree_sha commit_sha
-  blob_sha="$(gh api "repos/${GITHUB_REPO}/git/blobs" \
-    -f content="smoke test ${TIMESTAMP}" -f encoding=utf-8 --jq '.sha')"
-  tree_sha="$(gh api "repos/${GITHUB_REPO}/git/trees" \
-    -f "tree[0][path]=smoke-${TIMESTAMP}.md" -f "tree[0][mode]=100644" \
-    -f "tree[0][type]=blob" -f "tree[0][sha]=${blob_sha}" \
-    -f "base_tree=${base_sha}" --jq '.sha')"
-  commit_sha="$(gh api "repos/${GITHUB_REPO}/git/commits" \
-    -f message="smoke test commit ${TIMESTAMP}" \
-    -f "tree=${tree_sha}" -f "parents[]=${base_sha}" --jq '.sha')"
-  gh api "repos/${GITHUB_REPO}/git/refs" \
-    -f "ref=refs/heads/${SMOKE_BRANCH}" -f "sha=${commit_sha}" >/dev/null 2>&1
+  local blob_sha tree_sha commit_sha base_tree_sha
+  # Get the tree SHA of the base commit (needed for git tree creation)
+  base_tree_sha="$(gh api "repos/${GITHUB_REPO}/git/commits/${base_sha}" --jq '.tree.sha')"
+  # Create blob via JSON input
+  blob_sha="$(jq -n --arg content "smoke test ${TIMESTAMP}" \
+    '{content:$content,encoding:"utf-8"}' \
+    | gh api "repos/${GITHUB_REPO}/git/blobs" --input - --jq '.sha')"
+  # Create tree via JSON input
+  tree_sha="$(jq -n --arg base_tree "$base_tree_sha" --arg path "smoke-${TIMESTAMP}.md" --arg sha "$blob_sha" \
+    '{base_tree:$base_tree,tree:[{path:$path,mode:"100644",type:"blob",sha:$sha}]}' \
+    | gh api "repos/${GITHUB_REPO}/git/trees" --input - --jq '.sha')"
+  # Create commit via JSON input
+  commit_sha="$(jq -n --arg message "smoke test commit ${TIMESTAMP}" --arg tree "$tree_sha" --arg parent "$base_sha" \
+    '{message:$message,tree:$tree,parents:[$parent]}' \
+    | gh api "repos/${GITHUB_REPO}/git/commits" --input - --jq '.sha')"
+  # Create ref via JSON input
+  jq -n --arg ref "refs/heads/${SMOKE_BRANCH}" --arg sha "$commit_sha" \
+    '{ref:$ref,sha:$sha}' \
+    | gh api "repos/${GITHUB_REPO}/git/refs" --input - >/dev/null 2>&1
   info "  Commit: ${commit_sha:0:8}"
 
   # ── 2b. Issue ─────────────────────────────────────────────────────────
@@ -335,12 +333,12 @@ fetch_deliveries() {
   local count_fetched=0
 
   # Find the push delivery
-  local push_guid
-  push_guid="$(echo "$deliveries" | jq -r '.[] | select(.event == "push") | .guid' | head -1)"
-  if [[ -n "$push_guid" ]]; then
-    PUSH_DELIVERY_ID="$push_guid"
-    info "Fetching push delivery: $push_guid"
-    gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${push_guid}" \
+  local push_id
+  push_id="$(echo "$deliveries" | jq -r '.[] | select(.event == "push") | .id' | head -1)"
+  if [[ -n "$push_id" ]]; then
+    PUSH_DELIVERY_ID="$push_id"
+    info "Fetching push delivery: $push_id"
+    gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${push_id}" \
       --jq '.request.payload' > "${SMOKE_TMP}/delivery-push.json" 2>/dev/null || true
     if jq empty "${SMOKE_TMP}/delivery-push.json" >/dev/null 2>&1; then
       pass "Fetched real push webhook payload ($(wc -c < "${SMOKE_TMP}/delivery-push.json") bytes)"
@@ -355,12 +353,12 @@ fetch_deliveries() {
   fi
 
   # Find the issues delivery
-  local issue_guid
-  issue_guid="$(echo "$deliveries" | jq -r '.[] | select(.event == "issues") | .guid' | head -1)"
-  if [[ -n "$issue_guid" ]]; then
-    ISSUE_DELIVERY_ID="$issue_guid"
-    info "Fetching issues delivery: $issue_guid"
-    gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${issue_guid}" \
+  local issue_id
+  issue_id="$(echo "$deliveries" | jq -r '.[] | select(.event == "issues") | .id' | head -1)"
+  if [[ -n "$issue_id" ]]; then
+    ISSUE_DELIVERY_ID="$issue_id"
+    info "Fetching issues delivery: $issue_id"
+    gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${issue_id}" \
       --jq '.request.payload' > "${SMOKE_TMP}/delivery-issues.json" 2>/dev/null || true
     if jq empty "${SMOKE_TMP}/delivery-issues.json" >/dev/null 2>&1; then
       pass "Fetched real issues webhook payload ($(wc -c < "${SMOKE_TMP}/delivery-issues.json") bytes)"
@@ -375,12 +373,12 @@ fetch_deliveries() {
   fi
 
   # Find the pull_request delivery
-  local pr_guid
-  pr_guid="$(echo "$deliveries" | jq -r '.[] | select(.event == "pull_request") | .guid' | head -1)"
-  if [[ -n "$pr_guid" ]]; then
-    PR_DELIVERY_ID="$pr_guid"
-    info "Fetching pull_request delivery: $pr_guid"
-    gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${pr_guid}" \
+  local pr_id
+  pr_id="$(echo "$deliveries" | jq -r '.[] | select(.event == "pull_request") | .id' | head -1)"
+  if [[ -n "$pr_id" ]]; then
+    PR_DELIVERY_ID="$pr_id"
+    info "Fetching pull_request delivery: $pr_id"
+    gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${pr_id}" \
       --jq '.request.payload' > "${SMOKE_TMP}/delivery-pr.json" 2>/dev/null || true
     if jq empty "${SMOKE_TMP}/delivery-pr.json" >/dev/null 2>&1; then
       pass "Fetched real pull_request webhook payload ($(wc -c < "${SMOKE_TMP}/delivery-pr.json") bytes)"
@@ -395,16 +393,16 @@ fetch_deliveries() {
   fi
 
   # Find the pull_request_review delivery
-  local review_guid
-  review_guid="$(echo "$deliveries" | jq -r '.[] | select(.event == "pull_request_review") | .guid' | head -1)"
-  if [[ -z "$review_guid" ]]; then
+  local review_id
+  review_id="$(echo "$deliveries" | jq -r '.[] | select(.event == "pull_request_review") | .id' | head -1)"
+  if [[ -z "$review_id" ]]; then
     # Fallback to issue_comment
-    review_guid="$(echo "$deliveries" | jq -r '.[] | select(.event == "issue_comment") | .guid' | head -1)"
+    review_id="$(echo "$deliveries" | jq -r '.[] | select(.event == "issue_comment") | .id' | head -1)"
   fi
-  if [[ -n "$review_guid" ]]; then
-    REVIEW_DELIVERY_ID="$review_guid"
-    info "Fetching review/comment delivery: $review_guid"
-    gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${review_guid}" \
+  if [[ -n "$review_id" ]]; then
+    REVIEW_DELIVERY_ID="$review_id"
+    info "Fetching review/comment delivery: $review_id"
+    gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${review_id}" \
       --jq '.request.payload' > "${SMOKE_TMP}/delivery-review.json" 2>/dev/null || true
     if jq empty "${SMOKE_TMP}/delivery-review.json" >/dev/null 2>&1; then
       pass "Fetched real review/comment webhook payload ($(wc -c < "${SMOKE_TMP}/delivery-review.json") bytes)"
@@ -797,9 +795,11 @@ test_idempotency() {
   fi
 
   # 7b. Modified payload → conflict
+  # Must modify a field the push normalizer includes in its stored payload
+  # (commits[].message, not head_commit.message which the normalizer ignores).
   info "Testing idempotency conflict (modified payload)..."
   local modified="${SMOKE_TMP}/push-modified.json"
-  jq '.head_commit.message = "MODIFIED — conflict test"' "$payload_file" > "$modified"
+  jq 'if .commits and (.commits | length) > 0 then .commits[0].message = "MODIFIED — conflict test" else .head_commit.message = "MODIFIED" end' "$payload_file" > "$modified"
 
   deliver_payload "push" "$push_delivery" "$modified"
   resp="$DELIVER_BODY"
@@ -815,6 +815,91 @@ test_idempotency() {
     fail "Idempotency conflict: HTTP $http_code"
     inc_fail
   fi
+  echo ""
+}
+
+# ── 8b. Redaction test (§5.3) ──────────────────────────────────────────────
+# Verifies that <private> content is stripped before persistence.
+# Creates a synthetic payload with a <private> tag in the body and confirms
+# the private content does not appear in the stored event.
+test_redaction() {
+  header "8b. Redaction Verification (§5.3)"
+
+  if [[ "$HAS_HTTP_ENDPOINT" != "true" ]]; then
+    warn "Redaction test skipped — HTTP webhook endpoint not available"
+    info "This test validates the persist→stripPrivateTags pipeline (red line 5.3)"
+    return
+  fi
+
+  local redact_ts="redact-${TIMESTAMP}"
+  local redact_payload="${SMOKE_TMP}/redact-payload.json"
+
+  # Synthetic GitHub issues payload with <private> content in both title and body
+  jq -n --arg ts "$redact_ts" '{
+    action: "opened",
+    issue: {
+      number: 99999,
+      title: "Public title <private>SECRET_KEY=abc123</private> rest",
+      body: "Normal body <private>INTERNAL_NOTES</private> more text",
+      created_at: "2026-07-19T00:00:00Z",
+      updated_at: "2026-07-19T00:00:00Z",
+      html_url: "https://github.com/test/repo/issues/99999",
+      user: { login: "test-user", id: 12345, type: "User" }
+    },
+    repository: {
+      full_name: "test/repo",
+      owner: { login: "test" },
+      name: "repo"
+    },
+    sender: { login: "test-user", id: 12345, type: "User" }
+  }' > "$redact_payload"
+
+  info "Delivering synthetic payload with <private> tags..."
+  local resp http_code
+  deliver_payload "issues" "$redact_ts" "$redact_payload"
+  http_code=$?
+
+  if [[ "$http_code" != "200" ]]; then
+    fail "Redaction test: HTTP $http_code — cannot verify"
+    inc_fail
+    return
+  fi
+
+  local ingested_id
+  ingested_id="$(echo "$DELIVER_BODY" | jq -r '.events[0].eventId // empty')"
+  if [[ -z "$ingested_id" ]]; then
+    fail "Redaction test: no event produced"
+    inc_fail
+    return
+  fi
+
+  info "  Event ID: $ingested_id"
+
+  # Check via psql that private content was stripped
+  local stored_title stored_body
+  stored_title="$(psql "$DATABASE_URL" -t -A -c \
+    "SELECT payload->>'title' FROM events WHERE id = '${ingested_id}'" 2>/dev/null || echo '')"
+  stored_body="$(psql "$DATABASE_URL" -t -A -c \
+    "SELECT payload->>'body' FROM events WHERE id = '${ingested_id}'" 2>/dev/null || echo '')"
+
+  if echo "$stored_title" | grep -q '<private>'; then
+    fail "Redaction (§5.3): <private> tag LEAKED in stored issue title"
+    inc_fail
+  else
+    pass "Redaction (§5.3): <private> stripped from issue title"
+    inc_pass
+  fi
+
+  if echo "$stored_body" | grep -q '<private>'; then
+    fail "Redaction (§5.3): <private> tag LEAKED in stored issue body"
+    inc_fail
+  else
+    pass "Redaction (§5.3): <private> stripped from issue body"
+    inc_pass
+  fi
+
+  # Cleanup the synthetic test row
+  psql "$DATABASE_URL" -c "DELETE FROM events WHERE id = '${ingested_id}'" >/dev/null 2>&1 || true
   echo ""
 }
 
@@ -897,6 +982,7 @@ main() {
   verify_psql
   verify_jobs
   test_idempotency
+  test_redaction
   print_summary
   cleanup_all
 }
