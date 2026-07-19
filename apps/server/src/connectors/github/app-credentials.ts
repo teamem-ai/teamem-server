@@ -25,6 +25,7 @@
  */
 
 import { createSign, createPrivateKey } from 'node:crypto';
+import { z } from 'zod';
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
@@ -90,13 +91,16 @@ function generateAppJwt(appId: string, privateKeyPem: string): string {
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
-/** GitHub's response from POST /app/installations/{id}/access_tokens */
-interface InstallationTokenResponse {
-  token: string;
-  expires_at: string; // ISO 8601 UTC
-  permissions?: Record<string, string>;
-  repository_selection?: string;
-}
+/**
+ * Zod schema for the installation token response from GitHub.
+ * Cross-boundary input — must be validated before any field is read.
+ */
+const installationTokenResponseSchema = z.object({
+  token: z.string().min(1),
+  expires_at: z.string().min(1),
+}).passthrough();
+
+type InstallationTokenResponse = z.infer<typeof installationTokenResponseSchema>;
 
 /**
  * Exchange a JWT for an installation access token.
@@ -134,19 +138,17 @@ async function exchangeJwtForToken(
     );
   }
 
-  const data = (await response.json()) as Record<string, unknown>;
-  const token = data['token'];
-  const expiresAt = data['expires_at'];
-  if (typeof token !== 'string' || typeof expiresAt !== 'string') {
-    const missing: string[] = [];
-    if (typeof token !== 'string') missing.push('token');
-    if (typeof expiresAt !== 'string') missing.push('expires_at');
+  const rawData: unknown = await response.json();
+  const parsed = installationTokenResponseSchema.safeParse(rawData);
+  if (!parsed.success) {
+    const issueMessages = parsed.error.issues
+      .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('; ');
     throw new Error(
-      `GitHub App token exchange returned an unexpected shape: missing or invalid field(s) ${missing.join(', ')} ` +
-      `(got keys: ${Object.keys(data).join(', ') || 'none'})`,
+      `GitHub App token exchange returned an unexpected shape: ${issueMessages}`.slice(0, 300),
     );
   }
-  return { token, expires_at: expiresAt };
+  return parsed.data;
 }
 
 // ── Token cache ─────────────────────────────────────────────────────────────

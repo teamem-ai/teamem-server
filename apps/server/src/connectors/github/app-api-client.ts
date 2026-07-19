@@ -2,68 +2,76 @@
  * Minimal GitHub App API client (DUA-147 / M0-GH-07).
  *
  * Thin wrapper around `fetch` for GitHub's REST API. Uses the credentials
- * provider for authentication. Only implements the endpoints the anchor
- * resolver needs — deliberately minimal, not a general-purpose GitHub client.
+ * provider for authentication when available; falls back to unauthenticated
+ * access for public repositories.
  *
  * Endpoints:
  *   - GET /repos/{owner}/{repo}/commits/{sha}/pulls
- *     Lists pull requests associated with a commit. This is the high-confidence
+ *     Lists pull requests associated with a commit. High-confidence
  *     source for commit→PR anchoring.
+ *   - GET /repos/{owner}/{repo}/pulls/{number}
+ *     Full PR details including body (for issue reference extraction).
+ *
+ * Every API response body is Zod-validated before any field is read
+ * (project red line: cross-boundary input must pass Zod). The raw
+ * `response.json()` value is never cast directly to an interface.
  *
  * Error handling:
  *   - 404 → returns `null` (no association — not an error)
- *   - 401/403 → throws (configuration or permission problem)
- *   - Rate limited (429 + Retry-After) → throws after logging
- *   - Other non-2xx → throws
+ *   - 401/403 → throws GitHubApiError
+ *   - Rate limited (429 + Retry-After) → throws GitHubApiError
+ *   - Other non-2xx → throws GitHubApiError
+ *   - Zod validation failure → throws GitHubApiError with server_error code
  *
  * Credentials are never exposed in logs or error messages (§5.3).
  */
 
+import { z } from 'zod';
 import type { GitHubAppCredentialsProvider } from './app-credentials.js';
 
-// ── API types ────────────────────────────────────────────────────────────────
-
-const GITHUB_API_BASE = 'https://api.github.com';
+// ── Zod schemas for GitHub API responses ─────────────────────────────────────
 
 /**
- * Minimal PR shape returned by the commits/{sha}/pulls endpoint.
- * GitHub returns a list of PR objects; we only extract the fields the
- * anchor resolver needs.
+ * Schema for a single PR object returned by GET /repos/{owner}/{repo}/commits/{sha}/pulls.
+ * This is a subset — GitHub returns many more fields, but we only validate
+ * what we consume. `.passthrough()` lets extra fields through without error.
  */
-export interface GitHubPullRequestRef {
-  /** PR number (per-repo, stable). */
-  number: number;
-  /** PR title. */
-  title: string;
-  /** PR state: "open", "closed". */
-  state: string;
-  /** Whether the PR was merged. */
-  mergedAt: string | null;
-  /** The PR's HTML URL. */
-  htmlUrl: string;
-  /** The head commit SHA of the PR. */
-  headSha: string;
-  /** The base branch ref. */
-  baseRef: string;
-}
-
-/** Raw shape from GitHub API (subset we consume). */
-interface RawPullRequest {
-  number: number;
-  title: string;
-  state: string;
-  merged_at: string | null;
-  html_url: string;
-  head: { sha: string };
-  base: { ref: string };
-}
+const rawPullRequestSchema = z
+  .object({
+    number: z.number().int().nonnegative(),
+    title: z.string(),
+    state: z.string(),
+    merged_at: z.string().nullable(),
+    html_url: z.string(),
+    head: z.object({ sha: z.string() }).passthrough(),
+    base: z.object({ ref: z.string() }).passthrough(),
+  })
+  .passthrough();
 
 /**
- * Detailed PR shape from GET /repos/{owner}/{repo}/pulls/{number}.
- * Includes the body field which may contain closing keyword references
- * to issues (e.g. "Closes #42").
+ * Schema for the full PR detail object from GET /repos/{owner}/{repo}/pulls/{number}.
+ * Same base fields plus `body`.
  */
-export interface GitHubPullRequestDetail {
+const rawPullRequestDetailSchema = z
+  .object({
+    number: z.number().int().nonnegative(),
+    title: z.string(),
+    state: z.string(),
+    merged_at: z.string().nullable(),
+    html_url: z.string(),
+    head: z.object({ sha: z.string() }).passthrough(),
+    base: z.object({ ref: z.string() }).passthrough(),
+    body: z.string().nullable(),
+  })
+  .passthrough();
+
+/** Schema for the array returned by GET …/commits/{sha}/pulls. */
+const rawPullRequestArraySchema = z.array(z.unknown());
+
+// ── API types (derived from Zod schemas for consumers) ───────────────────────
+
+/** Validated PR shape from the commits/{sha}/pulls endpoint. */
+export type GitHubPullRequestRef = {
   number: number;
   title: string;
   state: string;
@@ -71,20 +79,19 @@ export interface GitHubPullRequestDetail {
   htmlUrl: string;
   headSha: string;
   baseRef: string;
-  /** PR description/body — may contain "Closes #N" references. */
-  body: string | null;
-}
+};
 
-interface RawPullRequestDetail {
+/** Validated detailed PR shape from the pulls/{number} endpoint. */
+export type GitHubPullRequestDetail = {
   number: number;
   title: string;
   state: string;
-  merged_at: string | null;
-  html_url: string;
-  head: { sha: string };
-  base: { ref: string };
+  mergedAt: string | null;
+  htmlUrl: string;
+  headSha: string;
+  baseRef: string;
   body: string | null;
-}
+};
 
 // ── Error types ──────────────────────────────────────────────────────────────
 
@@ -108,34 +115,38 @@ export class GitHubApiError extends Error {
   }
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const GITHUB_API_BASE = 'https://api.github.com';
+
+/**
+ * Build request headers. When a credentials provider is available, use a
+ * Bearer token; otherwise make an unauthenticated request (works for public
+ * repos at 60 req/hour).
+ */
+async function buildHeaders(
+  credentials: GitHubAppCredentialsProvider | null,
+): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'teamem',
+  };
+  if (credentials) {
+    const token = await credentials.getInstallationToken();
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 // ── Client ───────────────────────────────────────────────────────────────────
 
 export interface GitHubApiClient {
-  /**
-   * List pull requests associated with a commit.
-   *
-   * Uses GitHub's `GET /repos/{owner}/{repo}/commits/{sha}/pulls` endpoint.
-   * This is the canonical, high-confidence association — GitHub returns only
-   * PRs that actually contain this commit in their merge/head history.
-   *
-   * Returns an empty array when the commit is not associated with any PR
-   * (the API returns 200 with `[]`). Returns null when the commit or repo
-   * is not found (404).
-   *
-   * Throws `GitHubApiError` on auth, permission, or rate-limit failures.
-   */
   getPullRequestsForCommit(
     owner: string,
     repo: string,
     sha: string,
   ): Promise<GitHubPullRequestRef[] | null>;
 
-  /**
-   * Get full PR details including body.
-   *
-   * Uses `GET /repos/{owner}/{repo}/pulls/{number}`.
-   * Returns null on 404, throws on auth/rate-limit errors.
-   */
   getPullRequest(
     owner: string,
     repo: string,
@@ -143,26 +154,31 @@ export interface GitHubApiClient {
   ): Promise<GitHubPullRequestDetail | null>;
 }
 
+/**
+ * Create a GitHub API client.
+ *
+ * @param credentials - Optional credentials provider. When absent, requests
+ *   are unauthenticated (public repos only, 60 req/hour rate limit).
+ * @param fetchImpl - Injectable fetch for testing.
+ */
 export function createGitHubApiClient(
-  credentials: GitHubAppCredentialsProvider,
+  credentials: GitHubAppCredentialsProvider | null = null,
   fetchImpl: typeof fetch = fetch,
 ): GitHubApiClient {
-  async function request<T>(
+  /**
+   * Generic request helper. On 404 returns `{data: null}`, on other errors
+   * throws GitHubApiError. The raw JSON body is Zod-validated before being
+   * returned as `data`.
+   */
+  async function request(
     path: string,
-  ): Promise<{ data: T | null; error: GitHubApiError | null }> {
-    const token = await credentials.getInstallationToken();
-
+  ): Promise<{ data: unknown; error: null } | { data: null; error: null }> {
+    const headers = await buildHeaders(credentials);
     const url = `${GITHUB_API_BASE}${path}`;
+
     let response: Response;
     try {
-      response = await fetchImpl(url, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/vnd.github+json',
-          Authorization: `Bearer ${token}`,
-          'User-Agent': 'teamem',
-        },
-      });
+      response = await fetchImpl(url, { method: 'GET', headers });
     } catch (err) {
       throw new GitHubApiError(
         'server_error',
@@ -171,14 +187,27 @@ export function createGitHubApiClient(
       );
     }
 
-    if (response.status === 404) {
+    // 404 = repo/endpoint not found; 422 = commit SHA looks invalid
+    // Both mean "no data for this query" — return null so callers get
+    // an empty result rather than a thrown error.
+    if (response.status === 404 || response.status === 422) {
       return { data: null, error: null };
     }
 
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       const body = await response.text().catch(() => '');
       throw new GitHubApiError(
         'unauthorized',
+        response.status,
+        `GitHub API returned ${response.status}: ${body.slice(0, 200)}`,
+      );
+    }
+
+    if (response.status === 403) {
+      const body = await response.text().catch(() => '');
+      const isRateLimit = body.toLowerCase().includes('rate limit');
+      throw new GitHubApiError(
+        isRateLimit ? 'rate_limited' : 'unauthorized',
         response.status,
         `GitHub API returned ${response.status}: ${body.slice(0, 200)}`,
       );
@@ -202,8 +231,39 @@ export function createGitHubApiClient(
       );
     }
 
-    const data = (await response.json()) as T;
-    return { data, error: null };
+    let rawBody: unknown;
+    try {
+      rawBody = await response.json();
+    } catch (err) {
+      throw new GitHubApiError(
+        'server_error',
+        response.status,
+        `GitHub API returned unparseable JSON: ${String(err).slice(0, 200)}`,
+      );
+    }
+
+    return { data: rawBody, error: null };
+  }
+
+  /**
+   * Parse a raw GitHub API value through a Zod schema, throwing a
+   * GitHubApiError on validation failure. The error message describes which
+   * fields failed but never includes raw API values (which could contain
+   * tokens or sensitive content).
+   */
+  function validate<T>(schema: z.ZodType<T>, raw: unknown, label: string): T {
+    const result = schema.safeParse(raw);
+    if (!result.success) {
+      const issueMessages = result.error.issues
+        .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+        .join('; ');
+      throw new GitHubApiError(
+        'server_error',
+        0,
+        `GitHub API response validation failed for ${label}: ${issueMessages}`.slice(0, 300),
+      );
+    }
+    return result.data;
   }
 
   return {
@@ -213,13 +273,21 @@ export function createGitHubApiClient(
       sha: string,
     ): Promise<GitHubPullRequestRef[] | null> {
       const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(sha)}/pulls`;
-      const { data, error } = await request<RawPullRequest[]>(path);
+      const { data, error } = await request(path);
 
       if (error) throw error;
-      if (data === null) return null; // 404 = commit not found
-      if (!Array.isArray(data)) return [];
+      if (data === null) return null;
 
-      return data.map(mapPullRequest);
+      // 1. Validate it's an array
+      const arr = validate(rawPullRequestArraySchema, data, 'commits/{sha}/pulls (array)');
+
+      // 2. Validate each element
+      const validated: GitHubPullRequestRef[] = [];
+      for (let i = 0; i < arr.length; i++) {
+        const pr = validate(rawPullRequestSchema, arr[i], `commits/{sha}/pulls[${i}]`);
+        validated.push(mapPullRequest(pr));
+      }
+      return validated;
     },
 
     async getPullRequest(
@@ -228,16 +296,23 @@ export function createGitHubApiClient(
       number: number,
     ): Promise<GitHubPullRequestDetail | null> {
       const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${encodeURIComponent(String(number))}`;
-      const { data, error } = await request<RawPullRequestDetail>(path);
+      const { data, error } = await request(path);
 
       if (error) throw error;
       if (data === null) return null;
-      return mapPullRequestDetail(data);
+
+      const pr = validate(rawPullRequestDetailSchema, data, `pulls/${number}`);
+      return mapPullRequestDetail(pr);
     },
   };
 }
 
-/** Map a raw GitHub API PR object to our typed ref. Exported for tests. */
+// ── Mappers (raw Zod-validated shape → consumer-friendly type) ───────────────
+
+type RawPullRequest = z.infer<typeof rawPullRequestSchema>;
+type RawPullRequestDetail = z.infer<typeof rawPullRequestDetailSchema>;
+
+/** Map a Zod-validated PR item to our typed ref. Exported for tests. */
 export function mapPullRequest(raw: RawPullRequest): GitHubPullRequestRef {
   return {
     number: raw.number,
@@ -250,7 +325,7 @@ export function mapPullRequest(raw: RawPullRequest): GitHubPullRequestRef {
   };
 }
 
-/** Map a raw detailed PR object to our typed detail. Exported for tests. */
+/** Map a Zod-validated PR detail to our typed detail. Exported for tests. */
 export function mapPullRequestDetail(raw: RawPullRequestDetail): GitHubPullRequestDetail {
   return {
     number: raw.number,
@@ -263,3 +338,9 @@ export function mapPullRequestDetail(raw: RawPullRequestDetail): GitHubPullReque
     body: raw.body,
   };
 }
+
+/** Zod schemas exported for tests to verify validation behavior. */
+export const __test = {
+  rawPullRequestSchema,
+  rawPullRequestDetailSchema,
+};
