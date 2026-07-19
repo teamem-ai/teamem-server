@@ -30,6 +30,7 @@ describe('parseServerEnv', () => {
         TEAMEM_GITHUB_WEBHOOK_SECRET: 'webhook-secret',
         TEAMEM_GITHUB_APP_ID: '123456',
         TEAMEM_GITHUB_INSTALLATION_ID: '9876543210',
+        TEAMEM_GITHUB_PRIVATE_KEY: '-----BEGIN RSA PRIVATE KEY-----\ntest-key\n-----END RSA PRIVATE KEY-----',
         TEAMEM_ANTHROPIC_API_KEY: 'anthropic-key',
         TEAMEM_OPENAI_API_KEY: 'openai-key',
         TEAMEM_OPENROUTER_API_KEY: 'openrouter-key',
@@ -45,6 +46,7 @@ describe('parseServerEnv', () => {
         webhookSecret: 'webhook-secret',
         appId: '123456',
         installationId: '9876543210',
+        privateKey: '-----BEGIN RSA PRIVATE KEY-----\ntest-key\n-----END RSA PRIVATE KEY-----',
       },
       llmProviders: [
         { kind: 'claude', apiKey: 'anthropic-key' },
