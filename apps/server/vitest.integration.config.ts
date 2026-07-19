@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     include: ['src/**/*.integration.test.ts'],
     environment: 'node',
+    fileParallelism: false,
     passWithNoTests: true,
   },
 });
