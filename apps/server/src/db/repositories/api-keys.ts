@@ -14,8 +14,9 @@
  *   use — never construct a scope from user-supplied team/project IDs
  *   when an API key scope is available.
  */
-import { eq, and } from 'drizzle-orm';
-import type { ApiScope } from '@teamem/schema';
+import { eq, and, isNull } from 'drizzle-orm';
+import { z } from 'zod';
+import { apiScope, type ApiScope } from '@teamem/schema';
 import * as schema from '../../db/schema.js';
 import type { AppDb } from '../../db/client.js';
 import type { ScopeContext } from '../../auth/scope.js';
@@ -88,7 +89,7 @@ export async function resolveTokenHash(
   db: AppDb,
   tokenHash: string,
 ): Promise<AuthContext> {
-  // Step 1: Look up the api_keys row by token_hash, rejecting revoked keys.
+  // Step 1: Look up the api_keys row by token_hash, filtering out revoked keys.
   // SECURITY: Unknown and revoked tokens hit the same code path — no information leakage.
   const keyRows = await db
     .select({
@@ -100,16 +101,15 @@ export async function resolveTokenHash(
       scopes: schema.apiKeys.scopes,
       allProjects: schema.apiKeys.allProjects,
       createdAt: schema.apiKeys.createdAt,
-      revokedAt: schema.apiKeys.revokedAt,
     })
     .from(schema.apiKeys)
-    .where(eq(schema.apiKeys.tokenHash, tokenHash))
+    .where(and(eq(schema.apiKeys.tokenHash, tokenHash), isNull(schema.apiKeys.revokedAt)))
     .limit(1);
 
   const keyRow = keyRows[0];
 
-  // No match or revoked — same error, same message (no information leakage)
-  if (!keyRow || keyRow.revokedAt !== null) {
+  // No match (unknown or revoked — SQL filters both) — same error, same message (no information leakage)
+  if (!keyRow) {
     throw new AuthenticationError('invalid or revoked API key');
   }
 
@@ -175,9 +175,16 @@ export async function resolveTokenHash(
     scope = projectScope(keyRow.teamId, keyRow.projectId);
   }
 
-  // Step 5: Defense-in-depth — verify the N7 invariant at the application layer.
-  // The database CHECK constraint is the primary guarantee; this is a belt-and-suspenders check.
-  const scopes = keyRow.scopes as ApiScope[];
+  // Step 5: Validate scopes against the frozen Zod enum (defense-in-depth).
+  // The DB CHECK constraint is the primary guarantee; this catches logic errors at the
+  // app boundary before anything downstream consumes potentially invalid data.
+  const parsedScopes = z.array(apiScope).safeParse(keyRow.scopes);
+  if (!parsedScopes.success) {
+    throw new AuthenticationError('invalid or revoked API key');
+  }
+  const scopes = parsedScopes.data;
+
+  // Defense-in-depth: verify the N7 invariant at the application layer.
   if (scopes.includes('read:payload') && !scopes.includes('read')) {
     throw new AuthenticationError('invalid or revoked API key');
   }
