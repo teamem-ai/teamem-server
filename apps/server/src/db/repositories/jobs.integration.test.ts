@@ -49,10 +49,18 @@ describe.skipIf(!url)('jobs repository (live Postgres)', () => {
     await closeDatabase(pool);
   });
 
-  // Clean data between tests: delete in dependency order (children first)
+  // Clean data between tests: delete in dependency order (children first).
+  // Also clears concept tables — a prior integration test file (e.g.
+  // compile-job.integration.test.ts) may leave concept rows referencing a
+  // project, which would otherwise block `delete from projects` here with
+  // a concepts_project_fk violation.
   beforeEach(async () => {
     await db.delete(schema.jobEvents);
     await db.delete(schema.jobs);
+    await db.delete(schema.conceptContributors);
+    await db.delete(schema.conceptEvidence);
+    await db.delete(schema.conceptPaths);
+    await db.delete(schema.concepts);
     await db.delete(schema.events); // events referenced by job_events FK
     await db.delete(schema.apiKeys);
     await db.delete(schema.principals);
