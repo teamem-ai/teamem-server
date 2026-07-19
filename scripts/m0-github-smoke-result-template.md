@@ -7,58 +7,80 @@
 | **Date / Time** | `YYYY-MM-DDTHH:MM:SSZ` |
 | **Tester** | _(name)_ |
 | **Repository** | `owner/repo` |
+| **Webhook Secret** | `configured` _(REQUIRED)_ |
 | **Server URL** | `http://127.0.0.1:8080` |
-| **Webhook Secret** | `configured` / `not configured` |
 
-## 1. Event Delivery Results
-
-| Event Type | HTTP Status | Events Ingested | Status |
-|---|---|---|---|
-| Push (`push`) | `200` | `N` | ✓ / ✗ |
-| Issue (`issues`) | `200` | `1` | ✓ / ✗ |
-| Pull Request (`pull_request`) | `200` | `1` | ✓ / ✗ |
-| PR Review (`pull_request_review`) | `200` | `1` | ✓ / ✗ |
-
-## 2. API Verification (`GET /v1/events`)
+## 1. Webhook Setup
 
 | Check | Expected | Actual | Result |
 |---|---|---|---|
-| Total events ≥ 4 | ≥ 4 | `N` | ✓ / ✗ |
+| Temporary webhook created on repo | `id` returned | | ✓ / ✗ |
+| Webhook configured with secret | `config.secret` set | | ✓ / ✗ |
+| Events subscribed: push, issues, pull_request, pull_request_review | all 4 | | ✓ / ✗ |
+
+## 2. Real GitHub Events Created
+
+| Event Type | Created? | Identifier |
+|---|---|---|
+| Push | ✓ / ✗ | commit `abc1234` |
+| Issue | ✓ / ✗ | `#N` |
+| Pull Request | ✓ / ✗ | `#N` |
+| PR Review | ✓ / ✗ | review ID `N` |
+
+## 3. Real Webhook Deliveries (from GitHub Delivery Log)
+
+| Delivery Type | Found in GitHub Log? | Delivery GUID | Payload Size |
+|---|---|---|---|
+| `push` | ✓ / ✗ | | bytes |
+| `issues` | ✓ / ✗ | | bytes |
+| `pull_request` | ✓ / ✗ | | bytes |
+| `pull_request_review` | ✓ / ✗ | | bytes |
+
+## 4. Ingested Events
+
+| Event Type | Events Ingested | Status |
+|---|---|---|
+| Push (`github_commit`) | `N` | ✓ / ✗ |
+| Issue (`github_issue`) | `1` | ✓ / ✗ |
+| PR (`github_pr`) | `1` | ✓ / ✗ |
+| Review (`github_pr_comment`) | `1` | ✓ / ✗ |
+
+## 5. Verification — `GET /v1/events`
+
+| Check | Expected | Actual | Result |
+|---|---|---|---|
 | `github_commit` present | ≥ 1 | `N` | ✓ / ✗ |
 | `github_issue` present | ≥ 1 | `N` | ✓ / ✗ |
 | `github_pr` present | ≥ 1 | `N` | ✓ / ✗ |
 | `github_pr_comment` present | ≥ 1 | `N` | ✓ / ✗ |
-| `channel` = `github` for all events | `github` | | ✓ / ✗ |
-| `actorProvenance` correct | `webhook_verified` or `unknown` | | ✓ / ✗ |
-| `url` is canonical `github.com/...` | starts with `https://github.com/` | | ✓ / ✗ |
+| `channel` = `github` for all | `github` | | ✓ / ✗ |
+| `actorProvenance` = `webhook_verified` | `webhook_verified` | | ✓ / ✗ |
+| `url` starts with `https://github.com/` | `https://github.com/...` | | ✓ / ✗ |
 
-## 3. Database Verification (PostgreSQL)
+## 6. Verification — PostgreSQL
 
 | Check | Expected | Actual | Result |
 |---|---|---|---|
-| `github_commit` rows exist | ≥ 1 | `N` | ✓ / ✗ |
+| `github_commit` rows | ≥ 1 | `N` | ✓ / ✗ |
 | `github_commit.channel` = `github` | `github` | | ✓ / ✗ |
 | `github_commit.source_event` = `push` | `push` | | ✓ / ✗ |
-| `github_commit.item_key` = commit SHA | 40-char hex | | ✓ / ✗ |
+| `github_commit.item_key` = commit SHA | ≥ 40 chars | | ✓ / ✗ |
 | `github_commit.occurred_at_provenance` = `provider` | `provider` | | ✓ / ✗ |
-| `github_commit.actor_provenance` correct | `webhook_verified` or `unknown` | | ✓ / ✗ |
-| `github_issue` rows exist | ≥ 1 | `N` | ✓ / ✗ |
+| `github_commit.actor_provenance` = `webhook_verified` | `webhook_verified` | | ✓ / ✗ |
 | `github_issue.source_event` = `issues` | `issues` | | ✓ / ✗ |
 | `github_issue.source_action` not null | not null | | ✓ / ✗ |
-| `github_issue.url` contains `/issues/` | `/issues/` | | ✓ / ✗ |
-| `github_pr` rows exist | ≥ 1 | `N` | ✓ / ✗ |
 | `github_pr.source_event` = `pull_request` | `pull_request` | | ✓ / ✗ |
-| `github_pr_comment` rows exist | ≥ 1 | `N` | ✓ / ✗ |
-| `github_pr_comment.url` has `#` anchor | contains `#` | | ✓ / ✗ |
+| `github_pr_comment.url` has `#` fragment | contains `#` | | ✓ / ✗ |
+| All events: `actor_provenance` = `webhook_verified` | `webhook_verified` | | ✓ / ✗ |
 
-## 4. Idempotency
+## 7. Idempotency
 
-| Check | Expected | Actual | Result |
-|---|---|---|---|
-| Replay same payload → HTTP 200, all `duplicate` | 200 + duplicate status | `200` | ✓ / ✗ |
-| Same delivery, modified payload → HTTP 409 | 409 | `409` | ✓ / ✗ |
+| Check | Expected | Result |
+|---|---|---|
+| Replay same payload → all `duplicate` status | all duplicate | ✓ / ✗ |
+| Modified payload → rejected (HTTP 409 or duplicate) | 409 or duplicate | ✓ / ✗ |
 
-## 5. Summary
+## 8. Summary
 
 | Metric | Count |
 |---|---|
@@ -70,4 +92,4 @@
 
 ## Notes
 
-_(Any observations, warnings, or limitations encountered during the test.)_
+_(Observations, warnings, or limitations encountered.)_

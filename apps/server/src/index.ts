@@ -37,7 +37,7 @@ export function createRuntimeStartup(config: {
       return { stop: () => queue.stop() };
     },
     async startHttpServer() {
-      const server = startServer({ db: dbHandle.db });
+      const server = startServer();
       return {
         stop: () =>
           new Promise<void>((resolve, reject) => {

@@ -65,7 +65,7 @@ describe.skipIf(!url)('all-in-one lifecycle (live Postgres + pg-boss)', () => {
         return { stop: () => queue.stop() };
       },
       async startHttpServer() {
-        const server = startServer({ port: 0 }); // ephemeral port
+        const server = startServer(0); // ephemeral port
         return {
           stop: () =>
             new Promise<void>((resolve, reject) => {

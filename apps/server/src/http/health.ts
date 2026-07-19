@@ -16,14 +16,14 @@ export interface HealthDeps {
   dbUrl?: string;
 }
 
-type HealthEnv = { Variables: { appDeps: HealthDeps } };
+type HealthEnv = { Variables: { healthDeps: HealthDeps } };
 
 export function healthzHandler(c: Context) {
   return c.json({ status: 'ok' });
 }
 
 export async function readyzHandler(c: Context<HealthEnv>) {
-  const { dbUrl } = c.var.appDeps ?? {};
+  const { dbUrl } = c.var.healthDeps ?? {};
 
   if (!dbUrl) {
     return c.json({ status: 'not_ready', error: 'database_not_configured' }, 503);
