@@ -19,12 +19,15 @@
  * - Composite FKs: tenant-consistent references to concepts, principals, and
  *   projects.
  */
+import { conceptPath, evidence as evidenceSchema } from '@teamem/schema';
+import { ZodError } from 'zod';
 import * as schema from '../schema.js';
 import type { AppDb } from '../client.js';
 
 // ── Error types ─────────────────────────────────────────────────────────────
 
-/** Thrown when evidence array is empty — every concept page requires at least one. */
+/** Thrown when concept input fails frozen-contract validation (empty evidence,
+ *  invalid path syntax, missing repo_file immutable fields, etc.). */
 export class InvalidConceptError extends Error {
   readonly name = 'InvalidConceptError';
 }
@@ -108,9 +111,43 @@ export async function createConcept(
   db: AppDb,
   input: CreateConceptInput,
 ): Promise<CreateConceptResult> {
-  // Application-level invariant: every concept must have at least one evidence item.
-  if (input.evidence.length === 0) {
-    throw new InvalidConceptError('Concept must have at least one evidence item');
+  // Application-level invariants: validate against frozen contract before
+  // touching the database.  Zod parse failures become InvalidConceptError.
+
+  // 1. Path must conform to conceptPath (N5: frozen syntax).
+  try {
+    conceptPath.parse(input.path);
+  } catch (err) {
+    if (err instanceof ZodError) {
+      throw new InvalidConceptError(
+        `Invalid concept path: ${err.issues.map((e) => e.message).join('; ')}`,
+      );
+    }
+    throw err;
+  }
+
+  // 2. At least one evidence item, and every item must satisfy the frozen
+  //    evidence discriminated union (repo_file requires repo/commitSha/path;
+  //    url kinds require a valid URL ref; mcp_write/manual require a ref).
+  //    The frozen contract expects ISO 8601 strings for `at`; we accept Date
+  //    objects in the input and convert them before validation.
+  try {
+    evidenceSchema
+      .array()
+      .nonempty()
+      .parse(
+        input.evidence.map((ev) => ({
+          ...ev,
+          at: ev.at instanceof Date ? ev.at.toISOString() : ev.at,
+        })),
+      );
+  } catch (err) {
+    if (err instanceof ZodError) {
+      throw new InvalidConceptError(
+        `Invalid evidence: ${err.issues.map((e) => e.message).join('; ')}`,
+      );
+    }
+    throw err;
   }
 
   return db.transaction(async (tx) => {

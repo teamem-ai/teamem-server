@@ -287,6 +287,111 @@ describe.skipIf(!url)('ConceptWriteRepository (live Postgres)', () => {
     });
   });
 
+  // ── Failure: invalid path syntax ──────────────────────────────────────
+
+  describe('invalid path syntax', () => {
+    it('rejects uppercase characters per conceptPath contract (N5)', async () => {
+      await expect(
+        createConcept(db, validInput({ path: 'Services/API' })),
+      ).rejects.toThrow(InvalidConceptError);
+    });
+
+    it('rejects a leading slash', async () => {
+      await expect(
+        createConcept(db, validInput({ path: '/services/api' })),
+      ).rejects.toThrow(InvalidConceptError);
+    });
+
+    it('rejects .md suffix', async () => {
+      await expect(
+        createConcept(db, validInput({ path: 'services/api.md' })),
+      ).rejects.toThrow(InvalidConceptError);
+    });
+
+    it('rejects empty path segments (double slash)', async () => {
+      await expect(
+        createConcept(db, validInput({ path: 'services//api' })),
+      ).rejects.toThrow(InvalidConceptError);
+    });
+  });
+
+  // ── Failure: repo_file evidence missing immutable fields ──────────────
+
+  describe('repo_file evidence validation', () => {
+    it('rejects repo_file evidence without repo field', async () => {
+      await expect(
+        createConcept(
+          db,
+          validInput({
+            evidence: [
+              {
+                kind: 'repo_file',
+                commitSha: 'abc1234',
+                path: 'src/index.ts',
+                at: new Date('2025-01-01T00:00:00.000Z'),
+              } as never,
+            ],
+          }),
+        ),
+      ).rejects.toThrow(InvalidConceptError);
+    });
+
+    it('rejects repo_file evidence without commitSha field', async () => {
+      await expect(
+        createConcept(
+          db,
+          validInput({
+            evidence: [
+              {
+                kind: 'repo_file',
+                repo: 'teamem-ai/teamem',
+                path: 'src/index.ts',
+                at: new Date('2025-01-01T00:00:00.000Z'),
+              } as never,
+            ],
+          }),
+        ),
+      ).rejects.toThrow(InvalidConceptError);
+    });
+
+    it('rejects repo_file evidence without path field', async () => {
+      await expect(
+        createConcept(
+          db,
+          validInput({
+            evidence: [
+              {
+                kind: 'repo_file',
+                repo: 'teamem-ai/teamem',
+                commitSha: 'abc1234',
+                at: new Date('2025-01-01T00:00:00.000Z'),
+              } as never,
+            ],
+          }),
+        ),
+      ).rejects.toThrow(InvalidConceptError);
+    });
+
+    it('rejects repo_file evidence with invalid commitSha format', async () => {
+      await expect(
+        createConcept(
+          db,
+          validInput({
+            evidence: [
+              {
+                kind: 'repo_file',
+                repo: 'teamem-ai/teamem',
+                commitSha: 'xyz',
+                path: 'src/index.ts',
+                at: new Date('2025-01-01T00:00:00.000Z'),
+              } as never,
+            ],
+          }),
+        ),
+      ).rejects.toThrow(InvalidConceptError);
+    });
+  });
+
   // ── Failure: duplicate path ────────────────────────────────────────────
 
   describe('duplicate path rejection', () => {
