@@ -15,6 +15,7 @@ import { createDbHandle } from './db/client.js';
 import { createCompileQueue } from './queue/boss.js';
 import { startEmbeddedWorker } from './worker/embedded.js';
 import { startServer } from './server.js';
+import { bootstrapMain } from './commands/bootstrap.js';
 
 /** Build the real startup factories over a validated runtime config. */
 export function createRuntimeStartup(config: {
@@ -93,5 +94,9 @@ const isMain =
   process.argv[1]?.endsWith('/index.js') || process.argv[1]?.endsWith('/index.ts');
 
 if (isMain) {
-  void bootstrap();
+  if (process.argv.includes('--bootstrap')) {
+    void bootstrapMain();
+  } else {
+    void bootstrap();
+  }
 }
