@@ -19,6 +19,7 @@ import { stripPrivateTags } from '../../security/private-tags.js';
 import { payloadHash, payloadByteLength } from '../../security/payload-hash.js';
 import { InvalidRequestError, UnauthorizedError, ForbiddenError, NotFoundError, InternalError, IdempotencyConflictError, PayloadTooLargeError, REQUEST_ID_KEY } from '../errors.js';
 import type { CompileQueue } from '../../queue/boss.js';
+import { waitForJob } from '../wait-for-job.js';
 import { and, eq } from 'drizzle-orm';
 import * as schema from '../../db/schema.js';
 
@@ -29,6 +30,8 @@ export interface EventsWriteDeps {
   /** Optional compile queue — when absent, compile=true jobs are created but
    *  not enqueued (useful for testing without a running pg-boss instance). */
   queue?: CompileQueue;
+  /** Override the default 30 s wait timeout (for testing). */
+  waitTimeoutMs?: number;
 }
 
 // ── Event kind / provenance constants for the public REST channel ───────────
@@ -273,44 +276,39 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
   // For M0 scope, wait=true with compile=true polls for job completion.
   // If the queue is unavailable or compile=false, this is a no-op.
   if (req.options.wait && req.options.compile && jobId) {
-    const deadline = Date.now() + 30_000;
-    let completed = false;
-    let conceptIds: string[] | undefined;
+    const outcome = await waitForJob({
+      db,
+      scope: auth.scope,
+      jobId,
+      signal: c.req.raw.signal, // client disconnect → stops waiting
+      timeoutMs: deps.waitTimeoutMs,
+    });
 
-    while (Date.now() < deadline) {
-      try {
-        const { getJob } = await import('../../db/repositories/jobs.js');
-        const job = await getJob(db, auth.scope, jobId);
-        if (job && (job.status === 'completed' || job.status === 'failed')) {
-          completed = true;
-          if (job.status === 'completed') {
-            // Fetch concept UUIDs from job_events
-            const { getJobEvents } = await import('../../db/repositories/jobs.js');
-            const events = await getJobEvents(db, teamId, req.projectId, jobId);
-            conceptIds = events
-              .filter((e) => e.conceptUuids && e.conceptUuids.length > 0)
-              .flatMap((e) => e.conceptUuids as string[]);
-          }
-          break;
-        }
-      } catch {
-        // Ignore polling errors; continue waiting
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
-    if (completed) {
+    if (outcome.outcome === 'completed') {
       const response: IngestEventResponse = {
         requestId,
         eventId,
         jobId,
         duplicate: false,
-        conceptIds,
+        conceptIds: outcome.conceptIds,
       };
       return c.json(response, 200);
     }
 
-    // Timed out
+    if (outcome.outcome === 'failed') {
+      // Job reached a terminal failure — return 200 (the wait completed,
+      // just without concept pages).
+      const response: IngestEventResponse = {
+        requestId,
+        eventId,
+        jobId,
+        duplicate: false,
+      };
+      return c.json(response, 200);
+    }
+
+    // outcome.outcome === 'timed_out' || outcome.outcome === 'aborted'
+    // Both cases → 202 so the caller can poll or retry.
     const response: IngestEventResponse = {
       requestId,
       eventId,
