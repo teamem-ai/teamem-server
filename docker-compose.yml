@@ -59,6 +59,7 @@ services:
       TEAMEM_GITHUB_WEBHOOK_SECRET: ${TEAMEM_GITHUB_WEBHOOK_SECRET:-}
       TEAMEM_GITHUB_APP_ID: ${TEAMEM_GITHUB_APP_ID:-}
       TEAMEM_GITHUB_INSTALLATION_ID: ${TEAMEM_GITHUB_INSTALLATION_ID:-}
+      TEAMEM_GITHUB_PRIVATE_KEY: ${TEAMEM_GITHUB_PRIVATE_KEY:-}
       # LLM provider keys (BYO). M0 reads env; M2 moves provider config
       # into the portal UI. TEAMEM_-prefixed on purpose: never inherit
       # ambient ANTHROPIC_API_KEY/OPENAI_API_KEY from the host shell.
@@ -96,6 +97,12 @@ services:
       TEAMEM_OPENROUTER_API_KEY: ${TEAMEM_OPENROUTER_API_KEY:-}
       TEAMEM_OPENAI_COMPAT_BASE_URL: ${TEAMEM_OPENAI_COMPAT_BASE_URL:-}
       TEAMEM_OPENAI_COMPAT_API_KEY: ${TEAMEM_OPENAI_COMPAT_API_KEY:-}
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'node.*worker\\.js' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
 volumes:
   pgdata:
