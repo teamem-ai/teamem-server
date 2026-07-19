@@ -69,6 +69,7 @@ interface GithubCommentObject {
   readonly created_at?: string;
   readonly updated_at?: string;
   readonly submitted_at?: string;
+  readonly dismissed_at?: string;
   readonly html_url?: string;
   readonly state?: string;
   readonly user?: GithubSender;
@@ -167,12 +168,51 @@ export function githubCommentPermalink(
 }
 
 /**
+ * Verify that a raw GitHub `html_url` actually matches the normalized facts
+ * we extracted from the payload. Prevents the stored "immutable evidence"
+ * link from drifting away from the stable repo/parent/id facts, e.g. when a
+ * replayed or crafted payload points at a different PR/issue/comment.
+ */
+function isHtmlUrlConsistentWithFacts(
+  rawHtmlUrl: string,
+  repoFullName: string,
+  parentType: CommentParentType,
+  parentNumber: number,
+  githubEvent: GithubCommentEventKind,
+  commentId: number,
+): boolean {
+  const parts = splitRepoFullName(repoFullName);
+  if (!parts) return false;
+
+  let u: URL;
+  try {
+    u = new URL(rawHtmlUrl);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:' || u.host !== 'github.com') return false;
+
+  const segs = u.pathname.split('/');
+  if (segs.length < 5) return false;
+  const [, urlOwner, urlRepo, kindSeg, numberSeg] = segs;
+  if (urlOwner !== parts.owner || urlRepo !== parts.repo) return false;
+
+  const expectedKind = parentType === 'pull_request' ? 'pull' : 'issues';
+  if (kindSeg !== expectedKind) return false;
+  if (numberSeg !== String(parentNumber)) return false;
+
+  const expectedAnchor = githubCommentAnchor(githubEvent, commentId);
+  return u.hash === expectedAnchor;
+}
+
+/**
  * Decide the trusted permalink. A signature-verified GitHub payload's
  * `html_url` IS GitHub's official immutable permalink, so we prefer it when
- * it is a genuine `https://github.com/...` URL (preserves the original fact,
- * §5.4). A malformed or non-github `html_url` is rejected — never let an
- * attacker-controlled arbitrary URL become the stored "immutable evidence"
- * link — and we fall back to deterministic construction from the stable id.
+ * it is a genuine `https://github.com/...` URL AND it matches the stable
+ * repo/parent/id facts we extracted (preserves the original fact, §5.4). A
+ * malformed, non-github, or fact-inconsistent `html_url` is rejected — never
+ * let an arbitrary URL become the stored "immutable evidence" link — and we
+ * fall back to deterministic construction from the stable id.
  */
 export function resolveCommentPermalink(
   rawHtmlUrl: string | undefined,
@@ -182,13 +222,19 @@ export function resolveCommentPermalink(
   githubEvent: GithubCommentEventKind,
   commentId: number,
 ): string | undefined {
-  if (typeof rawHtmlUrl === 'string' && rawHtmlUrl.length > 0) {
-    try {
-      const u = new URL(rawHtmlUrl);
-      if (u.protocol === 'https:' && u.host === 'github.com') return rawHtmlUrl;
-    } catch {
-      // fall through to construction
-    }
+  if (
+    typeof rawHtmlUrl === 'string' &&
+    rawHtmlUrl.length > 0 &&
+    isHtmlUrlConsistentWithFacts(
+      rawHtmlUrl,
+      repoFullName,
+      parentType,
+      parentNumber,
+      githubEvent,
+      commentId,
+    )
+  ) {
+    return rawHtmlUrl;
   }
   return githubCommentPermalink(
     repoFullName,
@@ -260,13 +306,26 @@ function extractCommentFacts(
   if (!obj || obj.id === undefined || obj.id === null) return undefined;
 
   // For created events the relevant "occurred at" is creation; for any later
-  // action (edited/deleted/dismissed) the provider's updated/dismissed time
-  // is when the change actually happened (N8).
-  const providerAt = isReview
-    ? obj.submitted_at ?? obj.updated_at ?? obj.created_at
-    : action === 'created'
-      ? obj.created_at ?? obj.updated_at
-      : obj.updated_at ?? obj.created_at;
+  // action (edited/deleted) the provider's updated time is when the change
+  // actually happened (N8). For pull_request_review specifically, submitted_at
+  // is the original review submission time and must NOT be reused for later
+  // edited/dismissed actions — doing so would mis-attribute those events to
+  // the original submission time. If no reliable provider timestamp exists,
+  // the normalizer falls back to server time with occurredAtProvenance='server'.
+  let providerAt: string | undefined;
+  if (isReview) {
+    if (action === 'submitted') {
+      providerAt = obj.submitted_at;
+    } else {
+      // edited/dismissed: never submitted_at; use a real change time if present.
+      providerAt = obj.updated_at ?? obj.dismissed_at;
+    }
+  } else {
+    providerAt =
+      action === 'created'
+        ? obj.created_at ?? obj.updated_at
+        : obj.updated_at ?? obj.created_at;
+  }
 
   return {
     id: obj.id,

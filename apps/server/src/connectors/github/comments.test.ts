@@ -262,6 +262,53 @@ describe('normalizeCommentEvent — success paths', () => {
     });
   });
 
+  it('pull_request_review.edited: does NOT reuse submitted_at; uses updated_at', () => {
+    const edited = {
+      ...reviewSubmittedPayload,
+      action: 'edited',
+      review: {
+        ...reviewSubmittedPayload.review,
+        updated_at: '2024-02-03T12:00:00Z', // edit time
+        dismissed_at: undefined,
+      },
+    };
+    const ev = normalizeCommentEvent({
+      githubEvent: 'pull_request_review',
+      payload: edited,
+      deliveryId: DELIVERY,
+      webhookVerified: true,
+      serverTime: SERVER_TIME,
+    })!;
+    expect(ev.sourceAction).toBe('edited');
+    expect(ev.occurredAt).toBe('2024-02-03T12:00:00.000Z');
+    expect(ev.occurredAtProvenance).toBe('provider');
+  });
+
+  it('pull_request_review.dismissed: no updated_at/dismissed_at → server time with server provenance', () => {
+    const dismissed = {
+      ...reviewSubmittedPayload,
+      action: 'dismissed',
+      review: {
+        ...reviewSubmittedPayload.review,
+        updated_at: undefined,
+        dismissed_at: undefined,
+      },
+    };
+    const ev = normalizeCommentEvent({
+      githubEvent: 'pull_request_review',
+      payload: dismissed,
+      deliveryId: DELIVERY,
+      webhookVerified: true,
+      serverTime: SERVER_TIME,
+    })!;
+    expect(ev.sourceAction).toBe('dismissed');
+    // submitted_at is the original submission time and must NOT be used for
+    // the dismissal event (P1). With no reliable provider change timestamp,
+    // we fall back to server time.
+    expect(ev.occurredAt).toBe(SERVER_TIME);
+    expect(ev.occurredAtProvenance).toBe('server');
+  });
+
   it('every produced event passes the frozen NormalizedEvent Zod contract', () => {
     for (const [name, githubEvent, payload] of [
       ['issue_comment', 'issue_comment', issueCommentCreatedPayload],
@@ -403,6 +450,84 @@ describe('CLI #3 — comment permalink is immutable evidence', () => {
     expect(githubCommentAnchor('issue_comment', 1)).toBe('#issuecomment-1');
     expect(githubCommentAnchor('pull_request_review_comment', 2)).toBe('#discussion_r2');
     expect(githubCommentAnchor('pull_request_review', 3)).toBe('#pullrequestreview-3');
+  });
+
+  it('raw html_url is accepted only when it matches normalized facts (P2)', () => {
+    // Wrong repo — should fall back to deterministic construction.
+    const wrongRepo = normalizeCommentEvent({
+      githubEvent: 'issue_comment',
+      payload: {
+        ...issueCommentCreatedPayload,
+        comment: {
+          ...issueCommentCreatedPayload.comment,
+          html_url: 'https://github.com/evil/Hello-World/issues/7#issuecomment-123456789',
+        },
+      },
+      deliveryId: DELIVERY,
+      webhookVerified: true,
+      serverTime: SERVER_TIME,
+    })!;
+    expect(wrongRepo.url).toBe(
+      'https://github.com/octocat/Hello-World/issues/7#issuecomment-123456789',
+    );
+    expect(wrongRepo.payload['commentHtmlUrl']).toBe(
+      'https://github.com/evil/Hello-World/issues/7#issuecomment-123456789',
+    );
+
+    // Wrong parent number — fall back.
+    const wrongNumber = normalizeCommentEvent({
+      githubEvent: 'issue_comment',
+      payload: {
+        ...issueCommentCreatedPayload,
+        comment: {
+          ...issueCommentCreatedPayload.comment,
+          html_url: 'https://github.com/octocat/Hello-World/issues/99#issuecomment-123456789',
+        },
+      },
+      deliveryId: DELIVERY,
+      webhookVerified: true,
+      serverTime: SERVER_TIME,
+    })!;
+    expect(wrongNumber.url).toBe(
+      'https://github.com/octocat/Hello-World/issues/7#issuecomment-123456789',
+    );
+
+    // Wrong anchor (different comment id) — fall back.
+    const wrongAnchor = normalizeCommentEvent({
+      githubEvent: 'issue_comment',
+      payload: {
+        ...issueCommentCreatedPayload,
+        comment: {
+          ...issueCommentCreatedPayload.comment,
+          html_url: 'https://github.com/octocat/Hello-World/issues/7#issuecomment-999',
+        },
+      },
+      deliveryId: DELIVERY,
+      webhookVerified: true,
+      serverTime: SERVER_TIME,
+    })!;
+    expect(wrongAnchor.url).toBe(
+      'https://github.com/octocat/Hello-World/issues/7#issuecomment-123456789',
+    );
+
+    // Wrong parent kind (issues vs pull) — fall back.
+    const wrongKind = normalizeCommentEvent({
+      githubEvent: 'issue_comment',
+      payload: {
+        ...issueCommentOnPrPayload,
+        comment: {
+          ...issueCommentOnPrPayload.comment,
+          html_url: 'https://github.com/octocat/Hello-World/issues/42#issuecomment-555',
+        },
+      },
+      deliveryId: DELIVERY,
+      webhookVerified: true,
+      serverTime: SERVER_TIME,
+    })!;
+    expect(wrongKind.payload['parentType']).toBe('pull_request');
+    expect(wrongKind.url).toBe(
+      'https://github.com/octocat/Hello-World/pull/42#issuecomment-555',
+    );
   });
 });
 
