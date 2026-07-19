@@ -581,4 +581,100 @@ describe.skipIf(!url)('POST /v1/events (live Postgres)', () => {
     expect(jobRow['event_count']).toBe(1);
     expect(jobRow['project_id']).toBe(projectId);
   });
+
+  // ── wait=true — completed ──────────────────────────────────────────────
+  // (DUA-154)
+
+  it('returns 200 with conceptIds when wait=true and job completes within timeout', async () => {
+    const body = validBody({ options: { compile: true, wait: true } });
+
+    // Fire the request but don't await yet — the handler will create the
+    // event + job and then start polling.  While it polls we manually mark
+    // the job as completed so the next poll iteration picks it up.
+    const resPromise = app.request('/v1/events', {
+      method: 'POST',
+      headers: authHeader(),
+      body: JSON.stringify(body),
+    });
+
+    // Let the handler create the event + job (a single microtask tick is
+    // enough — the handler does all DB work synchronously before the first
+    // setTimeout in the poll loop).
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Find the newly-created job.
+    const { rows: freshJobs } = await db.execute(
+      `SELECT id FROM jobs WHERE project_id = '${projectId}' ORDER BY created_at DESC LIMIT 1`,
+    );
+    const jobId = (freshJobs[0] as Record<string, unknown>)['id'] as string;
+
+    // Find the event so we can link the job_event row.
+    const { rows: evtRows } = await db.execute(
+      `SELECT id FROM events WHERE project_id = '${projectId}' ORDER BY created_at DESC LIMIT 1`,
+    );
+    const eventId = (evtRows[0] as Record<string, unknown>)['id'] as string;
+
+    // Mark job completed and insert a per-event outcome with concept UUIDs.
+    await db.execute(
+      `UPDATE jobs SET status = 'completed', finished_at = NOW() WHERE id = '${jobId}'`,
+    );
+    // concept_uuids is uuid[] — use valid UUID values.
+    const cid1 = randomUUID();
+    const cid2 = randomUUID();
+    await db.execute(
+      `INSERT INTO job_events (team_id, project_id, job_id, event_id, status, concept_uuids, updated_at)
+       VALUES ('${teamId}', '${projectId}', '${jobId}', '${eventId}', 'compiled',
+               ARRAY['${cid1}','${cid2}']::uuid[], NOW())`,
+    );
+
+    // Now await the original handler — it should see the completed job on
+    // the next poll and return 200.
+    const res = await resPromise;
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.eventId).toBeTruthy();
+    expect(json.jobId).toBe(jobId);
+    expect(json.duplicate).toBe(false);
+    expect(json.conceptIds).toEqual([cid1, cid2]);
+  });
+
+  // ── wait=true — timeout ────────────────────────────────────────────────
+
+  it('returns 202 with timedOut:true when wait=true times out', async () => {
+    // Rebuild the app with a 1-second wait timeout so the test is fast.
+    const deps: AppDeps = { dbUrl: url!, db, waitTimeoutMs: 1000 };
+    const shortTimeoutApp = buildApp(deps);
+
+    const body = validBody({ options: { compile: true, wait: true } });
+    const res = await shortTimeoutApp.request('/v1/events', {
+      method: 'POST',
+      headers: authHeader(),
+      body: JSON.stringify(body),
+    });
+
+    expect(res.status).toBe(202);
+    const json = await res.json();
+    expect(json.eventId).toBeTruthy();
+    expect(json.jobId).toBeTruthy();
+    expect(json.duplicate).toBe(false);
+    expect(json.timedOut).toBe(true);
+  });
+
+  // ── wait=true — compile=false (no job → no wait) ───────────────────────
+
+  it('returns 202 immediately when wait=true but compile=false', async () => {
+    const body = validBody({ options: { compile: false, wait: true } });
+    const res = await app.request('/v1/events', {
+      method: 'POST',
+      headers: authHeader(),
+      body: JSON.stringify(body),
+    });
+
+    expect(res.status).toBe(202);
+    const json = await res.json();
+    expect(json.eventId).toBeTruthy();
+    expect(json.jobId).toBeNull();
+    expect(json.duplicate).toBe(false);
+    expect(json.timedOut).toBeUndefined();
+  });
 });

@@ -22,6 +22,8 @@ export interface AppDeps extends HealthDeps {
   db?: EventsWriteDeps['db'];
   /** Optional compile queue for enqueuing compile jobs. */
   queue?: EventsWriteDeps['queue'];
+  /** Override the default 30 s wait timeout (for testing). */
+  waitTimeoutMs?: number;
 }
 
 type AppEnv = { Variables: { healthDeps: HealthDeps } };
@@ -49,7 +51,14 @@ export function buildApp(deps: AppDeps = {}) {
 
   // Ingestion routes — wired only when db is available.
   if (deps.db) {
-    app.route('/', buildEventsWriteRoutes({ db: deps.db, queue: deps.queue }));
+    app.route(
+      '/',
+      buildEventsWriteRoutes({
+        db: deps.db,
+        queue: deps.queue,
+        waitTimeoutMs: deps.waitTimeoutMs,
+      }),
+    );
   }
 
   return app;
