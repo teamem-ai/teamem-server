@@ -14,6 +14,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "bootstrap": "node dist/index.js --bootstrap",
+    "bootstrap:dev": "tsx src/index.ts --bootstrap",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:compose": "docker compose -f ../../docker-compose.yml up -d --wait && vitest run --config vitest.e2e.config.ts; docker compose -f ../../docker-compose.yml down",
