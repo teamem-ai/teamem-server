@@ -446,12 +446,16 @@ describe('structured — error redaction (§5.3)', () => {
       caught = err instanceof LlmError ? err : undefined;
     }
     expect(caught?.kind).toBe('http_error');
+    expect(caught?.cause).toBeUndefined();
     const serialized = JSON.stringify(caught ?? {});
     expect(serialized).not.toContain(API_KEYS.openai);
     expect(serialized).not.toContain('<private>');
     expect(serialized).not.toContain('usr-private-payload');
     expect(serialized).not.toContain('boom');
     expect(caught?.httpStatus).toBe(500);
+    // JSON.stringify omits non-enumerable Error.cause; assert against Node's
+    // own accessor too, which is what logs/inspect actually surface.
+    expect(Object.getOwnPropertyDescriptor(caught, 'cause')).toBeUndefined();
   });
 
   it('a schema_validation_failed error never carries the raw provider payload or zod error text', async () => {
@@ -470,10 +474,13 @@ describe('structured — error redaction (§5.3)', () => {
       caught = err instanceof LlmError ? err : undefined;
     }
     expect(caught?.kind).toBe('schema_validation_failed');
+    expect(caught?.cause).toBeUndefined();
     const serialized = JSON.stringify(caught ?? {});
     expect(serialized).not.toContain(API_KEYS.openai);
     expect(serialized).not.toContain('usr-private');
     expect(serialized).not.toContain('secret');
+    // The ZodError (which details the raw payload) must not leak via cause.
+    expect(Object.getOwnPropertyDescriptor(caught, 'cause')).toBeUndefined();
   });
 });
 
@@ -502,7 +509,7 @@ describe('structured — uses the real F1 schema with provider-native oneOf', ()
     expect((inputSchema as Record<string, unknown>).$schema).toBeUndefined();
   });
 
-  it('openai response_format schema is the F1 oneOf payload', async () => {
+  it('openai response_format schema is the F1 oneOf payload and is sent STRICT-LESS (root oneOf is not strict-compatible)', async () => {
     const calls: Captured[] = [];
     const fetch = makeRecorder(
       () => okOpenAi({ action: 'skip', reason: 'nope' }),
@@ -510,18 +517,40 @@ describe('structured — uses the real F1 schema with provider-native oneOf', ()
     );
     const client = createLlmClient(byoConfigs[1], { fetch });
 
-    await client.structured({
+    // The request must actually complete (i.e. be a runnable OpenAI call for
+    // the real F1 schema), not a shape OpenAI would 400 under strict:true.
+    const res = await client.structured({
       schema: f1Output,
       systemPrompt: 'sys',
       userPrompt: 'usr',
       requestId: 'req-f1b',
     });
+    expect(res.output).toEqual({ action: 'skip', reason: 'nope' });
 
-    const schema = (calls[0]!.body as { response_format: { json_schema: { schema: { oneOf: unknown[] } } } })
-      .response_format.json_schema.schema;
+    const envelope = (calls[0]!.body as { response_format: { json_schema: { schema: { oneOf: unknown[] }; strict?: boolean } } })
+      .response_format.json_schema;
+    const schema = envelope.schema;
     expect(Array.isArray(schema.oneOf)).toBe(true);
     expect(schema.oneOf.length).toBe(2);
     expect((schema as Record<string, unknown>).$schema).toBeUndefined();
+    // Root-level oneOf is NOT OpenAI strict-compatible -> strict must be absent
+    // (sending strict:true here would be the unrunnable implementation).
+    expect(envelope.strict).toBeUndefined();
+  });
+
+  it('an object-root schema IS sent with strict:true on the OpenAI family', async () => {
+    const calls: Captured[] = [];
+    const fetch = makeRecorder(() => okOpenAi(validValue), calls);
+    const client = createLlmClient(byoConfigs[1], { fetch });
+    await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-strict',
+    });
+    const envelope = (calls[0]!.body as { response_format: { json_schema: { strict?: boolean } } })
+      .response_format.json_schema;
+    expect(envelope.strict).toBe(true);
   });
 });
 

@@ -9,6 +9,11 @@
  *     `input_schema` is the JSON Schema derived from the caller's Zod schema.
  *   - OpenAI / OpenRouter / custom OpenAI-compatible — Chat Completions with
  *     `response_format: { type: 'json_schema', ... }`, again derived from Zod.
+ *     Strict mode is requested only when the derived schema is strict-
+ *     compatible (root object, no anyOf/oneOf/$ref); the F1 discriminated union
+ *     renders to a root `oneOf`, so it is sent strict-less, which is the only
+ *     shape OpenAI accepts for it. The authoritative guarantee always comes
+ *     from the mandatory Zod re-validation (§5.2).
  *
  * Every adapter does the same two things around the native mechanism, so the
  * compiler does not branch on provider:
@@ -106,32 +111,20 @@ export function createLlmClient(
     // shape could sneak through. Failing here means no transport, no fetch
     // URL, and no headers are ever constructed with a managed config — the
     // rejection provably precedes any network I/O (covered by tests).
-    throw new LlmError('config_rejected', 'custom', '', {
-      cause: new Error(
-        "'platform-managed' is not available in the self-hosted build; " +
-          'configure a BYO key (claude/openai/openrouter/custom)',
-      ),
-    });
+    throw new LlmError('config_rejected', 'custom', '');
   }
 
   const resolved: ResolvedLlmConfig = config;
   const provider = resolved.kind;
   const model = deps.defaultModel ?? DEFAULT_MODELS[provider];
   if (!model) {
-    throw new LlmError('config_rejected', provider, '', {
-      cause: new Error(
-        `no model configured for '${provider}'; ` +
-          'supply one via LlmClientDeps.defaultModel',
-      ),
-    });
+    throw new LlmError('config_rejected', provider, '');
   }
 
   const timeoutMs = deps.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   const fetchFn = deps.fetch ?? globalThis.fetch;
   if (typeof fetchFn !== 'function') {
-    throw new LlmError('config_rejected', provider, '', {
-      cause: new Error('no fetch implementation available'),
-    });
+    throw new LlmError('config_rejected', provider, '');
   }
 
   return {
@@ -175,9 +168,7 @@ async function runStructured<T>(
       if (controller.signal.aborted) {
         throw new LlmError('timeout', provider, request.requestId);
       }
-      throw new LlmError(abortedKind(err), provider, request.requestId, {
-        cause: err,
-      });
+      throw new LlmError(abortedKind(err), provider, request.requestId);
     }
 
     if (!response.ok) {
@@ -193,9 +184,9 @@ async function runStructured<T>(
 
     const validation = request.schema.safeParse(extracted.value);
     if (!validation.success) {
-      throw new LlmError('schema_validation_failed', provider, request.requestId, {
-        cause: validation.error,
-      });
+      // Suppress the ZodError: it details the provider's raw payload and must
+      // not escape via Error.cause (§5.3). The kind + requestId are enough.
+      throw new LlmError('schema_validation_failed', provider, request.requestId);
     }
 
     return {
@@ -208,13 +199,94 @@ async function runStructured<T>(
     };
   } catch (err) {
     if (err instanceof LlmError) throw err;
-    // Unexpected failure — wrap as a provider_error, never leaking details.
-    throw new LlmError('provider_error', provider, request.requestId, {
-      cause: err,
-    });
+    // Unexpected failure — wrap as a provider_error without attaching the
+    // raw error as cause (§5.3: logs/inspect must not leak provider internals).
+    throw new LlmError('provider_error', provider, request.requestId);
   } finally {
     clearTimeout(timer);
   }
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* OpenAI-family response_format: strict only when the schema can honor it   */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Build the `json_schema` member of an OpenAI-family `response_format`.
+ *
+ * OpenAI Structured Outputs `strict: true` imposes concrete, documented
+ * constraints the raw Zod-derived schema does not always meet:
+ *   - the root must be an object (not a root-level oneOf/anyOf, which is what
+ *     a discriminated union like the real F1 output renders to), and
+ *   - no `anyOf`/`oneOf`/`$ref` may appear anywhere.
+ *
+ * Forcing `strict: true` unconditionally would 400 the real F1 schema on the
+ * default `openai`, `openrouter`, and OpenAI-compatible `custom` providers —
+ * i.e. those providers would not be a runnable implementation for F1, which
+ * the task explicitly forbids. So we set `strict: true` only when the schema
+ * is actually strict-compatible, and otherwise emit the schema without the
+ * `strict` key. omitting `strict` is a valid provider-native structured-output
+ * request (strict defaults to false), and the authoritative guarantee still
+ * comes from the mandatory Zod re-validation after the provider returns
+ * (§5.2). No silent fallback is fabricated here: the request reaches the real
+ * provider, and any output the provider returns is still bent to the Zod
+ * schema before being accepted.
+ */
+function openAiJsonSchema(schema: unknown): {
+  name: string;
+  schema: unknown;
+  strict?: true;
+} {
+  const strict = isOpenAiStrictCompatible(schema) ? (true as const) : undefined;
+  const envelope: { name: string; schema: unknown; strict?: true } = {
+    name: 'teamem_structured_output',
+    schema,
+  };
+  if (strict) envelope.strict = strict;
+  return envelope;
+}
+
+/**
+ * Whether `schema` meets OpenAI Structured Outputs strict-mode constraints:
+ * the ROOT must be an object, and no `anyOf`/`oneOf`/`allOf`/`$ref` keyword
+ * may appear anywhere (including nested objects, array items, and `$defs`).
+ * Primitive node types are allowed at non-root positions.
+ */
+function isOpenAiStrictCompatible(schema: unknown): boolean {
+  if (!isObject(schema) || schema.type !== 'object') return false;
+  return strictCompatibleSubtree(schema);
+}
+
+function strictCompatibleSubtree(node: unknown): boolean {
+  if (!isObject(node)) return true; // primitive values are fine
+  if (
+    'anyOf' in node || 'oneOf' in node || 'allOf' in node || '$ref' in node
+  ) {
+    return false;
+  }
+  const properties = node.properties;
+  if (isObject(properties)) {
+    for (const value of Object.values(properties)) {
+      if (!strictCompatibleSubtree(value)) return false;
+    }
+  }
+  const items = node.items;
+  if (Array.isArray(items)) {
+    for (const item of items) {
+      if (!strictCompatibleSubtree(item)) return false;
+    }
+  } else if (isObject(items)) {
+    if (!strictCompatibleSubtree(items)) return false;
+  }
+  for (const defKey of ['$defs', 'definitions']) {
+    const defs = node[defKey];
+    if (isObject(defs)) {
+      for (const value of Object.values(defs)) {
+        if (!strictCompatibleSubtree(value)) return false;
+      }
+    }
+  }
+  return true;
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -297,11 +369,7 @@ function buildRequest(
       ],
       response_format: {
         type: 'json_schema',
-        json_schema: {
-          name: 'teamem_structured_output',
-          schema: jsonSchema,
-          strict: true,
-        },
+        json_schema: openAiJsonSchema(jsonSchema),
       },
     }),
   };

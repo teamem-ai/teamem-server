@@ -131,7 +131,11 @@ export type LlmErrorKind =
  * The only error type the LLM port throws. Redacted by construction: the
  * `message` is a fixed, kind-specific string and the stored fields are limited
  * to the provider name, the request id, and at most an HTTP status. No API
- * key, request body, model payload, or raw provider error text is ever kept.
+ * key, request body, model payload, or raw provider error text is ever kept,
+ * and no `cause` is attached — `Error.cause` would surface raw fetch/Zod/
+ * provider internals to logs and inspect (§5.3/§6.4), so it is intentionally
+ * not retained. Callers that need debugging detail should probe the provider
+ * themselves; the port keeps the failure surface redacted.
  *
  * This keeps logs, audits, and job snapshots (§5.3) free of original content
  * and secrets even when a call fails.
@@ -146,9 +150,9 @@ export class LlmError extends Error {
     kind: LlmErrorKind,
     provider: LlmProviderKind,
     requestId: string,
-    options: { httpStatus?: number; cause?: unknown } = {},
+    options: { httpStatus?: number } = {},
   ) {
-    super(redactedMessage(kind, provider, options.httpStatus), { cause: options.cause });
+    super(redactedMessage(kind, provider, options.httpStatus));
     this.name = 'LlmError';
     this.kind = kind;
     this.provider = provider;
