@@ -41,26 +41,8 @@ export function startServer(portOverride?: number) {
   return server;
 }
 
-// When executed directly (not imported), start the server.
-// In tests, the server is imported and started explicitly.
-const isMain =
-  process.argv[1]?.endsWith('/server.js') ||
-  process.argv[1]?.endsWith('/server.ts');
-
-if (isMain) {
-  startServer();
-
-  // All-in-one mode: embed the pg-boss compile worker in the server
-  // process. Used with `TEAMEM_ALL_IN_ONE=true` — bring up only
-  // `postgres server` and skip the `worker` container.
-  if (process.env['TEAMEM_ALL_IN_ONE'] === 'true') {
-    void import('./worker.js').then(() => {
-      console.log('teamem compile worker embedded in server process');
-    });
-  }
-}
-
-// Re-export the factory and a default app for backward compatibility with
-// tests that import `app` from './server.js'.
+// Re-export a default app for backward compatibility with tests that import
+// `app` from './server.js'. The real composition-root entrypoint is index.ts;
+// server.ts is a pure module — it never self-starts.
 const app = buildApp();
 export { app };
