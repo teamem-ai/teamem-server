@@ -6,14 +6,25 @@
  * parameter so the factory is testable without environment side-effects.
  *
  * This module owns route wiring.  Handler implementations live in
- * `http/health.ts` (and future route modules).
+ * `http/health.ts`, `http/routes/events-write.ts`, and future route modules.
  */
 import { Hono, type Context, type Next } from 'hono';
 import { healthzHandler, readyzHandler, type HealthDeps } from './http/health.js';
+import { requestContext } from './http/request-context.js';
+import { globalErrorHandler, notFoundHandler } from './http/errors.js';
+import {
+  buildEventsWriteRoutes,
+  type EventsWriteDeps,
+} from './http/routes/events-write.js';
 
-export type AppDeps = HealthDeps;
+export interface AppDeps extends HealthDeps {
+  /** Database instance for scoped queries (events-write, read endpoints). */
+  db?: EventsWriteDeps['db'];
+  /** Optional compile queue for enqueuing compile jobs. */
+  queue?: EventsWriteDeps['queue'];
+}
 
-type AppEnv = { Variables: { healthDeps: AppDeps } };
+type AppEnv = { Variables: { healthDeps: HealthDeps } };
 
 function injectDeps(deps: AppDeps) {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -25,9 +36,21 @@ function injectDeps(deps: AppDeps) {
 export function buildApp(deps: AppDeps = {}) {
   const app = new Hono<AppEnv>().basePath('/');
 
+  // Global middleware: request ID for every response (success or error).
+  app.use('*', requestContext);
   app.use('*', injectDeps(deps));
+
+  // Global error handling: catches unhandled errors from any route.
+  app.onError(globalErrorHandler);
+  app.notFound(notFoundHandler);
+
   app.get('/healthz', healthzHandler);
   app.get('/readyz', readyzHandler);
+
+  // Ingestion routes — wired only when db is available.
+  if (deps.db) {
+    app.route('/', buildEventsWriteRoutes({ db: deps.db, queue: deps.queue }));
+  }
 
   return app;
 }
