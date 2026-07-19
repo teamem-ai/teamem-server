@@ -90,4 +90,4 @@ jobs:
             psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
           done
       - name: Run tests against PostgreSQL/pgvector
-        run: pnpm test
+        run: pnpm --filter @teamem/server test:integration
