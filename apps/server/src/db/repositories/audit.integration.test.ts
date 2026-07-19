@@ -10,6 +10,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
+import { Pool as PgPool } from 'pg';
 import { createDb, type AppDb } from '../../db/client.js';
 import {
   connectDatabase,
@@ -428,38 +429,107 @@ describe.skipIf(!url)('audit repository (live Postgres)', () => {
     expect(() => auditItem.parse(rowWithKey)).toThrow();
   });
 
-  // ── Fail-closed: audit write failure with transaction abort ──────────────
+  // ── Fail-closed: real database failure ──────────────────────────────────
 
-  it('fail-closed: when audit write encounters a database error, AuditWriteFailedError is thrown', async () => {
-    // Simulate a database error by writing with an action that exceeds
-    // column width (action is TEXT, but we can force a constraint violation
-    // by writing a valid record, then checking the error pathway).
+  it('fail-closed: when the database write fails, auditPayloadRead throws AuditWriteFailedError and denies the read', async () => {
+    // Create a separate pool and db handle for this test.
+    const failPool = new PgPool({ connectionString: url! });
+    const failDb = createDb(url!, { pool: failPool });
 
-    // In practice, database errors (connection lost, disk full) are
-    // integration-level failures. The fail-closed guarantee is:
-    // auditPayloadRead wraps writeAuditRecord in try/catch and
-    // converts ANY error into AuditWriteFailedError.
+    // Force a real database write failure by closing the pool first.
+    await failPool.end();
 
-    // We verify the error type by testing that the function signature
-    // exists and the error type is as expected.
-    expect(AuditWriteFailedError).toBeDefined();
+    const eventId = `evt_${randomUUID().replace(/-/g, '')}`;
 
-    const err = new AuditWriteFailedError('Audit write failed; payload read denied');
-    expect(err).toBeInstanceOf(Error);
-    expect(err.name).toBe('AuditWriteFailedError');
-    expect(err.message).toBe('Audit write failed; payload read denied');
+    // auditPayloadRead MUST throw AuditWriteFailedError — fail-closed.
+    // If it doesn't throw, the caller would incorrectly return payload data.
+    let caught: unknown = null;
+    try {
+      await auditPayloadRead(failDb, {
+        requestId: `req_${randomUUID()}`,
+        principalId: 'pri_test',
+        credentialId: 'key_test',
+        teamId: 'team_test001',
+        projectId: 'prj_test001',
+        resourceId: eventId,
+      });
+      // If we reach here, the fail-closed guarantee is broken.
+      expect.fail('auditPayloadRead should have thrown but succeeded — fail-closed guarantee broken');
+    } catch (err) {
+      caught = err;
+    }
+
+    // Must be an AuditWriteFailedError
+    expect(caught).toBeInstanceOf(AuditWriteFailedError);
+    expect((caught as Error).name).toBe('AuditWriteFailedError');
+
+    // Must have the standard denial message
+    expect((caught as Error).message).toBe('Audit write failed; payload read denied');
   });
 
-  it('SECURITY: the AuditWriteFailedError message does not leak internal details', async () => {
-    const err = new AuditWriteFailedError('Audit write failed; payload read denied');
-    // The message must not contain:
-    // - SQL statements
-    // - connection strings
-    // - internal stack traces (just the clean message)
-    expect(err.message).not.toContain('SELECT');
-    expect(err.message).not.toContain('INSERT');
-    expect(err.message).not.toContain('postgres');
-    expect(err.message).not.toContain('password');
-    expect(err.message).not.toContain('DATABASE_URL');
+  it('fail-closed: the AuditWriteFailedError message never leaks internal details', async () => {
+    // Create a separate pool, close it to force failure, and verify
+    // the error message is clean — no SQL, connection strings, or keys.
+    const failPool = new PgPool({ connectionString: url! });
+    const failDb = createDb(url!, { pool: failPool });
+    await failPool.end();
+
+    let caught: unknown = null;
+    try {
+      await auditPayloadRead(failDb, {
+        requestId: `req_${randomUUID()}`,
+        principalId: null,
+        credentialId: null,
+        teamId: 'team_test001',
+        projectId: null,
+        resourceId: `evt_${randomUUID().replace(/-/g, '')}`,
+      });
+      expect.fail('should have thrown');
+    } catch (err) {
+      caught = err;
+    }
+
+    const message = (caught as Error).message;
+    // The error message must NOT leak:
+    expect(message).not.toContain('SELECT');
+    expect(message).not.toContain('INSERT');
+    expect(message).not.toContain('postgres');
+    expect(message).not.toContain('password');
+    expect(message).not.toContain('DATABASE_URL');
+    expect(message).not.toContain('connectionString');
+    expect(message).not.toContain('127.0.0.1');
+    // The message must be the clean denial message only
+    expect(message).toBe('Audit write failed; payload read denied');
+  });
+
+  it('fail-closed: auditPayloadRead does NOT write a record when the database fails', async () => {
+    // Create a separate pool, close it, try auditPayloadRead, then verify
+    // no audit row was actually written (fail-closed = no partial side effect).
+    const failPool = new PgPool({ connectionString: url! });
+    const failDb = createDb(url!, { pool: failPool });
+    await failPool.end();
+
+    const eventId = `evt_${randomUUID().replace(/-/g, '')}`;
+
+    try {
+      await auditPayloadRead(failDb, {
+        requestId: `req_${randomUUID()}`,
+        principalId: null,
+        credentialId: null,
+        teamId: 'team_test001',
+        projectId: null,
+        resourceId: eventId,
+      });
+    } catch {
+      // Expected — now verify the main db has NO record of this event
+    }
+
+    // The main (healthy) db must not have any audit row for this event
+    const rows = await db
+      .select()
+      .from(schema.auditLog)
+      .where(eq(schema.auditLog.resourceId, eventId));
+
+    expect(rows).toHaveLength(0);
   });
 });
