@@ -12,7 +12,7 @@
  */
 import { type Context, type Next } from 'hono';
 import { serve } from '@hono/node-server';
-import { buildApp } from './app.js';
+import { buildApp, type AppDeps } from './app.js';
 import { PayloadTooLargeError } from './http/errors.js';
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5 MB batch limit (contract ②)
@@ -32,9 +32,12 @@ export function enforceBodyLimit(limit = MAX_BODY_BYTES) {
 // ── Server start ────────────────────────────────────────────────────────────
 const port = Number(process.env['TEAMEM_PORT'] ?? 8080);
 
-export function startServer(portOverride?: number) {
+export function startServer(portOverride?: number, deps?: AppDeps) {
   const p = portOverride ?? port;
-  const app = buildApp({ dbUrl: process.env['TEAMEM_DATABASE_URL'] });
+  const app = buildApp({
+    dbUrl: process.env['TEAMEM_DATABASE_URL'],
+    ...deps,
+  });
   const server = serve({ fetch: app.fetch, port: p }, (info) => {
     console.log(`teamem server listening on http://127.0.0.1:${info.port}`);
   });
