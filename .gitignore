@@ -19,3 +19,4 @@ coverage/
 # OS noise
 .DS_Store
 .claude/settings.local.json
+.pi/extensions/emdash-hook.ts
