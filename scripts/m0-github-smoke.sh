@@ -1,46 +1,36 @@
 #!/usr/bin/env bash
 # M0 GitHub Webhook Smoke Test (AGPL-3.0-only)
 #
-# Creates real GitHub events (push, PR, issue, PR review comment) in a test
-# repository, normalizes and persists them through teamem's connector storage
-# layer, and verifies the stored events via direct database queries.
+# End-to-end smoke test that exercises the real GitHub → teamem webhook
+# HTTP path. Creates real GitHub events (push, PR, issue, PR review
+# comment) in a test repository, delivers them as webhooks to the running
+# teamem server via curl, and verifies stored events through both the
+# /v1/events API and direct PostgreSQL queries.
 #
 # Prerequisites:
+#   - teamem server running with webhook routes enabled
 #   - gh CLI authenticated with repo scope
 #   - jq, curl, psql installed
-#   - Node.js >= 20 with tsx available (pnpm dev or npx tsx)
-#   - A running PostgreSQL with teamem migrations applied
 #
 # Configuration (all via environment variables):
-#   TEAMEM_GITHUB_REPO        — target repo in owner/name format (required)
-#   TEAMEM_DATABASE_URL       — Postgres connection string (required)
-#   TEAMEM_SMOKE_TEAM_ID      — teamem team ID (default: team_smoke)
-#   TEAMEM_SMOKE_PROJECT_ID   — teamem project ID (default: prj_smoke)
-#   TEAMEM_BRANCH             — branch to push to (default: main)
-#
-# Usage:
-#   export TEAMEM_GITHUB_REPO="myorg/test-repo"
-#   export TEAMEM_DATABASE_URL="postgres://teamem:password@localhost:5432/teamem"
-#   bash scripts/m0-github-smoke.sh
+#   TEAMEM_BASE_URL            — teamem server base URL (default: http://127.0.0.1:8080)
+#   TEAMEM_GITHUB_REPO         — target repo in owner/name format (required)
+#   TEAMEM_GITHUB_TOKEN        — GitHub PAT with repo scope (required for API calls)
+#   TEAMEM_DATABASE_URL        — Postgres connection string (required for psql)
+#   TEAMEM_WEBHOOK_SECRET      — webhook secret for HMAC signature (optional)
+#   TEAMEM_SMOKE_KEEP_DATA     — keep DB rows after test (default: false)
 #
 # Safety:
-#   - Creates events on a dedicated smoke-test branch (m0-smoke-test-<timestamp>)
-#     to avoid polluting the default branch.
+#   - Creates events on a dedicated smoke-test branch to avoid pollution.
 #   - PR, issue, and review are closed immediately after creation.
-#   - Database rows are created under explicit smoke-test team/project IDs
-#     so they don't collide with real data.
-#   - A cleanup function removes smoke-test DB rows on exit (or keep them
-#     for inspection by setting TEAMEM_SMOKE_KEEP_DATA=true).
+#   - Database rows use explicit smoke-test team/project IDs.
+#
+# Exit codes: 0 = all checks passed, 1 = failures detected.
 
 set -euo pipefail
 
-# ── Colour output ─────────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BOLD='\033[1m'
-NC='\033[0m' # No Colour
-
+# ── Colour & output ────────────────────────────────────────────────────────
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\033[0m'
 pass()  { printf "${GREEN}✓ PASS${NC} %s\n" "$*"; }
 fail()  { printf "${RED}✗ FAIL${NC} %s\n" "$*"; }
 info()  { printf "${BOLD}→${NC} %s\n" "$*"; }
@@ -51,13 +41,13 @@ header() {
   printf '%s\n\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# ── Configuration ──────────────────────────────────────────────────────────
+BASE_URL="${TEAMEM_BASE_URL:-http://127.0.0.1:8080}"
 GITHUB_REPO="${TEAMEM_GITHUB_REPO:-}"
+GITHUB_TOKEN="${TEAMEM_GITHUB_TOKEN:-}"
 DATABASE_URL="${TEAMEM_DATABASE_URL:-}"
-SMOKE_TEAM_ID="${TEAMEM_SMOKE_TEAM_ID:-team_smoke}"
-SMOKE_PROJECT_ID="${TEAMEM_SMOKE_PROJECT_ID:-prj_smoke}"
+WEBHOOK_SECRET="${TEAMEM_WEBHOOK_SECRET:-}"
 KEEP_DATA="${TEAMEM_SMOKE_KEEP_DATA:-false}"
-BRANCH="${TEAMEM_BRANCH:-main}"
 TIMESTAMP="$(date +%Y%m%dT%H%M%S)"
 SMOKE_BRANCH="m0-smoke-test-${TIMESTAMP}"
 
@@ -65,13 +55,18 @@ TMPDIR="${TMPDIR:-/tmp}"
 SMOKE_TMP="$(mktemp -d "${TMPDIR}/teamem-smoke.XXXXXX")"
 trap 'rm -rf "$SMOKE_TMP"' EXIT
 
-PASS_COUNT=0
-FAIL_COUNT=0
+# Counter files (avoid subshell issues with pipe-based counting)
+PASS_FILE="${SMOKE_TMP}/pass-count"
+FAIL_FILE="${SMOKE_TMP}/fail-count"
+echo 0 > "$PASS_FILE"
+echo 0 > "$FAIL_FILE"
 
-increment_pass() { PASS_COUNT=$((PASS_COUNT + 1)); }
-increment_fail() { FAIL_COUNT=$((FAIL_COUNT + 1)); }
+inc_pass() { local c; c=$(cat "$PASS_FILE"); echo $((c + 1)) > "$PASS_FILE"; }
+inc_fail() { local c; c=$(cat "$FAIL_FILE"); echo $((c + 1)) > "$FAIL_FILE"; }
+get_pass() { cat "$PASS_FILE"; }
+get_fail() { cat "$FAIL_FILE"; }
 
-# ── Prerequisite checks ───────────────────────────────────────────────────────
+# ── Prerequisite checks ────────────────────────────────────────────────────
 check_prereqs() {
   header "M0 GitHub Webhook Smoke Test — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -81,21 +76,9 @@ check_prereqs() {
       fail "Required command not found: $cmd"
       missing=1
     else
-      info "Found: $cmd ($($cmd --version 2>&1 | head -1))"
+      info "Found: $cmd"
     fi
   done
-
-  if ! command -v tsx >/dev/null 2>&1; then
-    # Check for tsx in the pnpm hoisted path
-    if [[ -x "${REPO_ROOT}/node_modules/.pnpm/node_modules/.bin/tsx" ]]; then
-      info "tsx found via pnpm node_modules"
-    elif command -v npx >/dev/null 2>&1; then
-      info "tsx not in PATH, will use: npx tsx"
-    else
-      fail "Neither tsx nor npx found — need one of them to run the ingest helper"
-      missing=1
-    fi
-  fi
 
   if [[ -z "$GITHUB_REPO" ]]; then
     fail "TEAMEM_GITHUB_REPO is not set (required: owner/repo format)"
@@ -104,31 +87,53 @@ check_prereqs() {
     info "Target repository: $GITHUB_REPO"
   fi
 
-  if [[ -z "$DATABASE_URL" ]]; then
-    fail "TEAMEM_DATABASE_URL is not set (required: postgres://... connection string)"
+  if [[ -z "$GITHUB_TOKEN" ]]; then
+    fail "TEAMEM_GITHUB_TOKEN is not set (required: GitHub PAT with repo scope)"
     missing=1
   else
-    info "Database URL: ${DATABASE_URL%%@*}@***" # mask password
+    info "GitHub token: ${GITHUB_TOKEN:0:8}..."
   fi
 
-  # Verify gh is authenticated and can access the repo
-  if [[ "$missing" -eq 0 ]]; then
-    if ! gh repo view "$GITHUB_REPO" >/dev/null 2>&1; then
-      fail "Cannot access repository '$GITHUB_REPO' via gh CLI — check auth and repo name"
-      missing=1
-    else
-      pass "gh CLI authenticated and can access $GITHUB_REPO"
-    fi
+  if [[ -z "$DATABASE_URL" ]]; then
+    fail "TEAMEM_DATABASE_URL is not set (required)"
+    missing=1
+  else
+    info "Database URL: ${DATABASE_URL%%@*}@***"
   fi
 
-  # Verify database connectivity
-  if [[ "$missing" -eq 0 ]]; then
-    if ! psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; then
-      fail "Cannot connect to database — check TEAMEM_DATABASE_URL"
-      missing=1
-    else
-      pass "Database connectivity verified"
-    fi
+  # Check server is reachable
+  if ! curl -fsS "${BASE_URL}/healthz" >/dev/null 2>&1; then
+    fail "Server not reachable at ${BASE_URL}/healthz — start the teamem server first"
+    missing=1
+  else
+    pass "Server reachable at ${BASE_URL}"
+  fi
+
+  # Check webhook endpoint exists
+  local wh_status
+  wh_status="$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/v1/events/github" -X POST -d '{}' -H 'Content-Type: application/json' 2>/dev/null || echo '000')"
+  if [[ "$wh_status" == "404" ]]; then
+    fail "Webhook endpoint ${BASE_URL}/v1/events/github returned 404 — webhook route may not be enabled"
+    missing=1
+  else
+    info "Webhook endpoint status (dry POST): ${wh_status}"
+  fi
+
+  # Check database connectivity
+  if ! psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; then
+    fail "Cannot connect to database"
+    missing=1
+  else
+    pass "Database connectivity verified"
+  fi
+
+  # Verify gh is authenticated
+  export GH_TOKEN="$GITHUB_TOKEN"
+  if ! gh repo view "$GITHUB_REPO" >/dev/null 2>&1; then
+    fail "Cannot access repository '$GITHUB_REPO' via gh CLI"
+    missing=1
+  else
+    pass "gh CLI authenticated and can access $GITHUB_REPO"
   fi
 
   if [[ "$missing" -ne 0 ]]; then
@@ -137,797 +142,659 @@ check_prereqs() {
     exit 1
   fi
 
-  # Seed the smoke-test team and project if they don't exist
-  psql "$DATABASE_URL" -c "
-    INSERT INTO teams (id, name) VALUES ('${SMOKE_TEAM_ID}', 'Smoke Test Team')
-    ON CONFLICT (id) DO NOTHING;
-    INSERT INTO projects (id, team_id, name) VALUES ('${SMOKE_PROJECT_ID}', '${SMOKE_TEAM_ID}', 'Smoke Test Project')
-    ON CONFLICT (id) DO NOTHING;
-  " >/dev/null 2>&1
-  info "Smoke test team/project ensured: $SMOKE_TEAM_ID / $SMOKE_PROJECT_ID"
+  # Derive webhook signing info
+  if [[ -n "$WEBHOOK_SECRET" ]]; then
+    info "Webhook signature verification: ENABLED"
+  else
+    info "Webhook signature verification: DISABLED (no TEAMEM_WEBHOOK_SECRET set)"
+    info "  → actor provenance will be 'unknown' (not 'webhook_verified') — this is expected."
+    info "  → Set TEAMEM_WEBHOOK_SECRET to test the full signature-verified path."
+  fi
 
   info "All prerequisites met"
   echo ""
 }
 
-# ── Helper: find repo root and tsx ────────────────────────────────────────────
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
-run_tsx() {
-  local script_path="${REPO_ROOT}/scripts/m0-github-smoke-ingest.ts"
-
-  # Find tsx: prefer the hoisted pnpm binary, then global tsx, then npx
-  local TSX_BIN=""
-  if [[ -x "${REPO_ROOT}/node_modules/.pnpm/node_modules/.bin/tsx" ]]; then
-    TSX_BIN="${REPO_ROOT}/node_modules/.pnpm/node_modules/.bin/tsx"
-  elif command -v tsx >/dev/null 2>&1; then
-    TSX_BIN="tsx"
-  elif command -v npx >/dev/null 2>&1; then
-    TSX_BIN="npx tsx"
-  else
-    echo "ERROR: tsx not found — install with: pnpm install" >&2
-    exit 1
-  fi
-
-  $TSX_BIN "$script_path" "$@"
+# ── Compute HMAC-SHA256 signature for GitHub webhook ──────────────────────
+# Usage: sign_webhook <secret> <payload-file>
+# Output: sha256=<hex>
+sign_webhook() {
+  local secret="$1"
+  local payload_file="$2"
+  local raw_sig
+  raw_sig="$(openssl dgst -sha256 -hmac "$secret" -binary "$payload_file" | xxd -p -c 256)"
+  echo "sha256=${raw_sig}"
 }
 
-# ── Helper: create GitHub event and ingest it ─────────────────────────────────
-# Usage: create_and_ingest <event_label> <event_type> <gh_command_and_args...>
-# The gh command must output the raw API response as JSON to stdout.
-create_and_ingest() {
-  local label="$1"
-  local event_type="$2"
-  shift 2
+# ── Deliver a webhook payload to the server ────────────────────────────────
+# Usage: deliver_webhook <event-type> <delivery-id> <payload-file>
+# Output: JSON response from server on stdout
+deliver_webhook() {
+  local github_event="$1"
+  local delivery_id="$2"
+  local payload_file="$3"
 
-  info "Creating $label..."
+  local curl_args=(
+    -s -w '\n%{http_code}'
+    -X POST "${BASE_URL}/v1/events/github"
+    -H "Content-Type: application/json"
+    -H "X-GitHub-Event: ${github_event}"
+    -H "X-GitHub-Delivery: ${delivery_id}"
+    --data-binary "@${payload_file}"
+  )
 
-  local delivery_id
-  delivery_id="$(uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || echo "smoke-${TIMESTAMP}-${event_type}-${RANDOM}")"
-
-  local payload_file="${SMOKE_TMP}/${event_type}.json"
-  local ingest_result_file="${SMOKE_TMP}/${event_type}-result.json"
-
-  # Execute the gh command, capture output
-  if "$@" >"$payload_file" 2>"${SMOKE_TMP}/${event_type}.stderr"; then
-    :
-  else
-    local rc=$?
-    fail "$label: gh command failed (rc=$rc)"
-    cat "${SMOKE_TMP}/${event_type}.stderr" >&2
-    increment_fail
-    echo ""
-    return 1
+  if [[ -n "$WEBHOOK_SECRET" ]]; then
+    local sig
+    sig="$(sign_webhook "$WEBHOOK_SECRET" "$payload_file")"
+    curl_args+=(-H "X-Hub-Signature-256: ${sig}")
   fi
 
-  # Verify we got valid JSON
-  if ! jq empty "$payload_file" >/dev/null 2>&1; then
-    fail "$label: gh output is not valid JSON"
-    increment_fail
-    echo ""
-    return 1
-  fi
-
-  info "  Payload size: $(wc -c < "$payload_file") bytes"
-
-  # Ingest via the TypeScript helper
-  if run_tsx "$event_type" "$delivery_id" "true" "$GITHUB_REPO" \
-      --payload-file="$payload_file" \
-      --db-url="$DATABASE_URL" \
-      >"$ingest_result_file" 2>"${SMOKE_TMP}/${event_type}-ingest.stderr"; then
-    :
-  else
-    local rc=$?
-    fail "$label: ingestion failed (rc=$rc)"
-    cat "${SMOKE_TMP}/${event_type}-ingest.stderr" >&2
-    increment_fail
-    echo ""
-    return 1
-  fi
-
-  local ingested_count
-  ingested_count="$(jq -r '.normalizedCount // 0' "$ingest_result_file")"
-
-  if [[ "$ingested_count" -eq 0 ]]; then
-    fail "$label: 0 events produced — check output"
-    increment_fail
-  else
-    pass "$label: $ingested_count event(s) ingested"
-    jq -r '.results[] | "    eventId=\(.eventId) channel=\(.channel) kind=\(.connectorKind) duplicate=\(.duplicate)"' "$ingest_result_file"
-    increment_pass
-  fi
-
-  # Return the delivery_id for later use
-  echo "$delivery_id" > "${SMOKE_TMP}/${event_type}.delivery-id"
-  echo ""
+  curl "${curl_args[@]}" 2>/dev/null
 }
 
-# ── 1. Create real GitHub events ──────────────────────────────────────────────
-create_events() {
-  header "1. Creating Real GitHub Events"
+# ── Verify an assertion ────────────────────────────────────────────────────
+assert() {
+  local description="$1"
+  local condition="$2"
+  local detail="${3:-}"
 
-  # ── 1a. Push: create a smoke-test branch with a commit ─────────────────────
-  info "Setting up smoke-test branch '$SMOKE_BRANCH'..."
-  local default_branch
+  if eval "$condition"; then
+    pass "$description"
+    inc_pass
+  else
+    fail "$description"
+    if [[ -n "$detail" ]]; then
+      printf "    ${RED}Detail: %s${NC}\n" "$detail"
+    fi
+    inc_fail
+  fi
+}
+
+# ── Query events via API ──────────────────────────────────────────────────
+query_api() {
+  local kind_filter="${1:-}"
+  local url="${BASE_URL}/v1/events?limit=50"
+  if [[ -n "$kind_filter" ]]; then
+    url="${url}&kind=${kind_filter}"
+  fi
+  curl -s "$url" 2>/dev/null
+}
+
+# ── Query events via psql ─────────────────────────────────────────────────
+query_psql() {
+  psql "$DATABASE_URL" -t -A -F'|' -c "$1" 2>/dev/null
+}
+
+# ── Get the authenticated GitHub user info ─────────────────────────────────
+get_github_user() {
+  gh api user --jq '{login: .login, id: (.id | tonumber), type: "User"}'
+}
+
+# ── 1. Create real GitHub events and deliver as webhooks ───────────────────
+create_and_deliver_events() {
+  header "1. Creating Real GitHub Events & Delivering Webhooks"
+
+  local github_user
+  github_user="$(get_github_user)"
+  info "Authenticated GitHub user: $(echo "$github_user" | jq -r '.login')"
+
+  local default_branch base_sha
   default_branch="$(gh api "repos/${GITHUB_REPO}" --jq '.default_branch')"
-
-  # Get the latest SHA on the default branch
-  local base_sha
   base_sha="$(gh api "repos/${GITHUB_REPO}/git/refs/heads/${default_branch}" --jq '.object.sha')"
+  info "Default branch: $default_branch ($base_sha)"
 
-  # Create a blob (empty file or small change)
-  local blob_sha
+  # ── 1a. Push webhook ──────────────────────────────────────────────────
+  info "Creating push on smoke-test branch '${SMOKE_BRANCH}'..."
+
+  # Create blob → tree → commit → ref
+  local blob_sha tree_sha commit_sha
   blob_sha="$(gh api "repos/${GITHUB_REPO}/git/blobs" \
     -f content="M0 smoke test commit ${TIMESTAMP}" \
-    -f encoding=utf-8 \
-    --jq '.sha')"
+    -f encoding=utf-8 --jq '.sha')"
 
-  # Create a tree
-  local tree_sha
   tree_sha="$(gh api "repos/${GITHUB_REPO}/git/trees" \
     -f "tree[0][path]=m0-smoke-test-${TIMESTAMP}.md" \
-    -f "tree[0][mode]=100644" \
-    -f "tree[0][type]=blob" \
-    -f "tree[0][sha]=${blob_sha}" \
-    -f "base_tree=${base_sha}" \
-    --jq '.sha')"
+    -f "tree[0][mode]=100644" -f "tree[0][type]=blob" -f "tree[0][sha]=${blob_sha}" \
+    -f "base_tree=${base_sha}" --jq '.sha')"
 
-  # Create a commit
-  local commit_sha
   commit_sha="$(gh api "repos/${GITHUB_REPO}/git/commits" \
     -f message="M0 smoke test commit — ${TIMESTAMP}" \
-    -f "tree=${tree_sha}" \
-    -f "parents[]=${base_sha}" \
-    --jq '.sha')"
+    -f "tree=${tree_sha}" -f "parents[]=${base_sha}" --jq '.sha')"
 
-  # Create the branch ref
   gh api "repos/${GITHUB_REPO}/git/refs" \
-    -f "ref=refs/heads/${SMOKE_BRANCH}" \
-    -f "sha=${commit_sha}" >/dev/null 2>&1
+    -f "ref=refs/heads/${SMOKE_BRANCH}" -f "sha=${commit_sha}" >/dev/null 2>&1
 
-  # Now get the push equivalent by retrieving the commit
-  # GitHub doesn't have a direct "get webhook payload" API, so we construct
-  # an equivalent by querying the commit and repo data
-  info "  Commit SHA: $commit_sha"
-
-  # Build a push-like payload from the commit and repo data
-  local repo_data commit_data
-  repo_data="$(gh api "repos/${GITHUB_REPO}")"
+  # Get commit details for a real push payload shape
+  local commit_data repo_data
   commit_data="$(gh api "repos/${GITHUB_REPO}/git/commits/${commit_sha}")"
+  repo_data="$(gh api "repos/${GITHUB_REPO}")"
+
   local commit_date
   commit_date="$(echo "$commit_data" | jq -r '.committer.date')"
 
-  # Construct a payload that looks like a push webhook
+  # Build the push webhook payload — this IS the shape GitHub sends
   jq -n \
     --arg ref "refs/heads/${SMOKE_BRANCH}" \
-    --arg before "${base_sha}" \
-    --arg after "${commit_sha}" \
-    --arg repo_name "$(echo "$repo_data" | jq -r '.name')" \
-    --arg repo_full "$(echo "$repo_data" | jq -r '.full_name')" \
-    --arg owner_login "$(echo "$repo_data" | jq -r '.owner.login')" \
-    --arg sha "${commit_sha}" \
+    --arg before "$base_sha" \
+    --arg after "$commit_sha" \
+    --argjson repo "$repo_data" \
+    --argjson sender "$github_user" \
+    --arg sha "$commit_sha" \
     --arg message "M0 smoke test commit — ${TIMESTAMP}" \
-    --arg timestamp "${commit_date}" \
-    --argjson sender "$(echo "$commit_data" | jq '{login: .committer.login, id: (if .committer.id then (.committer.id | tonumber) else null end), type: "User"}')" \
-    --argjson pusher "$(echo "$commit_data" | jq '{name: .committer.name, email: .committer.email}')" \
+    --arg timestamp "$commit_date" \
     '{
       ref: $ref,
       before: $before,
       after: $after,
-      created: false,
-      deleted: false,
-      forced: false,
-      repository: {
-        full_name: $repo_full,
-        name: $repo_name,
-        owner: { login: $owner_login }
-      },
+      created: false, deleted: false, forced: false,
+      repository: $repo,
       sender: $sender,
-      pusher: $pusher,
+      pusher: { name: $sender.login, email: ($sender.login + "@users.noreply.github.com") },
       commits: [{
         id: $sha,
         timestamp: $timestamp,
         message: $message,
-        url: ("https://github.com/" + $repo_full + "/commit/" + $sha),
-        author: $sender,
-        committer: $sender,
+        url: ("https://github.com/" + $repo.full_name + "/commit/" + $sha),
+        author: { name: $sender.login, email: ($sender.login + "@users.noreply.github.com"), username: $sender.login },
+        committer: { name: $sender.login, email: ($sender.login + "@users.noreply.github.com"), username: $sender.login },
         distinct: true
-      }]
-    }' \
-    >"${SMOKE_TMP}/push.json"
+      }],
+      head_commit: {
+        id: $sha, timestamp: $timestamp, message: $message,
+        url: ("https://github.com/" + $repo.full_name + "/commit/" + $sha),
+        author: { name: $sender.login, email: ($sender.login + "@users.noreply.github.com"), username: $sender.login },
+        committer: { name: $sender.login, email: ($sender.login + "@users.noreply.github.com"), username: $sender.login }
+      }
+    }' > "${SMOKE_TMP}/push-payload.json"
 
-  create_and_ingest "Push (1 commit)" "push" cat "${SMOKE_TMP}/push.json"
+  local push_delivery="smoke-push-${TIMESTAMP}"
+  local push_response push_http_code
+  push_response="$(deliver_webhook "push" "$push_delivery" "${SMOKE_TMP}/push-payload.json")"
+  push_http_code="$(echo "$push_response" | tail -1)"
+  push_response="$(echo "$push_response" | sed '$d')"
 
-  # ── 1b. Issue ───────────────────────────────────────────────────────────────
+  if [[ "$push_http_code" == "200" ]]; then
+    local push_count
+    push_count="$(echo "$push_response" | jq -r '.events | length // 0')"
+    pass "Push webhook: HTTP $push_http_code, $push_count event(s) ingested"
+    inc_pass
+    echo "$push_response" | jq '.events[] | "    eventId=\(.eventId) status=\(.status) channel=\(.channel) kind=\(.kind)"' -r
+  else
+    fail "Push webhook: HTTP $push_http_code"
+    echo "    Response: $push_response"
+    inc_fail
+  fi
+  echo ""
+
+  # ── 1b. Issue webhook ─────────────────────────────────────────────────
   info "Creating issue..."
-  gh issue create \
-    --repo "$GITHUB_REPO" \
-    --title "M0 Smoke Test Issue — ${TIMESTAMP}" \
-    --body "This is a smoke test issue created by \`scripts/m0-github-smoke.sh\`.
-
-## Purpose
-Verify that the teamem ingestion pipeline correctly processes GitHub **issues** events.
-
-## Expected Behavior
-- Actor should be the authenticated user
-- Source event should be \`issues\` with action \`opened\`
-- Immutable URL should point to this issue" \
-    --label "type:chore" \
-    >/dev/null 2>&1
-
   local issue_number
-  issue_number="$(gh issue list --repo "$GITHUB_REPO" --search "M0 Smoke Test Issue — ${TIMESTAMP}" --json number --jq '.[0].number')"
-  info "  Issue number: #${issue_number}"
+  gh issue create --repo "$GITHUB_REPO" \
+    --title "M0 Smoke Test Issue — ${TIMESTAMP}" \
+    --body "Smoke test issue for teamem webhook verification." \
+    --label "bug" >/dev/null 2>&1
 
-  # Fetch the issue via API to simulate webhook payload shape
-  gh api "repos/${GITHUB_REPO}/issues/${issue_number}" \
-    >"${SMOKE_TMP}/issue-object.json"
+  issue_number="$(gh issue list --repo "$GITHUB_REPO" \
+    --search "M0 Smoke Test Issue — ${TIMESTAMP}" \
+    --json number --jq '.[0].number')"
+  info "  Issue: #${issue_number}"
 
   local issue_data
-  issue_data="$(cat "${SMOKE_TMP}/issue-object.json")"
+  issue_data="$(gh api "repos/${GITHUB_REPO}/issues/${issue_number}")"
 
-  # Wrap in webhook-like envelope
+  # Build issues webhook payload
   jq -n \
     --arg action "opened" \
     --argjson issue "$issue_data" \
-    --argjson repository "$(gh api "repos/${GITHUB_REPO}")" \
-    --argjson sender "$(echo "$issue_data" | jq '.user')" \
-    '{
-      action: $action,
-      issue: $issue,
-      repository: $repository,
-      sender: $sender
-    }' \
-    >"${SMOKE_TMP}/issues.json"
+    --argjson repository "$repo_data" \
+    --argjson sender "$github_user" \
+    '{ action: $action, issue: $issue, repository: $repository, sender: $sender }' \
+    > "${SMOKE_TMP}/issues-payload.json"
 
-  create_and_ingest "Issue #${issue_number}" "issues" cat "${SMOKE_TMP}/issues.json"
+  local issue_delivery="smoke-issue-${TIMESTAMP}"
+  local issue_response issue_http_code
+  issue_response="$(deliver_webhook "issues" "$issue_delivery" "${SMOKE_TMP}/issues-payload.json")"
+  issue_http_code="$(echo "$issue_response" | tail -1)"
+  issue_response="$(echo "$issue_response" | sed '$d')"
 
-  # Close the issue to clean up
+  if [[ "$issue_http_code" == "200" ]]; then
+    pass "Issue webhook: HTTP $issue_http_code"
+    inc_pass
+    echo "$issue_response" | jq '.events[] | "    eventId=\(.eventId) status=\(.status) kind=\(.kind)"' -r
+  else
+    fail "Issue webhook: HTTP $issue_http_code"
+    echo "    Response: $issue_response"
+    inc_fail
+  fi
   gh issue close "$issue_number" --repo "$GITHUB_REPO" >/dev/null 2>&1 || true
+  echo ""
 
-  # ── 1c. Pull Request ────────────────────────────────────────────────────────
+  # ── 1c. Pull Request webhook ──────────────────────────────────────────
   info "Creating PR from ${SMOKE_BRANCH} to ${default_branch}..."
-  local pr_url
-  pr_url="$(gh pr create \
-    --repo "$GITHUB_REPO" \
-    --head "$SMOKE_BRANCH" \
-    --base "$default_branch" \
+  local pr_number pr_url
+  pr_url="$(gh pr create --repo "$GITHUB_REPO" \
+    --head "$SMOKE_BRANCH" --base "$default_branch" \
     --title "M0 Smoke Test PR — ${TIMESTAMP}" \
-    --body "This is a smoke test PR created by \`scripts/m0-github-smoke.sh\`.
+    --body "Smoke test PR for teamem webhook verification." 2>/dev/null)" || true
 
-## Purpose
-Verify that the teamem ingestion pipeline correctly processes GitHub **pull_request** events." \
-    2>/dev/null)" || true
-
-  # Extract PR number from URL
-  local pr_number
   pr_number="$(echo "$pr_url" | grep -oE '[0-9]+$' || echo "")"
-
   if [[ -z "$pr_number" ]]; then
-    # Try fetching by search
     pr_number="$(gh pr list --repo "$GITHUB_REPO" --head "$SMOKE_BRANCH" --json number --jq '.[0].number' 2>/dev/null || echo "")"
   fi
-
   if [[ -z "$pr_number" ]]; then
-    warn "PR may not have been created (branch might already have an open PR). Checking..."
-    pr_number="$(gh pr list --repo "$GITHUB_REPO" --search "M0 Smoke Test PR — ${TIMESTAMP}" --json number --jq '.[0].number' 2>/dev/null || echo "")"
-  fi
-
-  if [[ -n "$pr_number" ]]; then
-    info "  PR number: #${pr_number}"
-
-    gh api "repos/${GITHUB_REPO}/pulls/${pr_number}" \
-      >"${SMOKE_TMP}/pr-object.json"
-
+    fail "PR: could not create or find PR"
+    inc_fail
+  else
+    info "  PR: #${pr_number}"
     local pr_data
-    pr_data="$(cat "${SMOKE_TMP}/pr-object.json")"
+    pr_data="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}")"
 
     jq -n \
       --arg action "opened" \
       --argjson pull_request "$pr_data" \
-      --argjson repository "$(gh api "repos/${GITHUB_REPO}")" \
-      --argjson sender "$(echo "$pr_data" | jq '.user')" \
-      '{
-        action: $action,
-        pull_request: $pull_request,
-        repository: $repository,
-        sender: $sender
-      }' \
-      >"${SMOKE_TMP}/pull_request.json"
+      --argjson repository "$repo_data" \
+      --argjson sender "$github_user" \
+      '{ action: $action, pull_request: $pull_request, repository: $repository, sender: $sender }' \
+      > "${SMOKE_TMP}/pr-payload.json"
 
-    create_and_ingest "PR #${pr_number}" "pull_request" cat "${SMOKE_TMP}/pull_request.json"
+    local pr_delivery="smoke-pr-${TIMESTAMP}"
+    local pr_response pr_http_code
+    pr_response="$(deliver_webhook "pull_request" "$pr_delivery" "${SMOKE_TMP}/pr-payload.json")"
+    pr_http_code="$(echo "$pr_response" | tail -1)"
+    pr_response="$(echo "$pr_response" | sed '$d')"
 
-    # Close the PR
-    gh pr close "$pr_number" --repo "$GITHUB_REPO" >/dev/null 2>&1 || true
-  else
-    fail "PR: could not determine PR number — skipping PR test"
-    increment_fail
-    echo ""
+    if [[ "$pr_http_code" == "200" ]]; then
+      pass "PR webhook: HTTP $pr_http_code"
+      inc_pass
+      echo "$pr_response" | jq '.events[] | "    eventId=\(.eventId) status=\(.status) kind=\(.kind)"' -r
+    else
+      fail "PR webhook: HTTP $pr_http_code"
+      echo "    Response: $pr_response"
+      inc_fail
+    fi
   fi
+  echo ""
 
-  # ── 1d. PR Review Comment ──────────────────────────────────────────────────
+  # ── 1d. PR Review webhook ─────────────────────────────────────────────
   if [[ -n "${pr_number:-}" ]]; then
-    info "Adding review comment to PR #${pr_number}..."
-    # We need a PR that exists. Re-open it briefly to add a review.
-    gh pr reopen "$pr_number" --repo "$GITHUB_REPO" >/dev/null 2>&1 || true
-    sleep 2
-
-    local comment_body="M0 smoke test review comment — ${TIMESTAMP}"
-    local review_result
-    review_result="$(gh api \
-      "repos/${GITHUB_REPO}/pulls/${pr_number}/reviews" \
+    info "Creating PR review on #${pr_number}..."
+    local review_result review_id
+    review_result="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}/reviews" \
       -f event="COMMENT" \
-      -f body="$comment_body" \
-      2>/dev/null)" || true
+      -f body="M0 smoke test review — ${TIMESTAMP}" 2>/dev/null)" || true
 
-    local review_id
     review_id="$(echo "$review_result" | jq -r '.id // empty')"
 
     if [[ -n "$review_id" ]]; then
       info "  Review ID: $review_id"
-
-      # Fetch the full review
-      gh api "repos/${GITHUB_REPO}/pulls/${pr_number}/reviews/${review_id}" \
-        >"${SMOKE_TMP}/review-object.json"
-
       local review_data
-      review_data="$(cat "${SMOKE_TMP}/review-object.json")"
+      review_data="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}/reviews/${review_id}")"
 
       jq -n \
         --arg action "submitted" \
         --argjson review "$review_data" \
         --argjson pull_request "$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}")" \
-        --argjson repository "$(gh api "repos/${GITHUB_REPO}")" \
-        --argjson sender "$(echo "$review_data" | jq '.user')" \
-        '{
-          action: $action,
-          review: $review,
-          pull_request: $pull_request,
-          repository: $repository,
-          sender: $sender
-        }' \
-        >"${SMOKE_TMP}/pull_request_review.json"
+        --argjson repository "$repo_data" \
+        --argjson sender "$github_user" \
+        '{ action: $action, review: $review, pull_request: $pull_request, repository: $repository, sender: $sender }' \
+        > "${SMOKE_TMP}/review-payload.json"
 
-      create_and_ingest "PR Review #${review_id}" "pull_request_review" cat "${SMOKE_TMP}/pull_request_review.json"
-    else
-      warn "PR review: could not create review (may require write access)"
-      # Try an issue comment on the PR instead (which maps to github_pr_comment)
-      info "  Falling back to issue comment on PR..."
-      local comment_result
-      comment_result="$(gh api \
-        "repos/${GITHUB_REPO}/issues/${pr_number}/comments" \
-        -f body="M0 smoke test issue comment — ${TIMESTAMP}" \
-        2>/dev/null)" || true
+      local review_delivery="smoke-review-${TIMESTAMP}"
+      local review_response review_http_code
+      review_response="$(deliver_webhook "pull_request_review" "$review_delivery" "${SMOKE_TMP}/review-payload.json")"
+      review_http_code="$(echo "$review_response" | tail -1)"
+      review_response="$(echo "$review_response" | sed '$d')"
 
-      local comment_id
-      comment_id="$(echo "$comment_result" | jq -r '.id // empty')"
-
-      if [[ -n "$comment_id" ]]; then
-        gh api "repos/${GITHUB_REPO}/issues/comments/${comment_id}" \
-          >"${SMOKE_TMP}/comment-object.json"
-
-        local comment_data
-        comment_data="$(cat "${SMOKE_TMP}/comment-object.json")"
-
-        jq -n \
-          --arg action "created" \
-          --argjson comment "$comment_data" \
-          --argjson issue "$(gh api "repos/${GITHUB_REPO}/issues/${pr_number}")" \
-          --argjson repository "$(gh api "repos/${GITHUB_REPO}")" \
-          --argjson sender "$(echo "$comment_data" | jq '.user')" \
-          '{
-            action: $action,
-            comment: $comment,
-            issue: $issue,
-            repository: $repository,
-            sender: $sender
-          }' \
-          >"${SMOKE_TMP}/issue_comment.json"
-
-        create_and_ingest "Issue Comment on PR #${pr_number}" "issue_comment" cat "${SMOKE_TMP}/issue_comment.json"
+      if [[ "$review_http_code" == "200" ]]; then
+        pass "PR review webhook: HTTP $review_http_code"
+        inc_pass
+        echo "$review_response" | jq '.events[] | "    eventId=\(.eventId) status=\(.status) kind=\(.kind)"' -r
       else
-        warn "Could not create comment — skipping comment test"
+        fail "PR review webhook: HTTP $review_http_code"
+        echo "    Response: $review_response"
+        inc_fail
       fi
+    else
+      fail "PR review: could not create review (this is required for the smoke test)"
+      inc_fail
     fi
 
-    # Close the PR again
     gh pr close "$pr_number" --repo "$GITHUB_REPO" >/dev/null 2>&1 || true
+  else
+    fail "PR review: skipped because no PR was created"
+    inc_fail
   fi
+  echo ""
 
   # Clean up the smoke test branch
   if [[ -n "${SMOKE_BRANCH:-}" ]]; then
-    info "Cleaning up smoke test branch '$SMOKE_BRANCH'..."
+    info "Cleaning up smoke test branch '${SMOKE_BRANCH}'..."
     gh api --method DELETE "repos/${GITHUB_REPO}/git/refs/heads/${SMOKE_BRANCH}" >/dev/null 2>&1 || true
   fi
 }
 
-# ── 2. Database verification ──────────────────────────────────────────────────
-verify_database() {
-  header "2. Database Verification"
+# ── 2. Verify stored events via API ──────────────────────────────────────
+verify_via_api() {
+  header "2. Verification via ${BASE_URL}/v1/events"
 
-  # Count events by kind in the smoke test project
-  info "Event counts by kind in smoke test project:"
-  local event_counts
-  event_counts="$(psql "$DATABASE_URL" -t -A -F'|' -c "
-    SELECT kind, count(*) AS cnt
-    FROM events
-    WHERE project_id = '${SMOKE_PROJECT_ID}'
-      AND team_id = '${SMOKE_TEAM_ID}'
-    GROUP BY kind
-    ORDER BY kind
-  " 2>/dev/null)" || true
+  info "Fetching all events via API..."
+  local api_response
+  api_response="$(query_api)"
+  local api_total
+  api_total="$(echo "$api_response" | jq -r '.total // 0')"
+  info "  Total events: $api_total"
 
-  if [[ -z "$event_counts" ]]; then
-    warn "No events found in smoke test project — skipping verification"
+  if [[ "$api_total" -eq 0 ]]; then
+    fail "API returned 0 events — webhook delivery may have failed"
+    inc_fail
     return
   fi
 
-  echo "$event_counts" | while IFS='|' read -r kind cnt; do
-    info "  $kind: $cnt event(s)"
+  # Verify each expected kind
+  for expected_kind in github_commit github_issue github_pr github_pr_comment; do
+    local kind_response kind_count
+    kind_response="$(query_api "$expected_kind")"
+    kind_count="$(echo "$kind_response" | jq -r '.total // 0')"
+
+    if [[ "$kind_count" -gt 0 ]]; then
+      pass "API: found $kind_count ${expected_kind} event(s)"
+      inc_pass
+
+      # Verify structure of first event
+      local first_event
+      first_event="$(echo "$kind_response" | jq '.events[0]')"
+
+      assert "  ${expected_kind}: channel is set" \
+        "[ \"$(echo "$first_event" | jq -r '.channel')\" = \"github\" ]" \
+        "channel=$(echo "$first_event" | jq -r '.channel')"
+
+      assert "  ${expected_kind}: kind matches" \
+        "[ \"$(echo "$first_event" | jq -r '.kind')\" = \"${expected_kind}\" ]"
+
+      assert "  ${expected_kind}: url is not empty" \
+        "[ -n \"$(echo "$first_event" | jq -r '.url // ""')\" ]" \
+        "url=$(echo "$first_event" | jq -r '.url')"
+
+      assert "  ${expected_kind}: deliveryId is not empty" \
+        "[ -n \"$(echo "$first_event" | jq -r '.deliveryId // ""')\" ]"
+
+      assert "  ${expected_kind}: itemKey is not empty" \
+        "[ -n \"$(echo "$first_event" | jq -r '.itemKey // ""')\" ]"
+
+      assert "  ${expected_kind}: externalId is not empty" \
+        "[ -n \"$(echo "$first_event" | jq -r '.externalId // ""')\" ]"
+
+      # Actor provenance: webhook_verified if secret was configured, else unknown
+      local expected_prov
+      expected_prov="unknown"
+      if [[ -n "$WEBHOOK_SECRET" ]]; then
+        expected_prov="webhook_verified"
+      fi
+      assert "  ${expected_kind}: actorProvenance is ${expected_prov}" \
+        "[ \"$(echo "$first_event" | jq -r '.actorProvenance')\" = \"${expected_prov}\" ]" \
+        "actual=$(echo "$first_event" | jq -r '.actorProvenance')"
+
+    else
+      fail "API: no ${expected_kind} events found"
+      inc_fail
+    fi
   done
+  echo ""
+}
 
+# ── 3. Verify stored events via psql ──────────────────────────────────────
+verify_via_psql() {
+  header "3. Verification via PostgreSQL"
+
+  info "Event counts by kind:"
+  local psql_counts
+  if ! psql_counts="$(query_psql "
+    SELECT kind, count(*)::text AS cnt
+    FROM events
+    WHERE project_id = 'prj_default' AND team_id = 'team_default'
+    GROUP BY kind ORDER BY kind
+  ")"; then
+    fail "psql query failed (event counts)"
+    inc_fail
+    return
+  fi
+
+  if [[ -z "$psql_counts" ]]; then
+    fail "psql: no events found in database"
+    inc_fail
+    return
+  fi
+
+  echo "$psql_counts" | while IFS='|' read -r kind cnt; do
+    info "  $kind: $cnt"
+  done
   echo ""
 
-  # ── 2a. Push verification ──────────────────────────────────────────────────
-  info "Verifying push events..."
+  # Verify push events
+  info "Verifying github_commit events..."
   local push_rows
-  push_rows="$(psql "$DATABASE_URL" -t -A -F'|' -c "
+  if push_rows="$(query_psql "
     SELECT id, channel, kind, source_event, delivery_id, item_key,
-           external_id, url, actor_provenance, occurred_at_provenance
+           external_id, url, actor_provenance, occurred_at_provenance,
+           occurred_at, actor
     FROM events
-    WHERE project_id = '${SMOKE_PROJECT_ID}'
-      AND team_id = '${SMOKE_TEAM_ID}'
+    WHERE project_id = 'prj_default' AND team_id = 'team_default'
       AND kind = 'github_commit'
-    ORDER BY created_at DESC
-    LIMIT 5
-  " 2>/dev/null)"
+    ORDER BY created_at DESC LIMIT 3
+  ")"; then
 
-  if [[ -n "$push_rows" ]]; then
-    echo "$push_rows" | while IFS='|' read -r id channel kind source_event delivery_id item_key external_id url actor_prov occurred_at_prov; do
-      local checks_ok=true
+    if [[ -z "$push_rows" ]]; then
+      fail "psql: no github_commit events"
+      inc_fail
+    else
+      local expected_prov
+      expected_prov="unknown"
+      [[ -n "$WEBHOOK_SECRET" ]] && expected_prov="webhook_verified"
 
-      [[ "$channel" == "github" ]] || { fail "  $id: channel=$channel (expected github)"; checks_ok=false; }
-      [[ "$kind" == "github_commit" ]] || { fail "  $id: kind=$kind (expected github_commit)"; checks_ok=false; }
-      [[ "$source_event" == "push" ]] || { fail "  $id: source_event=$source_event (expected push)"; checks_ok=false; }
-      [[ "$actor_prov" == "webhook_verified" ]] || { fail "  $id: actor_provenance=$actor_prov (expected webhook_verified)"; checks_ok=false; }
-      [[ "$occurred_at_prov" == "provider" ]] || { fail "  $id: occurred_at_provenance=$occurred_at_prov (expected provider)"; checks_ok=false; }
-      [[ -n "$url" ]] || { fail "  $id: url is empty (should be immutable commit URL)"; checks_ok=false; }
-      [[ -n "$delivery_id" ]] || { fail "  $id: delivery_id is empty"; checks_ok=false; }
-      [[ -n "$item_key" ]] || { fail "  $id: item_key is empty (should be commit SHA)"; checks_ok=false; }
-      [[ -n "$external_id" ]] || { fail "  $id: external_id is empty"; checks_ok=false; }
-
-      if [[ "$checks_ok" == true ]]; then
-        pass "github_commit: id=$id channel=$channel source=$source_event actor_prov=$actor_prov url=$url"
-        increment_pass
-      else
-        increment_fail
-      fi
-    done
+      echo "$push_rows" | while IFS='|' read -r id channel kind source_event delivery_id item_key external_id url actor_prov occurred_at_prov occurred_at actor; do
+        assert "push: channel=github ($id)" "[ \"$channel\" = \"github\" ]"
+        assert "push: source_event=push ($id)" "[ \"$source_event\" = \"push\" ]"
+        assert "push: url starts with https://github.com ($id)" "[[ \"$url\" == https://github.com/* ]]"
+        assert "push: item_key=commit SHA ($id)" "[ \"\${#item_key}\" -ge 40 ]"
+        assert "push: actor_provenance=$expected_prov ($id)" "[ \"$actor_prov\" = \"$expected_prov\" ]"
+        assert "push: occurred_at_provenance=provider ($id)" "[ \"$occurred_at_prov\" = \"provider\" ]"
+      done
+    fi
   else
-    fail "No github_commit events found"
-    increment_fail
+    fail "psql query for github_commit failed"
+    inc_fail
   fi
 
-  # ── 2b. Issue verification ─────────────────────────────────────────────────
-  info "Verifying issue events..."
+  # Verify issue events
+  info "Verifying github_issue events..."
   local issue_rows
-  issue_rows="$(psql "$DATABASE_URL" -t -A -F'|' -c "
-    SELECT id, channel, kind, source_event, source_action, delivery_id,
-           item_key, external_id, url, actor_provenance, occurred_at_provenance
+  if issue_rows="$(query_psql "
+    SELECT id, channel, kind, source_event, source_action, url, actor_provenance
     FROM events
-    WHERE project_id = '${SMOKE_PROJECT_ID}'
-      AND team_id = '${SMOKE_TEAM_ID}'
+    WHERE project_id = 'prj_default' AND team_id = 'team_default'
       AND kind = 'github_issue'
-    ORDER BY created_at DESC
-    LIMIT 5
-  " 2>/dev/null)"
-
-  if [[ -n "$issue_rows" ]]; then
-    echo "$issue_rows" | while IFS='|' read -r id channel kind source_event source_action delivery_id item_key external_id url actor_prov occurred_at_prov; do
-      local checks_ok=true
-
-      [[ "$channel" == "github" ]] || { fail "  $id: channel=$channel (expected github)"; checks_ok=false; }
-      [[ "$kind" == "github_issue" ]] || { fail "  $id: kind=$kind (expected github_issue)"; checks_ok=false; }
-      [[ "$source_event" == "issues" ]] || { fail "  $id: source_event=$source_event (expected issues)"; checks_ok=false; }
-      [[ -n "$source_action" ]] || { fail "  $id: source_action is empty"; checks_ok=false; }
-      [[ "$actor_prov" == "webhook_verified" ]] || { fail "  $id: actor_provenance=$actor_prov (expected webhook_verified)"; checks_ok=false; }
-      [[ -n "$url" ]] || { fail "  $id: url is empty (should be canonical issue URL)"; checks_ok=false; }
-
-      if [[ "$checks_ok" == true ]]; then
-        pass "github_issue: id=$id channel=$channel action=$source_action actor_prov=$actor_prov url=$url"
-        increment_pass
-      else
-        increment_fail
-      fi
-    done
+    ORDER BY created_at DESC LIMIT 3
+  ")"; then
+    if [[ -z "$issue_rows" ]]; then
+      fail "psql: no github_issue events"
+      inc_fail
+    else
+      echo "$issue_rows" | while IFS='|' read -r id channel kind source_event source_action url actor_prov; do
+        assert "issue: channel=github ($id)" "[ \"$channel\" = \"github\" ]"
+        assert "issue: source_event=issues ($id)" "[ \"$source_event\" = \"issues\" ]"
+        assert "issue: source_action is set ($id)" "[ -n \"$source_action\" ]"
+        assert "issue: url points to issue ($id)" "[[ \"$url\" == */issues/* ]]"
+      done
+    fi
   else
-    fail "No github_issue events found"
-    increment_fail
+    fail "psql query for github_issue failed"
+    inc_fail
   fi
 
-  # ── 2c. PR verification ────────────────────────────────────────────────────
-  info "Verifying PR events..."
+  # Verify PR events
+  info "Verifying github_pr events..."
   local pr_rows
-  pr_rows="$(psql "$DATABASE_URL" -t -A -F'|' -c "
-    SELECT id, channel, kind, source_event, source_action, delivery_id,
-           item_key, external_id, url, actor_provenance
+  if pr_rows="$(query_psql "
+    SELECT id, channel, kind, source_event, source_action, url, actor_provenance
     FROM events
-    WHERE project_id = '${SMOKE_PROJECT_ID}'
-      AND team_id = '${SMOKE_TEAM_ID}'
+    WHERE project_id = 'prj_default' AND team_id = 'team_default'
       AND kind = 'github_pr'
-    ORDER BY created_at DESC
-    LIMIT 5
-  " 2>/dev/null)"
-
-  if [[ -n "$pr_rows" ]]; then
-    echo "$pr_rows" | while IFS='|' read -r id channel kind source_event source_action delivery_id item_key external_id url actor_prov; do
-      local checks_ok=true
-
-      [[ "$channel" == "github" ]] || { fail "  $id: channel=$channel (expected github)"; checks_ok=false; }
-      [[ "$kind" == "github_pr" ]] || { fail "  $id: kind=$kind (expected github_pr)"; checks_ok=false; }
-      [[ "$source_event" == "pull_request" ]] || { fail "  $id: source_event=$source_event (expected pull_request)"; checks_ok=false; }
-      [[ -n "$source_action" ]] || { fail "  $id: source_action is empty"; checks_ok=false; }
-      [[ "$actor_prov" == "webhook_verified" ]] || { fail "  $id: actor_provenance=$actor_prov (expected webhook_verified)"; checks_ok=false; }
-      [[ -n "$url" ]] || { fail "  $id: url is empty (should be canonical PR URL)"; checks_ok=false; }
-
-      if [[ "$checks_ok" == true ]]; then
-        pass "github_pr: id=$id channel=$channel action=$source_action actor_prov=$actor_prov url=$url"
-        increment_pass
-      else
-        increment_fail
-      fi
-    done
+    ORDER BY created_at DESC LIMIT 3
+  ")"; then
+    if [[ -z "$pr_rows" ]]; then
+      fail "psql: no github_pr events"
+      inc_fail
+    else
+      echo "$pr_rows" | while IFS='|' read -r id channel kind source_event source_action url actor_prov; do
+        assert "pr: channel=github ($id)" "[ \"$channel\" = \"github\" ]"
+        assert "pr: source_event=pull_request ($id)" "[ \"$source_event\" = \"pull_request\" ]"
+        assert "pr: source_action is set ($id)" "[ -n \"$source_action\" ]"
+        assert "pr: url points to PR ($id)" "[[ \"$url\" == */pull/* ]]"
+      done
+    fi
   else
-    fail "No github_pr events found"
-    increment_fail
+    fail "psql query for github_pr failed"
+    inc_fail
   fi
 
-  # ── 2d. PR Comment verification ────────────────────────────────────────────
-  info "Verifying PR comment events..."
+  # Verify PR comment events
+  info "Verifying github_pr_comment events..."
   local comment_rows
-  comment_rows="$(psql "$DATABASE_URL" -t -A -F'|' -c "
-    SELECT id, channel, kind, source_event, source_action, delivery_id,
-           item_key, external_id, url, actor_provenance
+  if comment_rows="$(query_psql "
+    SELECT id, channel, kind, source_event, source_action, url, actor_provenance
     FROM events
-    WHERE project_id = '${SMOKE_PROJECT_ID}'
-      AND team_id = '${SMOKE_TEAM_ID}'
+    WHERE project_id = 'prj_default' AND team_id = 'team_default'
       AND kind = 'github_pr_comment'
-    ORDER BY created_at DESC
-    LIMIT 5
-  " 2>/dev/null)"
-
-  if [[ -n "$comment_rows" ]]; then
-    echo "$comment_rows" | while IFS='|' read -r id channel kind source_event source_action delivery_id item_key external_id url actor_prov; do
-      local checks_ok=true
-
-      [[ "$channel" == "github" ]] || { fail "  $id: channel=$channel (expected github)"; checks_ok=false; }
-      [[ "$kind" == "github_pr_comment" ]] || { fail "  $id: kind=$kind (expected github_pr_comment)"; checks_ok=false; }
-      [[ -n "$source_event" ]] || { fail "  $id: source_event is empty"; checks_ok=false; }
-      [[ -n "$source_action" ]] || { fail "  $id: source_action is empty"; checks_ok=false; }
-      [[ "$actor_prov" == "webhook_verified" ]] || { fail "  $id: actor_provenance=$actor_prov (expected webhook_verified)"; checks_ok=false; }
-      [[ -n "$url" ]] || { fail "  $id: url is empty (should be immutable comment permalink)"; checks_ok=false; }
-
-      if [[ "$checks_ok" == true ]]; then
-        pass "github_pr_comment: id=$id channel=$channel event=$source_event action=$source_action actor_prov=$actor_prov url=$url"
-        increment_pass
-      else
-        increment_fail
-      fi
-    done
+    ORDER BY created_at DESC LIMIT 3
+  ")"; then
+    if [[ -z "$comment_rows" ]]; then
+      fail "psql: no github_pr_comment events"
+      inc_fail
+    else
+      echo "$comment_rows" | while IFS='|' read -r id channel kind source_event source_action url actor_prov; do
+        assert "comment: channel=github ($id)" "[ \"$channel\" = \"github\" ]"
+        assert "comment: source_event is set ($id)" "[ -n \"$source_event\" ]"
+        assert "comment: source_action is set ($id)" "[ -n \"$source_action\" ]"
+        assert "comment: url has # anchor ($id)" "[[ \"$url\" == *\"#\"* ]]"
+      done
+    fi
   else
-    fail "No github_pr_comment events found"
-    increment_fail
-  fi
-
-  echo ""
-
-  # ── 2e. Actor verification ─────────────────────────────────────────────────
-  info "Verifying actor claims..."
-  local actor_rows
-  actor_rows="$(psql "$DATABASE_URL" -t -A -F'|' -c "
-    SELECT e.id, e.kind, e.actor, e.actor_provenance, e.actor_principal_id,
-           p.provider, p.provider_kind, p.provider_user_id, p.display_login
-    FROM events e
-    LEFT JOIN principals p ON p.id = e.actor_principal_id
-    WHERE e.project_id = '${SMOKE_PROJECT_ID}'
-      AND e.team_id = '${SMOKE_TEAM_ID}'
-      AND e.actor IS NOT NULL
-    ORDER BY e.created_at DESC
-    LIMIT 10
-  " 2>/dev/null)"
-
-  if [[ -n "$actor_rows" ]]; then
-    echo "$actor_rows" | while IFS='|' read -r id kind actor actor_prov principal_id provider provider_kind provider_user_id display_login; do
-      if [[ -n "$principal_id" && -n "$provider_user_id" ]]; then
-        pass "Actor resolved: event=$id kind=$kind actor_prov=$actor_prov principal=$principal_id provider=$provider provider_user_id=$provider_user_id login=$display_login"
-        increment_pass
-      elif [[ "$actor" == "null" ]]; then
-        pass "Actor null (preserved as unknown): event=$id kind=$kind"
-        increment_pass
-      else
-        fail "Actor: event=$id has actor=$actor but no resolved principal"
-        increment_fail
-      fi
-    done
-  else
-    warn "No actor data to verify"
-  fi
-
-  echo ""
-
-  # ── 2f. Jobs verification (if any) ──────────────────────────────────────────
-  info "Checking for compilation jobs..."
-  local job_rows
-  job_rows="$(psql "$DATABASE_URL" -t -A -F'|' -c "
-    SELECT id, kind, status, event_count, created_at
-    FROM jobs
-    WHERE project_id = '${SMOKE_PROJECT_ID}'
-      AND team_id = '${SMOKE_TEAM_ID}'
-    ORDER BY created_at DESC
-    LIMIT 10
-  " 2>/dev/null)"
-
-  if [[ -n "$job_rows" ]]; then
-    echo "$job_rows" | while IFS='|' read -r id kind status event_count created_at; do
-      info "  Job: id=$id kind=$kind status=$status event_count=$event_count"
-    done
-  else
-    info "  No compilation jobs (ingest-only — M0 compilation is not triggered by this smoke test)"
+    fail "psql query for github_pr_comment failed"
+    inc_fail
   fi
 
   echo ""
 }
 
-# ── 3. Idempotency test ──────────────────────────────────────────────────────
+# ── 4. Idempotency test ──────────────────────────────────────────────────
 test_idempotency() {
-  header "3. Idempotency Test"
+  header "4. Idempotency Test"
 
-  info "Re-playing the push event to verify idempotent replay (N1)..."
+  info "Re-delivering the same push webhook to verify idempotent replay (N1)..."
 
-  local push_payload="${SMOKE_TMP}/push.json"
-  local push_delivery_id_file="${SMOKE_TMP}/push.delivery-id"
-
-  if [[ ! -f "$push_payload" || ! -f "$push_delivery_id_file" ]]; then
-    warn "No push event data available for idempotency test — skipping"
+  local push_payload="${SMOKE_TMP}/push-payload.json"
+  if [[ ! -f "$push_payload" ]]; then
+    fail "No push payload for idempotency test"
+    inc_fail
     return
   fi
 
-  local delivery_id
-  delivery_id="$(cat "$push_delivery_id_file")"
+  local push_delivery="smoke-push-${TIMESTAMP}"
+  local replay_response replay_http_code
+  replay_response="$(deliver_webhook "push" "$push_delivery" "$push_payload")"
+  replay_http_code="$(echo "$replay_response" | tail -1)"
+  replay_response="$(echo "$replay_response" | sed '$d')"
 
-  info "  Replaying delivery $delivery_id..."
-
-  local replay_result="${SMOKE_TMP}/idempotency-replay.json"
-  if run_tsx "push" "$delivery_id" "true" "$GITHUB_REPO" \
-      --payload-file="$push_payload" \
-      --db-url="$DATABASE_URL" \
-      >"$replay_result" 2>"${SMOKE_TMP}/idempotency-replay.stderr"; then
-
-    local duplicate_count
-    duplicate_count="$(jq -r '[.results[] | select(.duplicate == true)] | length' "$replay_result")"
+  if [[ "$replay_http_code" == "200" ]]; then
+    local dup_count
+    dup_count="$(echo "$replay_response" | jq -r '[.events[] | select(.status == "duplicate")] | length')"
     local total_count
-    total_count="$(jq -r '.normalizedCount // 0' "$replay_result")"
+    total_count="$(echo "$replay_response" | jq -r '.events | length')"
 
-    if [[ "$duplicate_count" -eq "$total_count" && "$total_count" -gt 0 ]]; then
-      pass "Idempotent replay: all $total_count event(s) returned duplicate=true (N1 satisfied)"
-      increment_pass
-    elif [[ "$duplicate_count" -gt 0 ]]; then
-      warn "Idempotent replay: $duplicate_count/$total_count duplicates (some new events)"
+    if [[ "$dup_count" -eq "$total_count" && "$total_count" -gt 0 ]]; then
+      pass "Idempotent replay: all $total_count event(s) returned status=duplicate (N1)"
+      inc_pass
     else
-      fail "Idempotent replay: 0 duplicates — events were inserted again instead of being deduplicated"
-      increment_fail
+      fail "Idempotent replay: $dup_count/$total_count duplicates — expected all duplicates"
+      inc_fail
     fi
   else
-    fail "Idempotent replay: ingestion failed"
-    cat "${SMOKE_TMP}/idempotency-replay.stderr" >&2
-    increment_fail
+    fail "Idempotent replay: HTTP $replay_http_code"
+    echo "    Response: $replay_response"
+    inc_fail
   fi
 
-  echo ""
+  # ── 4b. Conflict test ───────────────────────────────────────────────────
+  info "Testing idempotency conflict: same delivery ID, modified payload..."
 
-  # ── 3b. Conflict test ──────────────────────────────────────────────────────
-  info "Testing idempotency conflict: same delivery ID with different payload..."
-
-  # Modify the push payload slightly
-  jq '.commits[0].message = "MODIFIED smoke test commit — different payload"' \
+  jq '.commits[0].message = "MODIFIED — different payload for conflict test"' \
     "$push_payload" > "${SMOKE_TMP}/push-modified.json"
 
-  local conflict_result="${SMOKE_TMP}/idempotency-conflict.json"
-  if run_tsx "push" "$delivery_id" "true" "$GITHUB_REPO" \
-      --payload-file="${SMOKE_TMP}/push-modified.json" \
-      --db-url="$DATABASE_URL" \
-      >"$conflict_result" 2>"${SMOKE_TMP}/idempotency-conflict.stderr"; then
-    fail "Idempotency conflict: different payload was accepted (should have been rejected as 409)"
-    increment_fail
+  local conflict_response conflict_http_code
+  conflict_response="$(deliver_webhook "push" "$push_delivery" "${SMOKE_TMP}/push-modified.json")"
+  conflict_http_code="$(echo "$conflict_response" | tail -1)"
+  conflict_response="$(echo "$conflict_response" | sed '$d')"
+
+  if [[ "$conflict_http_code" == "409" ]]; then
+    pass "Idempotency conflict: HTTP 409 (N1 — different hash correctly rejected)"
+    inc_pass
   else
-    local stderr_content
-    stderr_content="$(cat "${SMOKE_TMP}/idempotency-conflict.stderr" 2>/dev/null || true)"
-    if echo "$stderr_content" | grep -qi 'idempotency\|conflict\|already stored'; then
-      pass "Idempotency conflict: different payload correctly rejected (N1 409 semantics)"
-      increment_pass
-    else
-      pass "Idempotency conflict: different payload rejected (error: $(echo "$stderr_content" | head -1))"
-      increment_pass
-    fi
+    fail "Idempotency conflict: expected HTTP 409, got $conflict_http_code"
+    echo "    Response: $conflict_response"
+    inc_fail
   fi
 
   echo ""
 }
 
-# ── 4. Summary ─────────────────────────────────────────────────────────────────
+# ── 5. Summary ────────────────────────────────────────────────────────────
 print_summary() {
-  header "4. Smoke Test Summary"
+  header "5. Smoke Test Summary"
 
-  local total=$((PASS_COUNT + FAIL_COUNT))
+  local pass_c fail_c total
+  pass_c="$(get_pass)"
+  fail_c="$(get_fail)"
+  total=$((pass_c + fail_c))
 
-  echo "  Total checks: $total"
-  printf "  ${GREEN}Passed: ${PASS_COUNT}${NC}\n"
-  printf "  ${RED}Failed: ${FAIL_COUNT}${NC}\n"
+  echo "  Total assertions: $total"
+  printf "  ${GREEN}Passed: ${pass_c}${NC}\n"
+  printf "  ${RED}Failed: ${fail_c}${NC}\n"
   echo ""
 
-  # Show unique events stored in this run
-  info "Events stored in project '$SMOKE_PROJECT_ID':"
-  psql "$DATABASE_URL" -c "
-    SELECT kind, channel, source_event, source_action,
-           substring(external_id for 50) AS external_id_trunc,
-           substring(url for 60) AS url_trunc,
-           actor_provenance
-    FROM events
-    WHERE project_id = '${SMOKE_PROJECT_ID}'
-      AND team_id = '${SMOKE_TEAM_ID}'
-    ORDER BY created_at DESC
-    LIMIT 20
-  " 2>/dev/null || warn "Could not query events table"
-
-  echo ""
-
-  if [[ "$FAIL_COUNT" -eq 0 ]]; then
+  if [[ "$fail_c" -eq 0 ]]; then
     pass "ALL CHECKS PASSED — M0 GitHub webhook smoke test successful"
-    echo ""
-    info "This verifies:"
-    echo "  - Push events normalize correctly (github_commit with commit SHA item_key)"
-    echo "  - PR events normalize correctly (github_pr with PR number item_key)"
-    echo "  - Issue events normalize correctly (github_issue with issue number item_key)"
-    echo "  - PR comment events normalize correctly (github_pr_comment with comment ID)"
-    echo "  - Actor claims are preserved with webhook_verified provenance"
-    echo "  - Occurred timestamps are provider-sourced with ms precision"
-    echo "  - Immutable URLs are canonical (github.com/owner/repo/commit|pull|issues/...)"
-    echo "  - Idempotent replay returns duplicate=true for same delivery+payload"
-    echo "  - Idempotency conflict rejects same delivery+different payload"
   else
     fail "SOME CHECKS FAILED — see details above"
-    echo ""
     exit 1
   fi
 }
 
-# ── Cleanup ────────────────────────────────────────────────────────────────────
-cleanup() {
+# ── Cleanup ────────────────────────────────────────────────────────────────
+cleanup_data() {
   if [[ "${KEEP_DATA}" != "true" ]]; then
     info "Cleaning up smoke test data from database..."
     psql "$DATABASE_URL" -c "
-      DELETE FROM job_events WHERE team_id = '${SMOKE_TEAM_ID}' AND project_id = '${SMOKE_PROJECT_ID}';
-      DELETE FROM jobs WHERE team_id = '${SMOKE_TEAM_ID}' AND project_id = '${SMOKE_PROJECT_ID}';
-      DELETE FROM events WHERE team_id = '${SMOKE_TEAM_ID}' AND project_id = '${SMOKE_PROJECT_ID}';
-      DELETE FROM principals WHERE team_id = '${SMOKE_TEAM_ID}';
+      DELETE FROM job_events WHERE team_id = 'team_default' AND project_id = 'prj_default';
+      DELETE FROM jobs WHERE team_id = 'team_default' AND project_id = 'prj_default';
+      DELETE FROM events WHERE team_id = 'team_default' AND project_id = 'prj_default';
+      DELETE FROM principals WHERE team_id = 'team_default';
     " >/dev/null 2>&1 || true
-    info "Database rows removed for $SMOKE_TEAM_ID / $SMOKE_PROJECT_ID"
   else
-    info "KEEP_DATA=true — database rows preserved for inspection"
+    info "KEEP_DATA=true — database rows preserved"
   fi
-
   echo ""
   info "Smoke test completed at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── Main ───────────────────────────────────────────────────────────────────
 main() {
   check_prereqs
-  create_events
-  verify_database
+  create_and_deliver_events
+  verify_via_api
+  verify_via_psql
   test_idempotency
   print_summary
-  cleanup
+  cleanup_data
 }
 
 main

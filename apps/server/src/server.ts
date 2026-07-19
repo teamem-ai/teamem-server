@@ -1,7 +1,8 @@
 /**
  * teamem portal server — Hono on Node.js (AGPL-3.0-only)
  *
- * M0 scope: HTTP listener, /healthz, raw-body webhook access.
+ * M0 scope: HTTP listener, /healthz, /readyz, /v1/events/github (webhook
+ * receiver), /v1/events (query), raw-body webhook access.
  *
  * Raw body access: `c.req.raw` returns the web `Request` object; the
  * undigested body bytes are available before any JSON.parse() runs.
@@ -10,31 +11,51 @@
  *
  * Body limit: 5 MB enforced at the Hono level before any handler runs.
  */
-import { type Context, type Next } from 'hono';
 import { serve } from '@hono/node-server';
-import { buildApp } from './app.js';
-import { PayloadTooLargeError } from './http/errors.js';
+import { buildApp, type AppDeps } from './app.js';
+import { GitHubConnector } from './connectors/github/connector.js';
+import type { AppDb } from './db/client.js';
+import { enforceBodyLimit, MAX_BODY_BYTES } from './http/middleware.js';
 
-const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5 MB batch limit (contract ②)
-// ── Body-size guard ─────────────────────────────────────────────────────────
-// Applied per-route rather than globally so /healthz stays lightweight.
-// Ingestion routes will use this middleware explicitly.
-export function enforceBodyLimit(limit = MAX_BODY_BYTES) {
-  return async (c: Context, next: Next) => {
-    const contentLength = c.req.header('content-length');
-    if (contentLength && Number(contentLength) > limit) {
-      throw new PayloadTooLargeError(`Body exceeds ${limit} bytes`);
-    }
-    await next();
-  };
-}
+export { enforceBodyLimit, MAX_BODY_BYTES };
 
 // ── Server start ────────────────────────────────────────────────────────────
 const port = Number(process.env['TEAMEM_PORT'] ?? 8080);
 
-export function startServer(portOverride?: number) {
-  const p = portOverride ?? port;
-  const app = buildApp({ dbUrl: process.env['TEAMEM_DATABASE_URL'] });
+export interface StartServerOptions {
+  /** Drizzle database instance (for webhook + events routes). */
+  db?: AppDb;
+  /** GitHub webhook secret — pass false to skip verification. */
+  githubWebhookSecret?: string | false;
+  /** Webhook scope (team + project IDs for event delivery). */
+  webhookScope?: { teamId: string; projectId: string };
+  /** Override the listen port. */
+  port?: number;
+}
+
+export function startServer(options: StartServerOptions = {}) {
+  const p = options.port ?? port;
+
+  const deps: AppDeps = {
+    dbUrl: process.env['TEAMEM_DATABASE_URL'],
+    db: options.db,
+  };
+
+  // Wire GitHub connector if we have a db (need it for webhook routes)
+  if (options.db) {
+    deps.githubConnector = new GitHubConnector({
+      webhookSecret:
+        options.githubWebhookSecret === false
+          ? undefined
+          : (options.githubWebhookSecret ?? process.env['TEAMEM_GITHUB_WEBHOOK_SECRET']),
+    });
+    deps.webhookScope = options.webhookScope ?? {
+      teamId: process.env['TEAMEM_WEBHOOK_TEAM_ID'] ?? 'team_default',
+      projectId: process.env['TEAMEM_WEBHOOK_PROJECT_ID'] ?? 'prj_default',
+    };
+  }
+
+  const app = buildApp(deps);
   const server = serve({ fetch: app.fetch, port: p }, (info) => {
     console.log(`teamem server listening on http://127.0.0.1:${info.port}`);
   });
@@ -62,5 +83,5 @@ if (isMain) {
 
 // Re-export the factory and a default app for backward compatibility with
 // tests that import `app` from './server.js'.
-const app = buildApp();
+const app = buildApp({ dbUrl: process.env['TEAMEM_DATABASE_URL'] });
 export { app };
