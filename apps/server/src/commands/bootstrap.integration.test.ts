@@ -46,7 +46,16 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
   });
 
   beforeEach(async () => {
-    // Clean data in dependency order (children first)
+    // Clean data in full FK dependency order. The postgres CI job runs all
+    // integration files against one database, so this setup must tolerate rows
+    // left by earlier repository tests.
+    await db.delete(schema.jobEvents);
+    await db.delete(schema.jobs);
+    await db.delete(schema.conceptContributors);
+    await db.delete(schema.conceptEvidence);
+    await db.delete(schema.conceptPaths);
+    await db.delete(schema.concepts);
+    await db.delete(schema.events);
     await db.delete(schema.apiKeys);
     await db.delete(schema.principals);
     await db.delete(schema.projects);
