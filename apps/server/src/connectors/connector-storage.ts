@@ -21,8 +21,10 @@
  * not strip `<private>` content itself, it only stores what it is given and
  * computes the frozen N1 payload hash over the (assumed-redacted) content.
  */
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { canonicalJson } from '../security/canonical-json.js';
+import { payloadHash as computePayloadHash } from '../security/payload-hash.js';
 import { and, eq } from 'drizzle-orm';
 import {
   sourceKind as sourceKindSchema,
@@ -92,20 +94,6 @@ function resolveSourceEvent(channel: StoredChannel, event: NormalizedEvent): str
 function resolveProviderEnum(provider: string): 'github' | 'external' {
   return BUILTIN_IDENTITY_PROVIDERS.has(provider) ? 'github' : 'external';
 }
-
-/** Canonical JSON per N1: sorted object keys, recursively, no whitespace. */
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value !== null && typeof value === 'object') {
-    const keys = Object.keys(value as Record<string, unknown>).sort();
-    const entries = keys.map(
-      (k) => `${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`,
-    );
-    return `{${entries.join(',')}}`;
-  }
-  return JSON.stringify(value);
-}
-
 function newEventId(): string {
   return `evt_${randomUUID().replace(/-/g, '')}`;
 }
@@ -268,13 +256,12 @@ export async function persistNormalizedEvent(
   const kind = resolveKind(channel, validEvent.eventKind);
   const sourceEvent = resolveSourceEvent(channel, validEvent);
 
-  const payloadBytes = Buffer.byteLength(JSON.stringify(validEvent.payload), 'utf8');
-  const payloadHash = createHash('sha256')
-    .update(canonicalJson(validEvent.payload))
-    .digest('hex');
+  const canonical = canonicalJson(validEvent.payload);
+  const payloadBytes = Buffer.byteLength(canonical, 'utf8');
+  const storedPayloadHash = computePayloadHash(validEvent.payload);
 
   const resolveReplay = (row: ExistingEventRow): PersistNormalizedEventResult => {
-    if (row.payloadHash === payloadHash) {
+    if (row.payloadHash === storedPayloadHash) {
       return {
         eventId: row.id,
         channel,
@@ -330,7 +317,7 @@ export async function persistNormalizedEvent(
         ingestedByPrincipalId: null,
         payload: validEvent.payload,
         payloadBytes,
-        payloadHash,
+        payloadHash: storedPayloadHash,
         payloadSchemaVersion: PAYLOAD_SCHEMA_VERSION,
         envelopeVersion: EVENT_ENVELOPE_VERSION,
       })
