@@ -6,16 +6,16 @@
 #   1. Creates a temporary GitHub webhook on the target repository.
 #   2. Creates four real GitHub events (push, issue, PR, PR review).
 #   3. Fetches the ACTUAL webhook payloads from GitHub's delivery log.
-#   4. Feeds those payloads into teamem (via HTTP endpoint or ingest helper).
+#   4. Feeds those payloads into teamem through the real HTTP webhook endpoint.
 #   5. Verifies stored events through curl /v1/events and PostgreSQL.
 #   6. Tests idempotent replay and idempotency conflict rejection.
-#   7. Cleans up the temporary webhook and database rows.
+#   7. Verifies job/job_events rows for the delivered events.
+#   8. Cleans up the temporary webhook and database rows.
 #
 # Prerequisites:
 #   - teamem server with /v1/events/github and /v1/events endpoints
-#     (if not available, falls back to direct ingest helper + psql)
 #   - gh CLI authenticated with admin:repo_hook scope
-#   - jq, curl, psql installed
+#   - jq, curl, psql, openssl, xxd installed
 #
 # Configuration (all via environment variables):
 #   TEAMEM_BASE_URL            — server base URL (default: http://127.0.0.1:8080)
@@ -24,8 +24,9 @@
 #   TEAMEM_WEBHOOK_SECRET      — webhook secret ≥16 chars (REQUIRED)
 #   TEAMEM_DATABASE_URL        — Postgres connection string (required)
 #   TEAMEM_SMOKE_KEEP_DATA     — keep rows after test (default: false)
-#   TEAMEM_SMOKE_TEAM_ID       — team ID for event scope (default: team_smoke)
-#   TEAMEM_SMOKE_PROJECT_ID    — project ID for event scope (default: prj_smoke)
+#   TEAMEM_SMOKE_TEAM_ID       — team ID for event scope (default: TEAMEM_WEBHOOK_TEAM_ID or team_default)
+#   TEAMEM_SMOKE_PROJECT_ID    — project ID for event scope (default: TEAMEM_WEBHOOK_PROJECT_ID or prj_default)
+#   TEAMEM_SMOKE_WEBHOOK_URL   — webhook target URL (default: uses example.com + delivery-log fetch)
 
 set -euo pipefail
 
@@ -42,8 +43,8 @@ GITHUB_TOKEN="${TEAMEM_GITHUB_TOKEN:-}"
 WEBHOOK_SECRET="${TEAMEM_WEBHOOK_SECRET:-}"
 DATABASE_URL="${TEAMEM_DATABASE_URL:-}"
 KEEP_DATA="${TEAMEM_SMOKE_KEEP_DATA:-false}"
-SMOKE_TEAM="${TEAMEM_SMOKE_TEAM_ID:-team_smoke}"
-SMOKE_PROJECT="${TEAMEM_SMOKE_PROJECT_ID:-prj_smoke}"
+SMOKE_TEAM="${TEAMEM_SMOKE_TEAM_ID:-${TEAMEM_WEBHOOK_TEAM_ID:-team_default}}"
+SMOKE_PROJECT="${TEAMEM_SMOKE_PROJECT_ID:-${TEAMEM_WEBHOOK_PROJECT_ID:-prj_default}}"
 TIMESTAMP="$(date +%Y%m%dT%H%M%S)"
 SMOKE_BRANCH="smoke-test-${TIMESTAMP}"
 
@@ -64,7 +65,7 @@ check_prereqs() {
   header "M0 GitHub Webhook Smoke Test — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local missing=0
 
-  for cmd in gh jq curl psql; do
+  for cmd in gh jq curl psql openssl xxd; do
     command -v "$cmd" >/dev/null 2>&1 || { fail "Missing: $cmd"; missing=1; }
   done
 
@@ -82,6 +83,7 @@ check_prereqs() {
     missing=1
   else
     info "Webhook secret: configured (${#WEBHOOK_SECRET} chars)"
+    export TEAMEM_WEBHOOK_SECRET
   fi
 
   export GH_TOKEN="$GITHUB_TOKEN"
@@ -89,20 +91,27 @@ check_prereqs() {
   psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1 || { fail "Cannot connect to database"; missing=1; }
 
   # Check server reachability and which endpoints are available
-  local has_endpoint=false
   if curl -fsS "${BASE_URL}/healthz" >/dev/null 2>&1; then
     info "Server: ${BASE_URL} reachable (/healthz OK)"
-    local wh_status
-    wh_status="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${BASE_URL}/v1/events/github" \
-      -d '{}' -H 'Content-Type: application/json' 2>/dev/null || echo '000')"
-    if [[ "$wh_status" != "404" ]]; then
-      has_endpoint=true
-      info "Server: /v1/events/github available (HTTP $wh_status)"
-    else
-      info "Server: /v1/events/github not available (HTTP 404) — will use direct ingest helper"
-    fi
+    detect_http_endpoint
   else
-    info "Server: not reachable at ${BASE_URL} — will use direct ingest helper + psql"
+    fail "Server not reachable at ${BASE_URL}; the smoke test requires the real HTTP webhook path"
+    missing=1
+  fi
+
+  if [[ "$HAS_HTTP_ENDPOINT" != "true" ]]; then
+    fail "Required webhook endpoint missing: ${BASE_URL}/v1/events/github"
+    missing=1
+  fi
+
+  local events_status
+  events_status="$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/v1/events?limit=1" 2>/dev/null || true)"
+  events_status="${events_status:-000}"
+  if [[ "$events_status" == "404" || "$events_status" == "000" ]]; then
+    fail "Required events list endpoint missing: ${BASE_URL}/v1/events (HTTP ${events_status})"
+    missing=1
+  else
+    info "Events list endpoint available at ${BASE_URL}/v1/events (HTTP ${events_status})"
   fi
 
   # Ensure seed data exists
@@ -116,68 +125,46 @@ check_prereqs() {
   echo ""
 }
 
-# ── Find tsx binary ──────────────────────────────────────────────────────────
-find_tsx() {
-  local repo_root
-  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-  if [[ -x "${repo_root}/node_modules/.pnpm/node_modules/.bin/tsx" ]]; then
-    echo "${repo_root}/node_modules/.pnpm/node_modules/.bin/tsx"
-  elif command -v tsx >/dev/null 2>&1; then
-    echo "tsx"
+# ── Deliver payload to teamem ────────────────────────────────────────────────
+# Delivers a webhook payload to the teamem server via the real HTTP endpoint
+# (POST /v1/events/github with HMAC signature).
+
+# Pre-check: can we reach the HTTP endpoint?
+HAS_HTTP_ENDPOINT=false
+detect_http_endpoint() {
+  local http_code
+  http_code="$(curl -s -o /dev/null -w '%{http_code}' \
+    -X POST "${BASE_URL}/v1/events/github" \
+    -H 'Content-Type: application/json' \
+    -H 'X-GitHub-Event: ping' \
+    -H 'X-GitHub-Delivery: probe' \
+    -d '{}' 2>/dev/null || true)"
+  http_code="${http_code:-000}"
+  if [[ "$http_code" != "000" && "$http_code" != "404" ]]; then
+    HAS_HTTP_ENDPOINT=true
+    info "Webhook endpoint available at ${BASE_URL}/v1/events/github (HTTP $http_code)"
   else
-    echo "npx tsx"
+    info "Webhook endpoint not available (HTTP $http_code)"
   fi
 }
-TSX="$(find_tsx)"
 
-# ── Deliver payload to teamem ────────────────────────────────────────────────
-# Tries HTTP webhook endpoint first; falls back to direct ingest helper.
-# Sets global HAS_HTTP_ENDPOINT based on availability.
-HAS_HTTP_ENDPOINT=false
+DELIVER_BODY=""
+DELIVER_HTTP_CODE="000"
 deliver_payload() {
   local event_type="$1" delivery_id="$2" payload_file="$3"
 
-  # Try the HTTP webhook endpoint if available
-  if curl -fsS -o /dev/null -w '' -X POST "${BASE_URL}/v1/events/github" \
-    -d '{}' -H 'Content-Type: application/json' 2>/dev/null; then
-    HAS_HTTP_ENDPOINT=true
+  local sig
+  sig="sha256=$(openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" -binary "$payload_file" | xxd -p -c 256)"
 
-    local sig
-    sig="sha256=$(openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" -binary "$payload_file" | xxd -p -c 256)"
-
-    local resp http_code
-    resp="$(curl -s -w '\n%{http_code}' -X POST "${BASE_URL}/v1/events/github" \
-      -H "Content-Type: application/json" \
-      -H "X-GitHub-Event: ${event_type}" \
-      -H "X-GitHub-Delivery: ${delivery_id}" \
-      -H "X-Hub-Signature-256: ${sig}" \
-      --data-binary "@${payload_file}" 2>/dev/null)"
-    http_code="$(echo "$resp" | tail -1)"
-    resp="$(echo "$resp" | sed '$d')"
-    echo "$resp"
-    return "$http_code"
-  fi
-
-  # Fallback: use the direct ingest helper
-  local repo_root
-  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-  local helper="${repo_root}/scripts/m0-github-smoke-ingest.ts"
-
-  local result result_file="${SMOKE_TMP}/ingest-${event_type}.json"
-  if $TSX "$helper" "$event_type" "$delivery_id" "$WEBHOOK_SECRET" \
-    --payload-file="$payload_file" \
-    --db-url="$DATABASE_URL" \
-    >"$result_file" 2>"${SMOKE_TMP}/ingest-${event_type}.err"; then
-    # Map the helper output to the same shape as the HTTP endpoint response
-    local count
-    count="$(jq -r '.normalizedCount // 0' "$result_file")"
-    jq -n --argjson results "$(jq '[.results[] | {eventId, status: (if .duplicate then "duplicate" else "inserted" end), channel, kind: .connectorKind}]' "$result_file")" \
-      '{ events: $results }'
-    return 200
-  else
-    cat "${SMOKE_TMP}/ingest-${event_type}.err" >&2
-    return 500
-  fi
+  local resp
+  resp="$(curl -s -w '\n%{http_code}' -X POST "${BASE_URL}/v1/events/github" \
+    -H "Content-Type: application/json" \
+    -H "X-GitHub-Event: ${event_type}" \
+    -H "X-GitHub-Delivery: ${delivery_id}" \
+    -H "X-Hub-Signature-256: ${sig}" \
+    --data-binary "@${payload_file}" 2>/dev/null || true)"
+  DELIVER_HTTP_CODE="$(echo "$resp" | tail -1)"
+  DELIVER_BODY="$(echo "$resp" | sed '$d')"
 }
 
 # ── Assertion helper ─────────────────────────────────────────────────────────
@@ -195,10 +182,13 @@ assert() {
 create_temp_webhook() {
   header "1. Creating Temporary GitHub Webhook"
 
-  # Use a fake URL — deliveries will fail but the payloads are recorded in
-  # GitHub's delivery log, which we fetch the ACTUAL webhook payload from.
-  # We don't need GitHub to successfully deliver; we just need it to send.
-  local webhook_url="https://example.com/teamem-smoke-test-webhook-${TIMESTAMP}"
+  # If TEAMEM_SMOKE_WEBHOOK_URL is set, use it as the webhook target.
+  # Otherwise use a fake URL — deliveries will fail but the payloads are
+  # recorded in GitHub's delivery log, which we fetch the ACTUAL webhook
+  # payload from. The script then delivers those real payloads through the
+  # teamem HTTP endpoint with proper HMAC headers, exercising the same
+  # code path as a live GitHub delivery.
+  local webhook_url="${TEAMEM_SMOKE_WEBHOOK_URL:-https://example.com/teamem-smoke-test-webhook-${TIMESTAMP}}"
 
   info "Creating webhook on ${GITHUB_REPO}..."
   local wh_resp
@@ -308,6 +298,10 @@ create_events() {
 ISSUE_NUMBER=""
 PR_NUMBER=""
 REVIEW_ID=""
+PUSH_DELIVERY_ID=""
+ISSUE_DELIVERY_ID=""
+PR_DELIVERY_ID=""
+REVIEW_DELIVERY_ID=""
 
 # ── 3. Fetch real webhook deliveries from GitHub ────────────────────────────
 fetch_deliveries() {
@@ -344,6 +338,7 @@ fetch_deliveries() {
   local push_guid
   push_guid="$(echo "$deliveries" | jq -r '.[] | select(.event == "push") | .guid' | head -1)"
   if [[ -n "$push_guid" ]]; then
+    PUSH_DELIVERY_ID="$push_guid"
     info "Fetching push delivery: $push_guid"
     gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${push_guid}" \
       --jq '.request.payload' > "${SMOKE_TMP}/delivery-push.json" 2>/dev/null || true
@@ -363,6 +358,7 @@ fetch_deliveries() {
   local issue_guid
   issue_guid="$(echo "$deliveries" | jq -r '.[] | select(.event == "issues") | .guid' | head -1)"
   if [[ -n "$issue_guid" ]]; then
+    ISSUE_DELIVERY_ID="$issue_guid"
     info "Fetching issues delivery: $issue_guid"
     gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${issue_guid}" \
       --jq '.request.payload' > "${SMOKE_TMP}/delivery-issues.json" 2>/dev/null || true
@@ -382,6 +378,7 @@ fetch_deliveries() {
   local pr_guid
   pr_guid="$(echo "$deliveries" | jq -r '.[] | select(.event == "pull_request") | .guid' | head -1)"
   if [[ -n "$pr_guid" ]]; then
+    PR_DELIVERY_ID="$pr_guid"
     info "Fetching pull_request delivery: $pr_guid"
     gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${pr_guid}" \
       --jq '.request.payload' > "${SMOKE_TMP}/delivery-pr.json" 2>/dev/null || true
@@ -405,6 +402,7 @@ fetch_deliveries() {
     review_guid="$(echo "$deliveries" | jq -r '.[] | select(.event == "issue_comment") | .guid' | head -1)"
   fi
   if [[ -n "$review_guid" ]]; then
+    REVIEW_DELIVERY_ID="$review_guid"
     info "Fetching review/comment delivery: $review_guid"
     gh api "repos/${GITHUB_REPO}/hooks/${HOOK_ID}/deliveries/${review_guid}" \
       --jq '.request.payload' > "${SMOKE_TMP}/delivery-review.json" 2>/dev/null || true
@@ -433,15 +431,21 @@ ingest_payloads() {
 
   # Push
   if [[ -f "${SMOKE_TMP}/delivery-push.json" ]]; then
-    local push_delivery="github-push-${TIMESTAMP}"
+    local push_delivery="$PUSH_DELIVERY_ID"
     info "Delivering push payload (delivery: $push_delivery)..."
     local resp http_code
-    resp="$(deliver_payload "push" "$push_delivery" "${SMOKE_TMP}/delivery-push.json")"
-    http_code=$?
+    deliver_payload "push" "$push_delivery" "${SMOKE_TMP}/delivery-push.json"
+    resp="$DELIVER_BODY"
+    http_code="$DELIVER_HTTP_CODE"
     if [[ "$http_code" == "200" ]]; then
       local n; n="$(echo "$resp" | jq -r '.events | length // 0')"
-      pass "Push: ingested $n event(s) (HTTP $http_code)"
-      inc_pass; ingested=$((ingested + 1))
+      if [[ "$n" -gt 0 ]]; then
+        pass "Push: ingested $n event(s) (HTTP $http_code)"
+        inc_pass; ingested=$((ingested + 1))
+      else
+        fail "Push: HTTP $http_code but produced 0 event(s)"
+        inc_fail
+      fi
     else
       fail "Push: HTTP $http_code — $(echo "$resp" | jq -c '.error // .' 2>/dev/null || echo "$resp")"
       inc_fail
@@ -450,15 +454,21 @@ ingest_payloads() {
 
   # Issues
   if [[ -f "${SMOKE_TMP}/delivery-issues.json" ]]; then
-    local issue_delivery="github-issues-${TIMESTAMP}"
+    local issue_delivery="$ISSUE_DELIVERY_ID"
     info "Delivering issues payload (delivery: $issue_delivery)..."
     local resp http_code
-    resp="$(deliver_payload "issues" "$issue_delivery" "${SMOKE_TMP}/delivery-issues.json")"
-    http_code=$?
+    deliver_payload "issues" "$issue_delivery" "${SMOKE_TMP}/delivery-issues.json"
+    resp="$DELIVER_BODY"
+    http_code="$DELIVER_HTTP_CODE"
     if [[ "$http_code" == "200" ]]; then
       local n; n="$(echo "$resp" | jq -r '.events | length // 0')"
-      pass "Issue: ingested $n event(s) (HTTP $http_code)"
-      inc_pass; ingested=$((ingested + 1))
+      if [[ "$n" -gt 0 ]]; then
+        pass "Issue: ingested $n event(s) (HTTP $http_code)"
+        inc_pass; ingested=$((ingested + 1))
+      else
+        fail "Issue: HTTP $http_code but produced 0 event(s)"
+        inc_fail
+      fi
     else
       fail "Issue: HTTP $http_code"
       inc_fail
@@ -467,15 +477,21 @@ ingest_payloads() {
 
   # Pull Request
   if [[ -f "${SMOKE_TMP}/delivery-pr.json" ]]; then
-    local pr_delivery="github-pr-${TIMESTAMP}"
+    local pr_delivery="$PR_DELIVERY_ID"
     info "Delivering pull_request payload (delivery: $pr_delivery)..."
     local resp http_code
-    resp="$(deliver_payload "pull_request" "$pr_delivery" "${SMOKE_TMP}/delivery-pr.json")"
-    http_code=$?
+    deliver_payload "pull_request" "$pr_delivery" "${SMOKE_TMP}/delivery-pr.json"
+    resp="$DELIVER_BODY"
+    http_code="$DELIVER_HTTP_CODE"
     if [[ "$http_code" == "200" ]]; then
       local n; n="$(echo "$resp" | jq -r '.events | length // 0')"
-      pass "PR: ingested $n event(s) (HTTP $http_code)"
-      inc_pass; ingested=$((ingested + 1))
+      if [[ "$n" -gt 0 ]]; then
+        pass "PR: ingested $n event(s) (HTTP $http_code)"
+        inc_pass; ingested=$((ingested + 1))
+      else
+        fail "PR: HTTP $http_code but produced 0 event(s)"
+        inc_fail
+      fi
     else
       fail "PR: HTTP $http_code"
       inc_fail
@@ -484,7 +500,7 @@ ingest_payloads() {
 
   # Review/Comment
   if [[ -f "${SMOKE_TMP}/delivery-review.json" ]]; then
-    local review_delivery="github-review-${TIMESTAMP}"
+    local review_delivery="$REVIEW_DELIVERY_ID"
     # Determine the actual event type from the payload
     local review_event_type="pull_request_review"
     if jq -e '.comment' "${SMOKE_TMP}/delivery-review.json" >/dev/null 2>&1; then
@@ -492,12 +508,18 @@ ingest_payloads() {
     fi
     info "Delivering ${review_event_type} payload (delivery: $review_delivery)..."
     local resp http_code
-    resp="$(deliver_payload "$review_event_type" "$review_delivery" "${SMOKE_TMP}/delivery-review.json")"
-    http_code=$?
+    deliver_payload "$review_event_type" "$review_delivery" "${SMOKE_TMP}/delivery-review.json"
+    resp="$DELIVER_BODY"
+    http_code="$DELIVER_HTTP_CODE"
     if [[ "$http_code" == "200" ]]; then
       local n; n="$(echo "$resp" | jq -r '.events | length // 0')"
-      pass "Review/Comment: ingested $n event(s) (HTTP $http_code)"
-      inc_pass; ingested=$((ingested + 1))
+      if [[ "$n" -gt 0 ]]; then
+        pass "Review/Comment: ingested $n event(s) (HTTP $http_code)"
+        inc_pass; ingested=$((ingested + 1))
+      else
+        fail "Review/Comment: HTTP $http_code but produced 0 event(s)"
+        inc_fail
+      fi
     else
       fail "Review/Comment: HTTP $http_code"
       inc_fail
@@ -514,12 +536,21 @@ verify_api() {
   header "5. Verification via ${BASE_URL}/v1/events"
 
   local api_resp api_total
-  api_resp="$(curl -s "${BASE_URL}/v1/events?limit=50" 2>/dev/null)" || true
-  api_total="$(echo "$api_resp" | jq -r '.total // 0' 2>/dev/null || echo '0')"
+  api_resp="$(curl -fsS "${BASE_URL}/v1/events?limit=50" 2>/dev/null)" || {
+    fail "API: /v1/events request failed"
+    inc_fail
+    return
+  }
+  if ! echo "$api_resp" | jq empty >/dev/null 2>&1; then
+    fail "API: /v1/events did not return JSON"
+    inc_fail
+    return
+  fi
+  api_total="$(echo "$api_resp" | jq -r '.total // 0')"
 
   if [[ "$api_total" -eq 0 ]]; then
-    warn "/v1/events returned 0 events — the API endpoint may not be available yet"
-    info "Skipping API verification; database verification will cover the checks."
+    fail "API: /v1/events returned 0 events"
+    inc_fail
     return
   fi
 
@@ -528,13 +559,28 @@ verify_api() {
   inc_pass
 
   for kind in github_commit github_issue github_pr github_pr_comment; do
+    local expected_delivery
+    case "$kind" in
+      github_commit) expected_delivery="$PUSH_DELIVERY_ID" ;;
+      github_issue) expected_delivery="$ISSUE_DELIVERY_ID" ;;
+      github_pr) expected_delivery="$PR_DELIVERY_ID" ;;
+      github_pr_comment) expected_delivery="$REVIEW_DELIVERY_ID" ;;
+      *) expected_delivery="" ;;
+    esac
     local kr
-    kr="$(curl -s "${BASE_URL}/v1/events?kind=${kind}&limit=5" 2>/dev/null)" || true
+    kr="$(curl -fsS "${BASE_URL}/v1/events?kind=${kind}&limit=5" 2>/dev/null)" || {
+      fail "API: ${kind} request failed"
+      inc_fail
+      continue
+    }
     local kc; kc="$(echo "$kr" | jq -r '.total // 0' 2>/dev/null || echo '0')"
     if [[ "$kc" -gt 0 ]]; then
       pass "API: ${kind} — $kc event(s)"
       inc_pass
-      local first; first="$(echo "$kr" | jq '.events[0]' 2>/dev/null)"
+      local first; first="$(echo "$kr" | jq -c --arg delivery "$expected_delivery" '.events[] | select(.deliveryId == $delivery)' 2>/dev/null | head -1)"
+      local has_delivery
+      has_delivery="$(echo "$kr" | jq --arg delivery "$expected_delivery" -r '[.events[]? | select(.deliveryId == $delivery)] | length')"
+      assert "  includes this smoke delivery" "[ \"$has_delivery\" -gt 0 ]" "deliveryId=$expected_delivery"
       assert "  channel=github" \
         "[ \"$(echo "$first" | jq -r '.channel')\" = \"github\" ]"
       assert "  actorProvenance=webhook_verified" \
@@ -557,6 +603,12 @@ verify_psql() {
   if ! counts="$(psql "$DATABASE_URL" -t -A -F'|' -c "
     SELECT kind, count(*)::text FROM events
     WHERE project_id = '${SMOKE_PROJECT}' AND team_id = '${SMOKE_TEAM}'
+      AND delivery_id IN (
+        '${PUSH_DELIVERY_ID}',
+        '${ISSUE_DELIVERY_ID}',
+        '${PR_DELIVERY_ID}',
+        '${REVIEW_DELIVERY_ID}'
+      )
     GROUP BY kind ORDER BY kind
   " 2>/dev/null)"; then
     fail "psql query failed — cannot verify events"
@@ -585,6 +637,14 @@ verify_psql() {
 
   for kind in github_commit github_issue github_pr github_pr_comment; do
     local rows
+    local delivery_id
+    case "$kind" in
+      github_commit) delivery_id="$PUSH_DELIVERY_ID" ;;
+      github_issue) delivery_id="$ISSUE_DELIVERY_ID" ;;
+      github_pr) delivery_id="$PR_DELIVERY_ID" ;;
+      github_pr_comment) delivery_id="$REVIEW_DELIVERY_ID" ;;
+      *) delivery_id="" ;;
+    esac
     rows="$(psql "$DATABASE_URL" -t -A -F'|' -c "
       SELECT id, channel, kind, source_event, source_action,
         delivery_id, item_key, external_id, url,
@@ -592,6 +652,7 @@ verify_psql() {
       FROM events
       WHERE project_id = '${SMOKE_PROJECT}' AND team_id = '${SMOKE_TEAM}'
         AND kind = '${kind}'
+        AND delivery_id = '${delivery_id}'
       ORDER BY created_at DESC LIMIT 3
     " 2>/dev/null)" || rows=""
 
@@ -604,7 +665,7 @@ verify_psql() {
     echo "$rows" | while IFS='|' read -r id ch k se sa did ik eid url apro ovpro; do
       assert "${kind}: channel=github ($id)" "[ \"$ch\" = \"github\" ]"
       assert "${kind}: actorProvenance=webhook_verified ($id)" \
-        "[ \"$apv\" = \"webhook_verified\" ]" "got: $apv"
+        "[ \"$apro\" = \"webhook_verified\" ]" "got: $apro"
       assert "${kind}: url is set ($id)" "[ -n \"$url\" ]"
 
       case "$k" in
@@ -632,9 +693,81 @@ verify_psql() {
   echo ""
 }
 
-# ── 7. Idempotency test ────────────────────────────────────────────────────
+# ── 7. Verify jobs ─────────────────────────────────────────────────────────
+verify_jobs() {
+  header "7. Verification via PostgreSQL — jobs"
+
+  local stats
+  stats="$(psql "$DATABASE_URL" -t -A -F'|' -c "
+    WITH smoke_events AS (
+      SELECT id
+      FROM events
+      WHERE team_id = '${SMOKE_TEAM}'
+        AND project_id = '${SMOKE_PROJECT}'
+        AND delivery_id IN (
+          '${PUSH_DELIVERY_ID}',
+          '${ISSUE_DELIVERY_ID}',
+          '${PR_DELIVERY_ID}',
+          '${REVIEW_DELIVERY_ID}'
+        )
+    )
+    SELECT
+      count(DISTINCT e.id)::text AS event_count,
+      count(DISTINCT je.event_id)::text AS linked_event_count,
+      count(DISTINCT j.id)::text AS job_count
+    FROM smoke_events e
+    LEFT JOIN job_events je
+      ON je.team_id = '${SMOKE_TEAM}'
+     AND je.project_id = '${SMOKE_PROJECT}'
+     AND je.event_id = e.id
+    LEFT JOIN jobs j
+      ON j.team_id = je.team_id
+     AND j.project_id = je.project_id
+     AND j.id = je.job_id;
+  " 2>/dev/null)" || {
+    fail "psql job query failed — cannot verify task/job creation"
+    inc_fail
+    return
+  }
+
+  local event_count linked_event_count job_count
+  IFS='|' read -r event_count linked_event_count job_count <<< "$stats"
+
+  assert "jobs: smoke events are present" "[ \"$event_count\" -gt 0 ]" "got: $event_count"
+  assert "jobs: at least one job is present" "[ \"$job_count\" -gt 0 ]" "got: $job_count"
+  assert "jobs: every smoke event is linked through job_events" \
+    "[ \"$linked_event_count\" -eq \"$event_count\" ]" \
+    "events=$event_count linked=$linked_event_count"
+
+  info "Job rows linked to smoke events:"
+  psql "$DATABASE_URL" -c "
+    SELECT j.id, j.kind, j.status, j.event_count, je.status AS event_status, je.event_id
+    FROM events e
+    JOIN job_events je
+      ON je.team_id = e.team_id
+     AND je.project_id = e.project_id
+     AND je.event_id = e.id
+    JOIN jobs j
+      ON j.team_id = je.team_id
+     AND j.project_id = je.project_id
+     AND j.id = je.job_id
+    WHERE e.team_id = '${SMOKE_TEAM}'
+      AND e.project_id = '${SMOKE_PROJECT}'
+      AND e.delivery_id IN (
+        '${PUSH_DELIVERY_ID}',
+        '${ISSUE_DELIVERY_ID}',
+        '${PR_DELIVERY_ID}',
+        '${REVIEW_DELIVERY_ID}'
+      )
+    ORDER BY j.created_at DESC, je.event_id
+    LIMIT 20
+  " 2>/dev/null || echo "  (query failed)"
+  echo ""
+}
+
+# ── 8. Idempotency test ────────────────────────────────────────────────────
 test_idempotency() {
-  header "7. Idempotency Test"
+  header "8. Idempotency Test"
 
   local payload_file="${SMOKE_TMP}/delivery-push.json"
   if [[ ! -f "$payload_file" ]]; then
@@ -643,10 +776,11 @@ test_idempotency() {
 
   # 7a. Replay same payload → duplicate
   info "Replaying same push payload (idempotent replay)..."
-  local push_delivery="github-push-${TIMESTAMP}"
+  local push_delivery="$PUSH_DELIVERY_ID"
   local resp http_code
-  resp="$(deliver_payload "push" "$push_delivery" "$payload_file")"
-  http_code=$?
+  deliver_payload "push" "$push_delivery" "$payload_file"
+  resp="$DELIVER_BODY"
+  http_code="$DELIVER_HTTP_CODE"
   if [[ "$http_code" == "200" ]]; then
     local dup; dup="$(echo "$resp" | jq -r '[.events[] | select(.status == "duplicate")] | length // 0')"
     local tot; tot="$(echo "$resp" | jq -r '.events | length // 0')"
@@ -667,22 +801,16 @@ test_idempotency() {
   local modified="${SMOKE_TMP}/push-modified.json"
   jq '.head_commit.message = "MODIFIED — conflict test"' "$payload_file" > "$modified"
 
-  resp="$(deliver_payload "push" "$push_delivery" "$modified")"
-  http_code=$?
+  deliver_payload "push" "$push_delivery" "$modified"
+  resp="$DELIVER_BODY"
+  http_code="$DELIVER_HTTP_CODE"
   if [[ "$http_code" == "409" ]]; then
     pass "Idempotency conflict: HTTP 409 (N1 — different hash correctly rejected)"
     inc_pass
   elif [[ "$http_code" == "200" ]]; then
-    # Some fallback paths may still return 200 with duplicate status
     local dup2; dup2="$(echo "$resp" | jq -r '[.events[] | select(.status == "duplicate")] | length // 0')"
-    if [[ "$dup2" -eq 0 ]]; then
-      # The helper might have inserted new events — not ideal but not a total failure
-      warn "Idempotency conflict: HTTP 200 (helper fallback may not enforce conflict)"
-      warn "  This is expected when using the direct ingest helper — the HTTP endpoint enforces 409"
-    else
-      pass "Idempotency conflict: returned duplicate (delivery+hash matched — N1)"
-      inc_pass
-    fi
+    fail "Idempotency conflict: HTTP 200 with $dup2 duplicate event(s) — expected HTTP 409"
+    inc_fail
   else
     fail "Idempotency conflict: HTTP $http_code"
     inc_fail
@@ -690,9 +818,9 @@ test_idempotency() {
   echo ""
 }
 
-# ── 8. Summary ─────────────────────────────────────────────────────────────
+# ── 9. Summary ─────────────────────────────────────────────────────────────
 print_summary() {
-  header "8. Smoke Test Summary"
+  header "9. Smoke Test Summary"
 
   local pass_c fail_c total
   pass_c="$(get_pass)"; fail_c="$(get_fail)"; total=$((pass_c + fail_c))
@@ -767,6 +895,7 @@ main() {
   ingest_payloads
   verify_api
   verify_psql
+  verify_jobs
   test_idempotency
   print_summary
   cleanup_all

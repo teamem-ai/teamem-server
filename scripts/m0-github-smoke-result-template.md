@@ -36,14 +36,14 @@
 | `pull_request` | ✓ / ✗ | | bytes |
 | `pull_request_review` | ✓ / ✗ | | bytes |
 
-## 4. Ingested Events
+## 4. HTTP Webhook Ingest
 
-| Event Type | Events Ingested | Status |
-|---|---|---|
-| Push (`github_commit`) | `N` | ✓ / ✗ |
-| Issue (`github_issue`) | `1` | ✓ / ✗ |
-| PR (`github_pr`) | `1` | ✓ / ✗ |
-| Review (`github_pr_comment`) | `1` | ✓ / ✗ |
+| Event Type | Delivery GUID Used | Events Ingested | Status |
+|---|---|---:|---|
+| Push (`github_commit`) | | `N` | ✓ / ✗ |
+| Issue (`github_issue`) | | `1` | ✓ / ✗ |
+| PR (`github_pr`) | | `1` | ✓ / ✗ |
+| Review (`github_pr_comment`) | | `1` | ✓ / ✗ |
 
 ## 5. Verification — `GET /v1/events`
 
@@ -73,14 +73,22 @@
 | `github_pr_comment.url` has `#` fragment | contains `#` | | ✓ / ✗ |
 | All events: `actor_provenance` = `webhook_verified` | `webhook_verified` | | ✓ / ✗ |
 
-## 7. Idempotency
+## 7. Verification — Jobs
+
+| Check | Expected | Actual | Result |
+|---|---|---|---|
+| Smoke events linked to `job_events` | all smoke events | | ✓ / ✗ |
+| At least one `jobs` row present | ≥ 1 | | ✓ / ✗ |
+| Job status recorded | `queued` / `processing` / `completed` / `failed` | | ✓ / ✗ |
+
+## 8. Idempotency
 
 | Check | Expected | Result |
 |---|---|---|
 | Replay same payload → all `duplicate` status | all duplicate | ✓ / ✗ |
-| Modified payload → rejected (HTTP 409 or duplicate) | 409 or duplicate | ✓ / ✗ |
+| Modified payload with same delivery GUID → rejected | HTTP 409 | ✓ / ✗ |
 
-## 8. Summary
+## 9. Summary
 
 | Metric | Count |
 |---|---|
