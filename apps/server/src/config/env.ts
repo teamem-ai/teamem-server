@@ -62,6 +62,10 @@ const optionalGithubId = z.preprocess(
   blankToUndefined,
   z.string().trim().regex(/^[1-9]\d*$/, 'GitHub IDs must be positive decimal integers').optional(),
 );
+const optionalPrivateKey = z.preprocess(
+  blankToUndefined,
+  z.string().trim().min(1).optional(),
+);
 const optionalHttpUrl = z.preprocess(
   blankToUndefined,
   z
@@ -83,6 +87,7 @@ const rawServerEnvSchema = z
     TEAMEM_GITHUB_WEBHOOK_SECRET: optionalSecret,
     TEAMEM_GITHUB_APP_ID: optionalGithubId,
     TEAMEM_GITHUB_INSTALLATION_ID: optionalGithubId,
+    TEAMEM_GITHUB_PRIVATE_KEY: optionalPrivateKey,
     TEAMEM_ANTHROPIC_API_KEY: optionalSecret,
     TEAMEM_OPENAI_API_KEY: optionalSecret,
     TEAMEM_OPENROUTER_API_KEY: optionalSecret,
@@ -111,6 +116,8 @@ export interface GithubEnvironment {
   webhookSecret?: string;
   appId?: string;
   installationId?: string;
+  /** RSA private key in PEM format for GitHub App authentication. */
+  privateKey?: string;
 }
 
 export interface ServerEnvironment {
@@ -132,7 +139,8 @@ export function parseServerEnv(environment: Environment = process.env): ServerEn
   const githubConfigured =
     env.TEAMEM_GITHUB_WEBHOOK_SECRET !== undefined ||
     env.TEAMEM_GITHUB_APP_ID !== undefined ||
-    env.TEAMEM_GITHUB_INSTALLATION_ID !== undefined;
+    env.TEAMEM_GITHUB_INSTALLATION_ID !== undefined ||
+    env.TEAMEM_GITHUB_PRIVATE_KEY !== undefined;
   const llmProviders: ResolvedLlmConfig[] = [];
 
   if (env.TEAMEM_ANTHROPIC_API_KEY !== undefined) {
@@ -165,6 +173,7 @@ export function parseServerEnv(environment: Environment = process.env): ServerEn
           webhookSecret: env.TEAMEM_GITHUB_WEBHOOK_SECRET,
           appId: env.TEAMEM_GITHUB_APP_ID,
           installationId: env.TEAMEM_GITHUB_INSTALLATION_ID,
+          privateKey: env.TEAMEM_GITHUB_PRIVATE_KEY,
         }
       : undefined,
     llmProviders,
