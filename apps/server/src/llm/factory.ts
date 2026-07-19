@@ -44,6 +44,12 @@ import {
   type LlmClientDeps,
   type LlmProviderKind,
 } from './types.js';
+import {
+  ANTHROPIC_BASE_URL,
+  CLAUDE_DEFAULT_MODEL,
+  buildClaudeRequest,
+  parseClaudeResponse,
+} from './claude-adapter.js';
 
 export { LlmError } from './types.js';
 export type {
@@ -53,10 +59,6 @@ export type {
   LlmProviderKind,
   ModelMetadata,
 } from './types.js';
-
-/** Anthropic API host. */
-const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
-const ANTHROPIC_API_VERSION = '2023-06-01';
 
 /** OpenAI API host. */
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -79,7 +81,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * rejects the config synchronously with `config_rejected` rather than guessing.
  */
 export const DEFAULT_MODELS: Readonly<Record<LlmProviderKind, string>> = Object.freeze({
-  claude: 'claude-3-5-sonnet-20241022',
+  claude: CLAUDE_DEFAULT_MODEL,
   openai: 'gpt-4o-2024-08-06',
   openrouter: 'openai/gpt-4o-2024-08-06',
   custom: '',
@@ -151,8 +153,7 @@ async function runStructured<T>(
 
   try {
     const jsonSchema = stripSchemaAnchor(z.toJSONSchema(request.schema));
-    const url = endpointFor(config);
-    const init = buildRequest(
+    const { url, init } = buildRequest(
       config,
       model,
       request.systemPrompt,
@@ -163,7 +164,7 @@ async function runStructured<T>(
 
     let response: Response;
     try {
-      response = await fetchFn(url, init as RequestInit);
+      response = await fetchFn(url, init);
     } catch (err) {
       if (controller.signal.aborted) {
         throw new LlmError('timeout', provider, request.requestId);
@@ -320,36 +321,20 @@ function buildRequest(
   userPrompt: string,
   jsonSchema: unknown,
   signal: AbortSignal,
-): RequestInit {
+): { url: string; init: RequestInit } {
   if (config.kind === 'claude') {
-    return {
-      method: 'POST',
+    return buildClaudeRequest(
+      config,
+      model,
+      systemPrompt,
+      userPrompt,
+      jsonSchema,
       signal,
-      headers: {
-        'content-type': 'application/json',
-        'anthropic-version': ANTHROPIC_API_VERSION,
-        'x-api-key': config.apiKey,
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 1024,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-        tools: [
-          {
-            name: 'record_structured_output',
-            description:
-              'Record the structured output requested by the caller. ' +
-              'Always call this tool; do not respond with free text.',
-            input_schema: jsonSchema,
-          },
-        ],
-        tool_choice: { type: 'tool', name: 'record_structured_output' },
-      }),
-    };
+    );
   }
 
   // OpenAI / OpenRouter / custom all speak the Chat Completions API.
+  const url = endpointFor(config);
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     authorization: `Bearer ${config.apiKey}`,
@@ -358,20 +343,23 @@ function buildRequest(
     headers['X-Title'] = 'teamem';
   }
   return {
-    method: 'POST',
-    signal,
-    headers,
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      response_format: {
-        type: 'json_schema',
-        json_schema: openAiJsonSchema(jsonSchema),
-      },
-    }),
+    url,
+    init: {
+      method: 'POST',
+      signal,
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        response_format: {
+          type: 'json_schema',
+          json_schema: openAiJsonSchema(jsonSchema),
+        },
+      }),
+    },
   };
 }
 
@@ -391,38 +379,9 @@ function extractStructured(
   fallbackModel: string,
 ): Extracted {
   if (provider === 'claude') {
-    return parseClaude(raw, requestId, fallbackModel);
+    return parseClaudeResponse(raw, requestId, fallbackModel);
   }
   return parseOpenAiFamily(provider, raw, requestId, fallbackModel);
-}
-
-function parseClaude(raw: string, requestId: string, fallbackModel: string): Extracted {
-  let envelope: unknown;
-  try {
-    envelope = JSON.parse(raw);
-  } catch {
-    throw new LlmError('provider_error', 'claude', requestId);
-  }
-  if (!isObject(envelope)) {
-    throw new LlmError('provider_error', 'claude', requestId);
-  }
-  const providerModel =
-    typeof envelope.model === 'string' ? envelope.model : fallbackModel;
-  const content = envelope.content;
-  if (!Array.isArray(content)) {
-    throw new LlmError('empty_output', 'claude', requestId);
-  }
-  for (const block of content) {
-    if (
-      isObject(block) &&
-      block.type === 'tool_use' &&
-      block.name === 'record_structured_output'
-    ) {
-      return { value: block.input, providerModel };
-    }
-  }
-  // A 2xx with no tool_use block means the model did not honor forced tool use.
-  throw new LlmError('provider_error', 'claude', requestId);
 }
 
 function parseOpenAiFamily(
