@@ -35,7 +35,10 @@ const port = Number(process.env['TEAMEM_PORT'] ?? 8080);
 export function startServer(portOverride?: number, deps?: AppDeps) {
   const p = portOverride ?? port;
   const app = buildApp({
-    dbUrl: process.env['TEAMEM_DATABASE_URL'],
+    // The compose file sets DATABASE_URL, not TEAMEM_DATABASE_URL. Readiness
+    // probes use either; the runtime bootstrap (index.ts) already provides the
+    // real db handle via deps.
+    dbUrl: process.env['TEAMEM_DATABASE_URL'] ?? process.env['DATABASE_URL'],
     ...deps,
   });
   const server = serve({ fetch: app.fetch, port: p }, (info) => {

@@ -19,7 +19,7 @@
  * (red line 5.3: validate → strip → persist order).
  */
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray as drizzleInArray } from 'drizzle-orm';
 import * as schema from '../schema.js';
 import type { AppDb } from '../client.js';
 
@@ -158,6 +158,116 @@ function newEventId(): string {
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
+
+// ── Event row shape for read-side consumers ──────────────────────────────
+
+/**
+ * Full event row as returned by read-side queries. Mirrors the Drizzle
+ * schema columns that the compiler needs — id, source facts, actor,
+ * provenance, payload, timestamps.
+ */
+export interface EventRow {
+  readonly id: string;
+  readonly teamId: string;
+  readonly projectId: string;
+  readonly channel: string;
+  readonly kind: string;
+  readonly connectorKind: string;
+  readonly sourceEvent: string | null;
+  readonly sourceAction: string | null;
+  readonly deliveryId: string;
+  readonly itemKey: string;
+  readonly externalId: string;
+  readonly url: string | null;
+  readonly actor: Record<string, unknown> | null;
+  readonly actorProvenance: string;
+  readonly actorPrincipalId: string | null;
+  readonly occurredAt: Date;
+  readonly occurredAtProvenance: string;
+  readonly ingestedByCredentialId: string | null;
+  readonly ingestedByPrincipalId: string | null;
+  readonly payload: Record<string, unknown>;
+  readonly payloadBytes: number;
+  readonly payloadHash: string;
+  readonly payloadSchemaVersion: number;
+  readonly envelopeVersion: number;
+  readonly createdAt: Date;
+}
+
+// Full-column SELECT for the events read-side shape.
+const EVENT_COLUMNS = {
+  id: schema.events.id,
+  teamId: schema.events.teamId,
+  projectId: schema.events.projectId,
+  channel: schema.events.channel,
+  kind: schema.events.kind,
+  connectorKind: schema.events.connectorKind,
+  sourceEvent: schema.events.sourceEvent,
+  sourceAction: schema.events.sourceAction,
+  deliveryId: schema.events.deliveryId,
+  itemKey: schema.events.itemKey,
+  externalId: schema.events.externalId,
+  url: schema.events.url,
+  actor: schema.events.actor,
+  actorProvenance: schema.events.actorProvenance,
+  actorPrincipalId: schema.events.actorPrincipalId,
+  occurredAt: schema.events.occurredAt,
+  occurredAtProvenance: schema.events.occurredAtProvenance,
+  ingestedByCredentialId: schema.events.ingestedByCredentialId,
+  ingestedByPrincipalId: schema.events.ingestedByPrincipalId,
+  payload: schema.events.payload,
+  payloadBytes: schema.events.payloadBytes,
+  payloadHash: schema.events.payloadHash,
+  payloadSchemaVersion: schema.events.payloadSchemaVersion,
+  envelopeVersion: schema.events.envelopeVersion,
+  createdAt: schema.events.createdAt,
+};
+
+/**
+ * Fetch events by their IDs, scoped to a specific team + project.
+ *
+ * Every query carries both teamId and projectId (red line 5.5). Events
+ * belonging to a different team or project are never returned.
+ *
+ * Returns events in the order of the input `eventIds` array for
+ * determinism (the caller relies on this for per-event result ordering).
+ * An event id not found or not belonging to the scope is silently omitted.
+ *
+ * @param db       the database handle
+ * @param teamId   tenant scope
+ * @param projectId project scope
+ * @param eventIds event ids to fetch (evt_...)
+ * @returns matching events, in input order
+ */
+export async function getEventsByIds(
+  db: AppDb,
+  teamId: string,
+  projectId: string,
+  eventIds: readonly string[],
+): Promise<EventRow[]> {
+  if (eventIds.length === 0) return [];
+
+  // Drizzle inArray requires at least one element.
+  const rows = await db
+    .select(EVENT_COLUMNS)
+    .from(schema.events)
+    .where(
+      and(
+        eq(schema.events.teamId, teamId),
+        eq(schema.events.projectId, projectId),
+        drizzleInArray(schema.events.id, eventIds as [string, ...string[]]),
+      ),
+    );
+
+  // Preserve input order so the caller can correlate with its eventId list.
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const ordered: EventRow[] = [];
+  for (const id of eventIds) {
+    const row = byId.get(id);
+    if (row) ordered.push(row as unknown as EventRow);
+  }
+  return ordered;
+}
 
 /**
  * Insert an event idempotently within an explicit tenant/project scope.

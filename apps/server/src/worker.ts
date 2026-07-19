@@ -4,44 +4,40 @@
  * This is the process that `docker-compose.yml` starts with
  * `["node", "apps/server/dist/worker.js"]`. It shares the server's lifecycle
  * contract:
- *  - parse/validate config and verify database connectivity before reporting
- *    ready; a missing/illegal DATABASE_URL or unreachable Postgres fails fast
- *    with a non-zero exit (pg-boss lives inside Postgres — no database, no
- *    worker);
- *  - shut down cleanly on SIGTERM/SIGINT;
+ *  - parse/validate config before reporting ready; a missing/illegal
+ *    DATABASE_URL fails fast with a non-zero exit;
+ *  - connect to the pg-boss compile queue and subscribe to consume compile
+ *    jobs (F1/F2 handlers land with the compile tasks; until then the no-op
+ *    acknowledge handler is wired);
+ *  - shut down cleanly on SIGTERM/SIGINT: detach consumer, then stop queue;
  *  - never leave a dangling background promise.
  *
- * The pg-boss queue consumer (F1/F2 compile jobs) lands with the compile
- * tasks. Until then the process connects, holds its database handle open, and
- * waits for signals — it does NOT fabricate compile results or invent jobs.
- * The keep-alive timer below is the honest placeholder that keeps the loop
- * alive; it is replaced by the real queue subscription and is cleared on
- * shutdown.
+ * This is the same pg-boss consumer the all-in-one server embeds — only the
+ * process boundary differs.
  */
 import { parseServerEnv } from './config/env.js';
-import { checkDbConnectivity, closeDb, createDb } from './db/client.js';
 import { fatalStartup, installShutdownHandlers } from './lifecycle.js';
-
-const IDLE_HEARTBEAT_MS = 60_000;
+import { createCompileQueue } from './queue/boss.js';
+import { acknowledgeCompileJob } from './worker/embedded.js';
 
 export async function runWorker(): Promise<void> {
   const env = parseServerEnv();
-  const db = createDb(env.databaseUrl);
 
-  await checkDbConnectivity(db);
+  // pg-boss lives inside Postgres — the queue start verifies connectivity.
+  const queue = createCompileQueue(env.databaseUrl, {
+    onError: (err) => console.error('[worker] pg-boss error:', err),
+  });
 
-  // Keep the event loop alive until a shutdown signal. A ref'd timer is the
-  // honest placeholder for the not-yet-wired pg-boss subscription; it does no
-  // work beyond holding the process open.
-  const heartbeat = setInterval(() => {}, IDLE_HEARTBEAT_MS);
+  await queue.start();
+  await queue.work(acknowledgeCompileJob);
 
   installShutdownHandlers(async () => {
-    clearInterval(heartbeat);
-    await closeDb(db);
+    await queue.offWork();
+    await queue.stop();
   });
 
   console.log(
-    'teamem worker ready — database connected; awaiting the pg-boss compile queue (not wired yet)',
+    'teamem worker ready — pg-boss compile queue consumer attached',
   );
 }
 
