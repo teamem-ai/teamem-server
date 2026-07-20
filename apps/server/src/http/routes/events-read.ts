@@ -15,6 +15,8 @@ import {
   eventListQuery,
   eventListResponse,
   eventDetailResponse,
+  eventId as eventIdSchema,
+  projectId as projectIdSchema,
   type EventSummary,
   type EventDetail,
 } from '@teamem/schema';
@@ -195,18 +197,20 @@ async function getEventDetailHandler(c: Context, deps: EventsReadDeps): Promise<
     throw new InvalidRequestError('Missing event ID in path');
   }
 
-  // Validate projectId format
-  if (!/^prj_[A-Za-z0-9]+$/.test(rawProjectId)) {
+  // Validate ID formats against the frozen contract's own definitions (N3) —
+  // do not hand-roll a second copy of the ID regexes here.
+  const projectIdParsed = projectIdSchema.safeParse(rawProjectId);
+  if (!projectIdParsed.success) {
     throw new InvalidRequestError('Invalid projectId format');
   }
 
-  // Validate eventId format
-  if (!/^evt_[A-Za-z0-9]+$/.test(rawEventId)) {
+  const eventIdParsed = eventIdSchema.safeParse(rawEventId);
+  if (!eventIdParsed.success) {
     throw new InvalidRequestError('Invalid eventId format');
   }
 
-  const projectId: string = rawProjectId;
-  const eventId: string = rawEventId;
+  const projectId: string = projectIdParsed.data;
+  const eventId: string = eventIdParsed.data;
 
   // Scope enforcement
   if (isProjectScope(auth.scope)) {
