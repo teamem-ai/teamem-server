@@ -33,10 +33,15 @@ COPY . .
 
 # The built server externalizes pg, while the current workspace manifest still
 # classifies it as a dev dependency. pg-boss already installs the exact locked
-# pg package in the production graph, so expose that package at the app root.
+# pg package in the production graph (pnpm deploy --prod --legacy retains it in
+# .pnpm/), so expose that package at the app root via a version-agnostic glob.
 RUN pnpm build \
     && pnpm --filter @teamem/server deploy --prod --legacy /production/server \
-    && ln -s .pnpm/pg@8.22.0/node_modules/pg /production/server/node_modules/pg
+    && cd /production/server/node_modules \
+    && for d in .pnpm/pg@*; do \
+         ln -s "$d/node_modules/pg" pg; \
+         break; \
+       done
 
 
 FROM ${NODE_IMAGE} AS runtime
