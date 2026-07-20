@@ -12,16 +12,15 @@ import type { Context } from 'hono';
 import type { AppDb } from '../../db/client.js';
 import { insertEvent, IdempotencyConflictError as RepoIdempotencyConflictError } from '../../db/repositories/events.js';
 import { createJob, findJobByIdempotencyKey, IdempotencyConflictError as JobIdempotencyConflictError } from '../../db/repositories/jobs.js';
-import { resolveTokenHash, AuthenticationError } from '../../db/repositories/api-keys.js';
-import { hashToken, parseBearerToken } from '../../auth/api-key.js';
 import { isProjectScope, getTeamId, getProjectId } from '../../auth/scope.js';
 import { stripPrivateTags } from '../../security/private-tags.js';
 import { payloadHash, payloadByteLength } from '../../security/payload-hash.js';
-import { InvalidRequestError, UnauthorizedError, ForbiddenError, NotFoundError, InternalError, IdempotencyConflictError, PayloadTooLargeError, REQUEST_ID_KEY } from '../errors.js';
+import { InvalidRequestError, ForbiddenError, NotFoundError, InternalError, IdempotencyConflictError, PayloadTooLargeError, REQUEST_ID_KEY } from '../errors.js';
 import type { CompileQueue } from '../../queue/boss.js';
 import { waitForJob } from '../wait-for-job.js';
 import { and, eq } from 'drizzle-orm';
 import * as schema from '../../db/schema.js';
+import { requireAuth, requireScope, getAuth } from '../auth.js';
 
 // ── Handler dependencies ────────────────────────────────────────────────────
 
@@ -54,31 +53,10 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
   const { db, queue } = deps;
   const requestId = c.get(REQUEST_ID_KEY) as string;
 
-  // ── Step 1: Authenticate ──────────────────────────────────────────────
-  const authHeader = c.req.header('authorization') ?? null;
-  const token = parseBearerToken(authHeader);
-  if (!token) {
-    throw new UnauthorizedError('Missing or malformed Authorization header');
-  }
+  // ── Step 1: AuthContext from middleware (requireAuth + requireScope already run) ─
+  const auth = getAuth(c);
 
-  const tokenHash = hashToken(token);
-
-  let auth;
-  try {
-    auth = await resolveTokenHash(db, tokenHash);
-  } catch (err) {
-    if (err instanceof AuthenticationError) {
-      throw new UnauthorizedError('invalid or revoked API key');
-    }
-    throw new InternalError('authentication lookup failed', { cause: err });
-  }
-
-  // ── Step 2: Authorize — must have events:write scope ──────────────────
-  if (!auth.scopes.includes('events:write')) {
-    throw new ForbiddenError('API key does not have events:write scope');
-  }
-
-  // ── Step 3: Parse & validate request body ─────────────────────────────
+  // ── Step 2: Parse & validate request body ─────────────────────────────
   let body: unknown;
   try {
     body = await c.req.json();
@@ -98,7 +76,7 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
 
   const req = parsed.data;
 
-  // ── Step 4: Scope check — requested project must be within key's scope ─
+  // ── Step 3: Scope check — requested project must be within key's scope ─
   const teamId = getTeamId(auth.scope);
 
   if (isProjectScope(auth.scope)) {
@@ -132,14 +110,14 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
     }
   }
 
-  // ── Step 5: Strip private tags from payload (BEFORE hashing/persistence) ─
+  // ── Step 4: Strip private tags from payload (BEFORE hashing/persistence) ─
   const redactedPayload = stripPrivateTags(req.payload) as Record<string, unknown>;
 
-  // ── Step 6: Compute payload hash & byte length on the REDACTED content ─
+  // ── Step 5: Compute payload hash & byte length on the REDACTED content ─
   const hash = payloadHash(redactedPayload);
   const byteLen = payloadByteLength(redactedPayload);
 
-  // ── Step 7: Idempotent event insert ───────────────────────────────────
+  // ── Step 6: Idempotent event insert ───────────────────────────────────
   const now = new Date();
   const eventResult = await (async () => {
     try {
@@ -177,7 +155,7 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
     }
   })();
 
-  // ── Step 8: Build response ────────────────────────────────────────────
+  // ── Step 7: Build response ────────────────────────────────────────────
   const { eventId, status } = eventResult;
 
   if (status === 'duplicate') {
@@ -208,7 +186,7 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
     return c.json(response, 200);
   }
 
-  // ── Step 9: Optionally create a compile job ───────────────────────────
+  // ── Step 8: Optionally create a compile job ───────────────────────────
   let jobId: string | null = null;
 
   if (req.options.compile) {
@@ -272,7 +250,7 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
     }
   }
 
-  // ── Step 10: Wait semantics (wait=true — poll up to 30s) ─────────────
+  // ── Step 9: Wait semantics (wait=true — poll up to 30s) ─────────────
   // For M0 scope, wait=true with compile=true polls for job completion.
   // If the queue is unavailable or compile=false, this is a no-op.
   if (req.options.wait && req.options.compile && jobId) {
@@ -357,7 +335,10 @@ import { Hono } from 'hono';
 export function buildEventsWriteRoutes(deps: EventsWriteDeps): Hono {
   const routes = new Hono();
 
+  // Middleware chain: body limit → auth → scope → handler
   routes.use('/v1/events', enforceBodyLimit());
+  routes.use('/v1/events', requireAuth(deps.db));
+  routes.use('/v1/events', requireScope('events:write'));
   routes.post('/v1/events', async (c) => {
     return postEventsHandler(c, deps);
   });
