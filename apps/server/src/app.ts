@@ -17,6 +17,9 @@ import {
   type EventsWriteDeps,
 } from './http/routes/events-write.js';
 import { buildJobsReadRoutes } from './http/routes/jobs-read.js';
+import {
+  buildConnectorWebhookRoutes,
+} from './http/routes/connector-webhook.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -64,6 +67,17 @@ export function buildApp(deps: AppDeps = {}) {
     app.route(
       '/',
       buildJobsReadRoutes({ db: deps.db }),
+    );
+
+    // Connector webhook routes (no Bearer-token auth — webhook signatures
+    // are the auth mechanism, verified inside each connector's
+    // handleWebhook()).
+    app.route(
+      '/',
+      buildConnectorWebhookRoutes({
+        db: deps.db,
+        queue: deps.queue,
+      }),
     );
   }
 
