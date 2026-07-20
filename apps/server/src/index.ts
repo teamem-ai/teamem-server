@@ -16,6 +16,7 @@ import { createCompileQueue } from './queue/boss.js';
 import { startEmbeddedWorker } from './worker/embedded.js';
 import { startServer } from './server.js';
 import { bootstrapMain } from './commands/bootstrap.js';
+import { installShutdownHandlers } from './lifecycle.js';
 
 /** Build the real startup factories over a validated runtime config. */
 export function createRuntimeStartup(config: {
@@ -38,6 +39,17 @@ export function createRuntimeStartup(config: {
     },
     async startHttpServer() {
       const server = startServer(undefined, { db: dbHandle.db, queue });
+      // `serve()` from @hono/node-server starts listening asynchronously.
+      // Wait for the server to be ready so an EADDRINUSE failure surfaces
+      // during startup and not as an uncatchable background crash.
+      await new Promise<void>((resolve, reject) => {
+        if (server.listening) {
+          resolve();
+        } else {
+          server.once('listening', resolve);
+          server.once('error', reject);
+        }
+      });
       return {
         stop: () =>
           new Promise<void>((resolve, reject) => {
@@ -64,27 +76,19 @@ async function bootstrap(): Promise<void> {
   try {
     runtime = await main();
   } catch (err) {
-    console.error('[runtime] startup failed:', err);
+    console.error('teamem: startup failed:', err);
     process.exit(1);
     return;
   }
 
-  let shuttingDown = false;
-  const onSignal = (signal: NodeJS.Signals): void => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    console.log(`[runtime] ${signal} received — shutting down`);
-    runtime
-      .shutdown()
-      .then(() => process.exit(0))
-      .catch((err) => {
-        console.error('[runtime] shutdown failed:', err);
-        process.exit(1);
-      });
-  };
+  console.log('teamem server ready');
 
-  process.on('SIGTERM', () => onSignal('SIGTERM'));
-  process.on('SIGINT', () => onSignal('SIGINT'));
+  // Delegate shutdown to the shared lifecycle module so the server and the
+  // worker share one signal-handling contract: single graceful teardown with
+  // a force-exit safety net.
+  installShutdownHandlers(async () => {
+    await runtime.shutdown();
+  });
 }
 
 // Only self-start when executed as the process entrypoint, so tests can import
