@@ -15,7 +15,7 @@
  * provider responses (N3/N7).
  */
 import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import * as schema from '../../db/schema.js';
 import type { AppDb } from '../../db/client.js';
 import type { ScopeContext } from '../../auth/scope.js';
@@ -319,6 +319,45 @@ export async function getJob(
 }
 
 // ── Lifecycle updates ───────────────────────────────────────────────────────
+
+/**
+ * Atomically claim a queued job for processing (DUA-173).
+ *
+ * Transitions `queued → processing` ONLY when the current status is `queued` —
+ * the `WHERE status = 'queued'` clause guarantees at most one worker succeeds.
+ * Increments `attempts` by 1 and sets `started_at = now` in the same atomic
+ * UPDATE. Returns the claimed job row, or `undefined` when another worker
+ * claimed it first (or the job is not in a claimable state).
+ *
+ * Requires team_id + project_id (red line 5.5): the worker inherits the
+ * initiator's scope from the job row.
+ */
+export async function claimJob(
+  db: AppDb,
+  teamId: string,
+  projectId: string,
+  jobId: string,
+): Promise<JobRow | undefined> {
+  const now = new Date();
+  const rows = await db
+    .update(schema.jobs)
+    .set({
+      status: 'processing',
+      startedAt: now,
+      attempts: sql`${schema.jobs.attempts} + 1`,
+    })
+    .where(
+      and(
+        eq(schema.jobs.id, jobId),
+        eq(schema.jobs.teamId, teamId),
+        eq(schema.jobs.projectId, projectId),
+        eq(schema.jobs.status, 'queued'),
+      ),
+    )
+    .returning(JOB_COLUMNS);
+
+  return rows[0];
+}
 
 /**
  * Transition a job's status and optionally set lifecycle timestamps.

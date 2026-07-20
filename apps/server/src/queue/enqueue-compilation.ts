@@ -147,7 +147,7 @@ export async function enqueueCompilation(
   //       error, which we catch and treat as success.
   try {
     await compileQueue.send(
-      { jobId: job.id, projectId: job.projectId, kind: job.kind },
+      { jobId: job.id, teamId: job.teamId, projectId: job.projectId, kind: job.kind },
       { id: job.id },
     );
   } catch (err: unknown) {
