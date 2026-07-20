@@ -14,12 +14,13 @@
  * sanitized to {code, message} — never expose raw payloads, prompts, or
  * provider responses (N3/N7).
  */
-import { randomUUID } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { randomUUID, createHash } from 'node:crypto';
+import { and, eq, or, lt, sql } from 'drizzle-orm';
 import * as schema from '../../db/schema.js';
 import type { AppDb } from '../../db/client.js';
 import type { ScopeContext } from '../../auth/scope.js';
 import { isProjectScope, getTeamId, getProjectId } from '../../auth/scope.js';
+import { encodeCursor, decodeCursor, type CursorPayload } from '@teamem/schema';
 
 // ── Error types ─────────────────────────────────────────────────────────────
 
@@ -423,6 +424,143 @@ export async function upsertJobEvent(
   }
 
   return row;
+}
+
+/**
+ * List jobs in a project with cursor-based pagination (N8: created_at desc + id).
+ *
+ * - Always scoped to team + project (red line 5.5).
+ * - Optional status filter.
+ * - Cursor encodes (sortValue=created_at ISO, id=job UUID) so the client can
+ *   request the next page without repeating filters. Mismatched filter hash →
+ *   caller should treat as cursor_invalid.
+ * - Returns at most `limit` rows + a nextCursor when more rows exist.
+ */
+export interface ListJobsResult {
+  jobs: JobRow[];
+  nextCursor: string | null;
+}
+
+export async function listJobs(
+  db: AppDb,
+  params: {
+    teamId: string;
+    projectId: string;
+    status?: string;
+    cursor?: string;
+    limit: number;
+  },
+): Promise<ListJobsResult> {
+  const { teamId, projectId, status, cursor: cursorToken, limit } = params;
+
+  // ── Decode and validate cursor ────────────────────────────────────────
+  let cursorSortValue: string | undefined;
+  let cursorId: string | undefined;
+
+  if (cursorToken) {
+    const decoded = decodeCursor(cursorToken);
+    if (
+      !decoded ||
+      decoded.resource !== 'jobs' ||
+      decoded.projectId !== projectId ||
+      decoded.filterHash !== filterHashForStatus(status)
+    ) {
+      return { jobs: [], nextCursor: null };
+      // Caller should return cursor_invalid — we let the HTTP layer decide.
+      // Returning empty is the safe default for the repository; the route
+      // layer checks the decoded cursor and throws CursorInvalidError.
+    }
+    cursorSortValue = decoded.position.sortValue;
+    cursorId = decoded.position.id;
+  }
+
+  // ── Build conditions ───────────────────────────────────────────────────
+  const conditions: ReturnType<typeof and>[] = [
+    eq(schema.jobs.teamId, teamId),
+    eq(schema.jobs.projectId, projectId),
+  ];
+
+  if (status) {
+    conditions.push(
+      eq(schema.jobs.status, status as typeof schema.jobs.status.enumValues[number]),
+    );
+  }
+
+  // Cursor: (created_at, id) < (sortValue, id) — descending order
+  if (cursorSortValue && cursorId) {
+    const cursorDate = new Date(cursorSortValue);
+    conditions.push(
+      or(
+        lt(schema.jobs.createdAt, cursorDate),
+        and(
+          eq(schema.jobs.createdAt, cursorDate),
+          lt(schema.jobs.id, cursorId),
+        ),
+      ),
+    );
+  }
+
+  // ── Execute query with limit + 1 for next-page detection ──────────────
+  const rows = await db
+    .select(JOB_COLUMNS)
+    .from(schema.jobs)
+    .where(and(...conditions))
+    .orderBy(
+      sql`${schema.jobs.createdAt} DESC`,
+      sql`${schema.jobs.id} DESC`,
+    )
+    .limit(limit + 1);
+
+  // ── Build next cursor ──────────────────────────────────────────────────
+  const hasMore = rows.length > limit;
+  const resultRows = hasMore ? rows.slice(0, limit) : rows;
+
+  let nextCursor: string | null = null;
+  if (hasMore && resultRows.length > 0) {
+    const last = resultRows[resultRows.length - 1]!;
+    nextCursor = encodeCursor({
+      v: 1,
+      resource: 'jobs',
+      sort: 'created_at',
+      projectId,
+      position: {
+        sortValue: last.createdAt.toISOString(),
+        id: last.id,
+      },
+      filterHash: filterHashForStatus(status),
+    });
+  }
+
+  return { jobs: resultRows, nextCursor };
+}
+
+/**
+ * Compute a stable filter hash for cursor validation.
+ * When a client reuses a cursor with a different status filter, the hash
+ * mismatch allows the server to reject the cursor (cursor_invalid).
+ */
+function filterHashForStatus(status?: string): string {
+  return createHash('sha256')
+    .update(`jobs:status:${status ?? 'none'}`)
+    .digest('hex')
+    .slice(0, 16);
+}
+
+/**
+ * Validate a cursor token for the jobs resource. Returns the decoded cursor
+ * or null if the token is invalid / mismatched.
+ */
+export function validateJobsCursor(
+  token: string,
+  projectId: string,
+  status?: string,
+): CursorPayload | null {
+  const decoded = decodeCursor(token);
+  if (!decoded) return null;
+  if (decoded.resource !== 'jobs') return null;
+  if (decoded.projectId !== projectId) return null;
+  if (decoded.filterHash !== filterHashForStatus(status)) return null;
+  return decoded;
 }
 
 /**

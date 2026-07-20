@@ -16,6 +16,7 @@ import {
   buildEventsWriteRoutes,
   type EventsWriteDeps,
 } from './http/routes/events-write.js';
+import { buildJobsReadRoutes } from './http/routes/jobs-read.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -58,6 +59,11 @@ export function buildApp(deps: AppDeps = {}) {
         queue: deps.queue,
         waitTimeoutMs: deps.waitTimeoutMs,
       }),
+    );
+    // Job read routes (list + detail)
+    app.route(
+      '/',
+      buildJobsReadRoutes({ db: deps.db }),
     );
   }
 
