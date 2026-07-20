@@ -20,6 +20,7 @@ import { buildJobsReadRoutes } from './http/routes/jobs-read.js';
 import {
   buildConnectorWebhookRoutes,
 } from './http/routes/connector-webhook.js';
+import { buildConceptsReadRoutes } from './http/routes/concepts-read.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -78,6 +79,12 @@ export function buildApp(deps: AppDeps = {}) {
         db: deps.db,
         queue: deps.queue,
       }),
+    );
+
+    // Concept read routes — detail by UUID and by path (M0-READ-04).
+    app.route(
+      '/',
+      buildConceptsReadRoutes({ db: deps.db }),
     );
   }
 
