@@ -103,6 +103,16 @@ check_prereqs() {
   gh repo view "$GITHUB_REPO" >/dev/null 2>&1 || { fail "Cannot access $GITHUB_REPO"; missing=1; }
   psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1 || { fail "Cannot connect to database"; missing=1; }
 
+  # Ensure seed data exists BEFORE endpoint detection.
+  # detect_webhook_endpoint() sends a real POST to the webhook handler,
+  # which resolves the project row first. If the project hasn't been
+  # seeded yet, the handler returns 404 — indistinguishable from "route
+  # doesn't exist" on a fresh database (DUA-161 timing bug).
+  psql "$DATABASE_URL" -c "
+    INSERT INTO teams (id, name) VALUES ('${SMOKE_TEAM}', 'Smoke Test Team') ON CONFLICT (id) DO NOTHING;
+    INSERT INTO projects (id, team_id, name) VALUES ('${SMOKE_PROJECT}', '${SMOKE_TEAM}', 'Smoke Test Project') ON CONFLICT (id) DO NOTHING;
+  " >/dev/null 2>&1
+
   # Check server reachability and which endpoints are available
   if curl -fsS "${BASE_URL}/healthz" >/dev/null 2>&1; then
     info "Server: ${BASE_URL} reachable (/healthz OK)"
@@ -135,12 +145,6 @@ check_prereqs() {
   else
     info "Events list endpoint available at ${BASE_URL}/v1/events (HTTP ${events_status})"
   fi
-
-  # Ensure seed data exists
-  psql "$DATABASE_URL" -c "
-    INSERT INTO teams (id, name) VALUES ('${SMOKE_TEAM}', 'Smoke Test Team') ON CONFLICT (id) DO NOTHING;
-    INSERT INTO projects (id, team_id, name) VALUES ('${SMOKE_PROJECT}', '${SMOKE_TEAM}', 'Smoke Test Project') ON CONFLICT (id) DO NOTHING;
-  " >/dev/null 2>&1
 
   if [[ "$missing" -ne 0 ]]; then echo; echo "Fix the failures above and re-run."; exit 1; fi
   pass "All prerequisites met"
@@ -855,15 +859,27 @@ test_idempotency() {
   deliver_payload "push" "$push_delivery" "$modified"
   resp="$DELIVER_BODY"
   http_code="$DELIVER_HTTP_CODE"
-  if [[ "$http_code" == "409" ]]; then
-    pass "Idempotency conflict: HTTP 409 (N1 — different hash correctly rejected)"
-    inc_pass
-  elif [[ "$http_code" == "200" ]]; then
-    local dup2; dup2="$(echo "$resp" | jq -r '[.results[] | select(.status == "duplicate")] | length // 0')"
-    fail "Idempotency conflict: HTTP 200 with $dup2 duplicate event(s) — expected HTTP 409"
-    inc_fail
+  # connector-webhook.ts returns per-event rejected status with HTTP 200,
+  # NOT 409 — the 409 mapping is only for the batch /v1/events path.
+  # See: connector-webhook.ts → catch (StorageIdempotencyConflictError)
+  if [[ "$http_code" == "200" ]]; then
+    local rejected
+    rejected="$(echo "$resp" | jq -r '[.results[] | select(.status == "rejected" and .error.code == "idempotency_conflict")] | length // 0')"
+    local total_results
+    total_results="$(echo "$resp" | jq -r '.results | length // 0')"
+    if [[ "$rejected" -gt 0 && "$rejected" -eq "$total_results" ]]; then
+      pass "Idempotency conflict: $rejected/$total_results events rejected with idempotency_conflict (HTTP 200 — per-event contract, N1)"
+      inc_pass
+    elif [[ "$rejected" -gt 0 ]]; then
+      pass "Idempotency conflict: $rejected/$total_results events rejected with idempotency_conflict (partial, HTTP 200)"
+      inc_pass
+    else
+      local dup2; dup2="$(echo "$resp" | jq -r '[.results[] | select(.status == "duplicate")] | length // 0')"
+      fail "Idempotency conflict: expected rejected+idempotency_conflict, got $dup2 duplicates and $total_results total results"
+      inc_fail
+    fi
   else
-    fail "Idempotency conflict: HTTP $http_code"
+    fail "Idempotency conflict: HTTP $http_code (expected 200 with per-event rejected status)"
     inc_fail
   fi
   echo ""
