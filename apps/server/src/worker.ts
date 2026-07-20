@@ -15,16 +15,19 @@
  * This is the same pg-boss consumer the all-in-one server embeds — only the
  * process boundary differs.
  */
-import { parseServerEnv } from './config/env.js';
+import { loadRuntimeConfig } from './config/runtime.js';
 import { fatalStartup, installShutdownHandlers } from './lifecycle.js';
 import { createCompileQueue } from './queue/boss.js';
 import { acknowledgeCompileJob } from './worker/embedded.js';
 
 export async function runWorker(): Promise<void> {
-  const env = parseServerEnv();
+  // The worker only needs a database URL; reuse the runtime config parser
+  // which validates DATABASE_URL without requiring the full server env
+  // (TEAMEM_HOST, TEAMEM_PORT, GitHub keys, etc. are irrelevant here).
+  const config = loadRuntimeConfig();
 
   // pg-boss lives inside Postgres — the queue start verifies connectivity.
-  const queue = createCompileQueue(env.databaseUrl, {
+  const queue = createCompileQueue(config.databaseUrl, {
     onError: (err) => console.error('[worker] pg-boss error:', err),
   });
 

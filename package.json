@@ -24,6 +24,11 @@
     "test:compose": "pnpm --filter @teamem/server test:compose",
     "m0:f1-reliability": "pnpm --filter @teamem/server m0:f1-reliability"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
   "devDependencies": {
     "eslint": "^9.31.0",
     "typescript": "^5.8.3",
