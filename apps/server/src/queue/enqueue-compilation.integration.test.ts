@@ -9,9 +9,12 @@
  *     pg-boss message without duplicating the application-layer job.
  *   - Boundary: no duplicate pg-boss messages from consecutive replays.
  *
+ * The test is self-sufficient: it creates the minimum required schema
+ * (enums, tables, indexes) in beforeAll, so the test database does not
+ * need pre-applied migrations. Any pre-existing tables are left untouched.
+ *
  * Requirements:
- *   POSTGRES_PASSWORD=x docker compose up -d postgres
- *   TEST_DATABASE_URL=postgres://teamem:x@localhost:5432/teamem pnpm vitest ...
+ *   TEST_DATABASE_URL=postgres://user:pass@localhost:5432/teamem pnpm vitest ...
  */
 import { randomBytes } from 'node:crypto';
 import { randomUUID } from 'node:crypto';
@@ -35,6 +38,137 @@ import { createCompileQueue, type CompileQueue } from './boss.js';
 
 const url = process.env['TEST_DATABASE_URL'];
 
+/**
+ * Ensure the minimum schema required by this test exists.
+ *
+ * Uses CREATE … IF NOT EXISTS / DO $$ … END $$ guards so the test is
+ * self-sufficient: it works against a completely empty database as well as
+ * one that already has the application migrations applied. The pgvector
+ * extension and the concepts table are deliberately skipped — this test
+ * only needs the job + event tables.
+ */
+const ENSURE_SCHEMA_SQL = `
+-- Enums (CREATE TYPE IF NOT EXISTS is PG 17+; guard with DO blocks for 16 compat).
+DO $$ BEGIN CREATE TYPE source_channel       AS ENUM('github','cli','mcp','external');             EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE source_kind          AS ENUM('github_commit','github_pr','github_issue','github_pr_comment','cli_init','mcp_write','external_event'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE actor_provenance     AS ENUM('webhook_verified','credential_bound','client_claimed','unknown'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE occurred_at_provenance AS ENUM('provider','client','server');                EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE job_status           AS ENUM('queued','processing','completed','failed','cancelled'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE job_kind             AS ENUM('ingest_event','ingest_batch','compilation');   EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE job_event_status     AS ENUM('pending','compiled','skipped','failed');       EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE initiator_kind       AS ENUM('credential','connector');                      EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE principal_kind       AS ENUM('human','service');                             EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE TYPE identity_provider    AS ENUM('github','external');                           EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Tables
+CREATE TABLE IF NOT EXISTS teams (
+  id         text PRIMARY KEY,
+  name       text NOT NULL,
+  created_at timestamptz(3) DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS projects (
+  id         text PRIMARY KEY,
+  team_id    text NOT NULL REFERENCES teams(id),
+  name       text NOT NULL,
+  created_at timestamptz(3) DEFAULT now() NOT NULL,
+  CONSTRAINT projects_team_id_uq UNIQUE(team_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS principals (
+  id              text PRIMARY KEY,
+  team_id         text NOT NULL REFERENCES teams(id),
+  kind            principal_kind NOT NULL,
+  provider        identity_provider NOT NULL,
+  provider_kind   text NOT NULL,
+  provider_user_id text NOT NULL,
+  display_login   text,
+  created_at      timestamptz(3) DEFAULT now() NOT NULL,
+  CONSTRAINT principals_team_id_uq UNIQUE(team_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  id                       text PRIMARY KEY,
+  team_id                  text NOT NULL REFERENCES teams(id),
+  project_id               text NOT NULL,
+  channel                  source_channel NOT NULL,
+  kind                     source_kind NOT NULL,
+  connector_kind           text NOT NULL,
+  source_event             text,
+  source_action            text,
+  delivery_id              text NOT NULL,
+  item_key                 text NOT NULL,
+  external_id              text NOT NULL,
+  url                      text,
+  actor                    jsonb,
+  actor_provenance         actor_provenance NOT NULL,
+  actor_principal_id       text,
+  occurred_at              timestamptz(3) NOT NULL,
+  occurred_at_provenance   occurred_at_provenance NOT NULL,
+  ingested_by_credential_id text,
+  ingested_by_principal_id text,
+  payload                  jsonb NOT NULL,
+  payload_bytes            integer NOT NULL,
+  payload_hash             text NOT NULL,
+  payload_schema_version   integer NOT NULL,
+  envelope_version         integer NOT NULL,
+  created_at               timestamptz(3) DEFAULT now() NOT NULL,
+  CONSTRAINT events_tenant_uq UNIQUE(team_id, project_id, id),
+  CONSTRAINT events_project_fk FOREIGN KEY (team_id, project_id) REFERENCES projects(team_id, id),
+  CONSTRAINT events_actor_principal_fk FOREIGN KEY (team_id, actor_principal_id) REFERENCES principals(team_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id                        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  team_id                   text NOT NULL REFERENCES teams(id),
+  project_id                text NOT NULL,
+  kind                      job_kind NOT NULL,
+  status                    job_status DEFAULT 'queued' NOT NULL,
+  attempts                  integer DEFAULT 0 NOT NULL,
+  initiated_by_kind         initiator_kind NOT NULL,
+  initiated_by_credential_id text,
+  initiated_by_principal_id text,
+  initiated_by_connector    text,
+  idempotency_key           text,
+  idempotency_request_hash  text,
+  result_snapshot           jsonb,
+  event_count               integer NOT NULL,
+  error                     jsonb,
+  created_at                timestamptz(3) DEFAULT now() NOT NULL,
+  started_at                timestamptz(3),
+  finished_at               timestamptz(3),
+  CONSTRAINT jobs_tenant_uq UNIQUE(team_id, project_id, id),
+  CONSTRAINT jobs_project_fk FOREIGN KEY (team_id, project_id) REFERENCES projects(team_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS job_events (
+  team_id       text NOT NULL REFERENCES teams(id),
+  project_id    text NOT NULL,
+  job_id        uuid NOT NULL,
+  event_id      text NOT NULL,
+  status        job_event_status DEFAULT 'pending' NOT NULL,
+  reason        text,
+  error         jsonb,
+  concept_uuids uuid[],
+  updated_at    timestamptz(3) DEFAULT now() NOT NULL,
+  CONSTRAINT job_events_pk PRIMARY KEY(job_id, event_id),
+  CONSTRAINT job_events_job_fk   FOREIGN KEY (team_id, project_id, job_id)   REFERENCES jobs(team_id, project_id, id),
+  CONSTRAINT job_events_event_fk FOREIGN KEY (team_id, project_id, event_id) REFERENCES events(team_id, project_id, id)
+);
+
+-- Indexes (only the ones the repository code relies on).
+DO $$ BEGIN
+  CREATE UNIQUE INDEX IF NOT EXISTS events_idempotency_uq ON events(project_id, channel, connector_kind, delivery_id, item_key);
+  CREATE INDEX IF NOT EXISTS events_cursor_idx ON events(project_id, created_at, id);
+  CREATE UNIQUE INDEX IF NOT EXISTS jobs_idempotency_uq ON jobs(project_id, kind, idempotency_key) WHERE idempotency_key IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS jobs_cursor_idx ON jobs(project_id, created_at, id);
+  CREATE INDEX IF NOT EXISTS jobs_status_idx ON jobs(project_id, status);
+  CREATE UNIQUE INDEX IF NOT EXISTS principals_identity_uq ON principals(team_id, provider, provider_kind, provider_user_id);
+  CREATE INDEX IF NOT EXISTS projects_team_idx ON projects(team_id);
+  CREATE INDEX IF NOT EXISTS events_team_idx ON events(team_id);
+EXCEPTION WHEN duplicate_table THEN NULL; END $$;
+`;
+
 describe.skipIf(!url)('enqueue compilation (live Postgres)', () => {
   let pool: Pool;
   let db: AppDb;
@@ -45,6 +179,11 @@ describe.skipIf(!url)('enqueue compilation (live Postgres)', () => {
   beforeAll(async () => {
     ({ pool } = connectDatabase());
     db = createDb(url!, { pool: pool as unknown as import('pg').Pool });
+
+    // Ensure the minimum schema exists (idempotent — safe to call on a
+    // database that already has the full migration applied).
+    await db.execute(ENSURE_SCHEMA_SQL);
+
     schemaName = `enq_test_${randomBytes(6).toString('hex')}`;
     compileQueue = createCompileQueue(url!, { schema: schemaName });
     await compileQueue.start();
@@ -62,26 +201,20 @@ describe.skipIf(!url)('enqueue compilation (live Postgres)', () => {
     await closeDatabase(pool);
   });
 
-  // Clean application data between tests (not the pg-boss schema).
-  // Deletes in FK dependency order: children first.
+  // Clean application data between tests (not the pg-boss schema and not
+  // the tables themselves — only rows).  Deletes in FK dependency order.
   beforeEach(async () => {
+    // Delete rows that reference the tables we own.  The tables created by
+    // ENSURE_SCHEMA_SQL are the minimal set; concept-* tables may or may
+    // not exist so guard each delete that could fail.
     await db.delete(schema.jobEvents);
     await db.delete(schema.jobs);
-    // conceptContributors has FK to concepts and principals.
-    await db.delete(schema.conceptContributors);
-    // conceptEvidence has FK to concepts.
-    await db.delete(schema.conceptEvidence);
-    // conceptPaths has FK to concepts.
-    await db.delete(schema.conceptPaths);
-    // concepts table may not exist (vector extension mismatch) —
-    // delete only when it is present.
-    try {
-      await db.delete(schema.concepts);
-    } catch {
-      // Table does not exist — safe to skip.
+    for (const table of [schema.conceptContributors, schema.conceptEvidence, schema.conceptPaths]) {
+      try { await db.delete(table); } catch { /* table may not exist */ }
     }
+    try { await db.delete(schema.concepts); } catch { /* table may not exist */ }
     await db.delete(schema.events);
-    await db.delete(schema.apiKeys);
+    try { await db.delete(schema.apiKeys); } catch { /* table may not exist */ }
     await db.delete(schema.principals);
     await db.delete(schema.projects);
     await db.delete(schema.teams);
