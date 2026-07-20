@@ -15,6 +15,8 @@ import { startRuntime, type Runtime, type RuntimeStartup } from './composition-r
 import { createDbHandle } from './db/client.js';
 import { createCompileQueue } from './queue/boss.js';
 import { startEmbeddedWorker } from './worker/embedded.js';
+import { createCompileJobHandler } from './queue/worker.js';
+import { createLlmClient } from './llm/factory.js';
 import { startServer } from './server.js';
 import { bootstrapMain } from './commands/bootstrap.js';
 import { installShutdownHandlers } from './lifecycle.js';
@@ -28,6 +30,12 @@ export function createRuntimeStartup(config: {
 }): RuntimeStartup {
   const dbHandle = createDbHandle(config.databaseUrl);
   const queue = createCompileQueue(config.databaseUrl);
+
+  // Resolve LLM config from the environment for the embedded worker.
+  const env = parseServerEnv();
+  const llmProvider = env.llmProviders[0];
+  const llm =
+    llmProvider ? createLlmClient(llmProvider) : undefined;
 
   return {
     async startDatabase() {
@@ -61,7 +69,20 @@ export function createRuntimeStartup(config: {
       };
     },
     async startWorker() {
-      return startEmbeddedWorker(queue);
+      if (!llm) {
+        console.warn(
+          '[runtime] no LLM provider configured — embedded worker will start but ' +
+          'compilation will fail. Configure TEAMEM_ANTHROPIC_API_KEY, ' +
+          'TEAMEM_OPENAI_API_KEY, or equivalent.',
+        );
+      }
+      // Use the real handler when an LLM is configured; fall back to the
+      // no-op placeholder otherwise so the queue is still consumed and
+      // acknowledged (prevents unbounded retry loops).
+      const handler = llm
+        ? createCompileJobHandler({ db: dbHandle.db, llm })
+        : undefined;
+      return startEmbeddedWorker(queue, handler);
     },
   };
 }

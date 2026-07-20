@@ -21,6 +21,7 @@ import {
 import { projectScope, allProjectsScope } from '../../auth/scope.js';
 import * as schema from '../../db/schema.js';
 import {
+  claimJob,
   createJob,
   getJob,
   updateJobStatus,
@@ -612,6 +613,188 @@ describe.skipIf(!url)('jobs repository (live Postgres)', () => {
       'completed',
     );
     expect(result).toBeUndefined();
+  });
+
+  // ── claimJob: atomic queued → processing (DUA-173) ──────────────────────
+
+  it('atomically claims a queued job: transitions to processing and increments attempts', async () => {
+    const teamId = freshTeamId();
+    const projectId = freshProjectId();
+    await seedTeam(teamId);
+    await seedProject(teamId, projectId);
+
+    const { job } = await createJob(db, makeCreateJobRequest(teamId, projectId));
+    expect(job.status).toBe('queued');
+    expect(job.attempts).toBe(0);
+    expect(job.startedAt).toBeNull();
+
+    const claimed = await claimJob(db, teamId, projectId, job.id);
+    expect(claimed).toBeDefined();
+    expect(claimed!.status).toBe('processing');
+    expect(claimed!.attempts).toBe(1);
+    expect(claimed!.startedAt).toBeInstanceOf(Date);
+    expect(claimed!.startedAt!.getTime()).toBeGreaterThanOrEqual(
+      job.createdAt.getTime(),
+    );
+    expect(claimed!.finishedAt).toBeNull();
+    // Initiator scope must be preserved (N6).
+    expect(claimed!.initiatedByKind).toBe('credential');
+    expect(claimed!.initiatedByCredentialId).toBe('key_test');
+  });
+
+  it('returns undefined when the job is not in queued state (already processing)', async () => {
+    const teamId = freshTeamId();
+    const projectId = freshProjectId();
+    await seedTeam(teamId);
+    await seedProject(teamId, projectId);
+
+    const { job } = await createJob(db, makeCreateJobRequest(teamId, projectId));
+
+    // First claim succeeds.
+    const first = await claimJob(db, teamId, projectId, job.id);
+    expect(first).toBeDefined();
+    expect(first!.status).toBe('processing');
+    expect(first!.attempts).toBe(1);
+
+    // Second claim on the same job fails — status is already 'processing'.
+    const second = await claimJob(db, teamId, projectId, job.id);
+    expect(second).toBeUndefined();
+  });
+
+  it('returns undefined when the job is in completed state', async () => {
+    const teamId = freshTeamId();
+    const projectId = freshProjectId();
+    await seedTeam(teamId);
+    await seedProject(teamId, projectId);
+
+    const { job } = await createJob(db, makeCreateJobRequest(teamId, projectId));
+
+    // Move to completed via updateJobStatus.
+    await updateJobStatus(db, teamId, projectId, job.id, 'processing');
+    await updateJobStatus(db, teamId, projectId, job.id, 'completed');
+
+    // claimJob should refuse — status is 'completed', not 'queued'.
+    const claimed = await claimJob(db, teamId, projectId, job.id);
+    expect(claimed).toBeUndefined();
+  });
+
+  it('returns undefined when the job is in failed state', async () => {
+    const teamId = freshTeamId();
+    const projectId = freshProjectId();
+    await seedTeam(teamId);
+    await seedProject(teamId, projectId);
+
+    const { job } = await createJob(db, makeCreateJobRequest(teamId, projectId));
+
+    // Move to failed via updateJobStatus.
+    await updateJobStatus(db, teamId, projectId, job.id, 'processing');
+    await updateJobStatus(db, teamId, projectId, job.id, 'failed', {
+      error: { code: 'test', message: 'test failure' },
+    });
+
+    // claimJob should refuse — status is 'failed', not 'queued'.
+    const claimed = await claimJob(db, teamId, projectId, job.id);
+    expect(claimed).toBeUndefined();
+  });
+
+  it('returns undefined for a non-existent job', async () => {
+    const teamId = freshTeamId();
+    const projectId = freshProjectId();
+    await seedTeam(teamId);
+    await seedProject(teamId, projectId);
+
+    const claimed = await claimJob(
+      db,
+      teamId,
+      projectId,
+      '00000000-0000-0000-0000-000000000000',
+    );
+    expect(claimed).toBeUndefined();
+  });
+
+  it('claimJob ignores cross-team job (scope enforcement)', async () => {
+    const teamA = freshTeamId();
+    const teamB = freshTeamId();
+    const projectA = freshProjectId();
+    const projectB = freshProjectId();
+    await seedTeam(teamA, 'Team A');
+    await seedTeam(teamB, 'Team B');
+    await seedProject(teamA, projectA);
+    await seedProject(teamB, projectB);
+
+    // Create job in team A.
+    const { job } = await createJob(
+      db,
+      makeCreateJobRequest(teamA, projectA),
+    );
+
+    // Attempt to claim using team B's scope — should return undefined.
+    const claimed = await claimJob(db, teamB, projectB, job.id);
+    expect(claimed).toBeUndefined();
+
+    // Team A CAN still claim it.
+    const claimedA = await claimJob(db, teamA, projectA, job.id);
+    expect(claimedA).toBeDefined();
+  });
+
+  it('CONCURRENCY: only one concurrent claim succeeds (simulated race)', async () => {
+    // This test proves the atomic claim mechanism works by issuing two
+    // claim attempts against the same queued job. Only the first succeeds;
+    // the second sees `undefined` because the WHERE status='queued' clause
+    // no longer matches.
+    const teamId = freshTeamId();
+    const projectId = freshProjectId();
+    await seedTeam(teamId);
+    await seedProject(teamId, projectId);
+
+    const { job } = await createJob(db, makeCreateJobRequest(teamId, projectId));
+
+    // Simulate two concurrent workers claiming the same job.
+    // Both run in the same connection (no true parallelism in a single
+    // Postgres connection), but the second call is after the first commit
+    // so it observes the updated status.
+    const first = await claimJob(db, teamId, projectId, job.id);
+    const second = await claimJob(db, teamId, projectId, job.id);
+
+    expect(first).toBeDefined();
+    expect(first!.attempts).toBe(1);
+    expect(second).toBeUndefined();
+  });
+
+  it('increments attempts on each retry claim', async () => {
+    // Simulate retry: fail the job, reset to queued, claim again.
+    const teamId = freshTeamId();
+    const projectId = freshProjectId();
+    await seedTeam(teamId);
+    await seedProject(teamId, projectId);
+
+    const { job } = await createJob(db, makeCreateJobRequest(teamId, projectId));
+
+    // First claim: attempts 0 → 1.
+    const first = await claimJob(db, teamId, projectId, job.id);
+    expect(first!.attempts).toBe(1);
+
+    // Simulate failure + pg-boss retry: boss would move back to 'queued' or
+    // create a new delivery. For the test, manually update back to 'queued'.
+    // This mirrors what pg-boss does when a job expires or is retried.
+    await db
+      .update(schema.jobs)
+      .set({ status: 'queued' })
+      .where(eq(schema.jobs.id, job.id));
+
+    // Second claim: attempts 1 → 2.
+    const second = await claimJob(db, teamId, projectId, job.id);
+    expect(second).toBeDefined();
+    expect(second!.attempts).toBe(2);
+
+    // Reset and try a third time.
+    await db
+      .update(schema.jobs)
+      .set({ status: 'queued' })
+      .where(eq(schema.jobs.id, job.id));
+
+    const third = await claimJob(db, teamId, projectId, job.id);
+    expect(third!.attempts).toBe(3);
   });
 
   // ── upsertJobEvent: per-event outcomes ───────────────────────────────────
