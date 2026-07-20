@@ -27,6 +27,10 @@ import {
 import {
   buildCompilationsRoutes,
 } from './ingest/create-compilation.js';
+import {
+  buildEventsBatchRoutes,
+  type EventsBatchDeps,
+} from './http/routes/events-batch.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -62,14 +66,19 @@ export function buildApp(deps: AppDeps = {}) {
 
   // Ingestion routes — wired only when db is available.
   if (deps.db) {
-    app.route(
-      '/',
-      buildEventsWriteRoutes({
-        db: deps.db,
-        queue: deps.queue,
-        waitTimeoutMs: deps.waitTimeoutMs,
-      }),
-    );
+    const eventsWriteDeps: EventsWriteDeps = {
+      db: deps.db,
+      queue: deps.queue,
+      waitTimeoutMs: deps.waitTimeoutMs,
+    };
+    app.route('/', buildEventsWriteRoutes(eventsWriteDeps));
+
+    const eventsBatchDeps: EventsBatchDeps = {
+      db: deps.db,
+      queue: deps.queue,
+    };
+    app.route('/', buildEventsBatchRoutes(eventsBatchDeps));
+
     // Job read routes (list + detail)
     app.route(
       '/',
