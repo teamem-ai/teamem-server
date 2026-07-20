@@ -24,6 +24,9 @@ import { buildConceptsReadRoutes } from './http/routes/concepts-read.js';
 import {
   buildEventsReadRoutes,
 } from './http/routes/events-read.js';
+import {
+  buildCompilationsRoutes,
+} from './ingest/create-compilation.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -79,6 +82,15 @@ export function buildApp(deps: AppDeps = {}) {
     app.route(
       '/',
       buildConnectorWebhookRoutes({
+        db: deps.db,
+        queue: deps.queue,
+      }),
+    );
+
+    // Compilation routes — explicit compilation trigger for stored events.
+    app.route(
+      '/',
+      buildCompilationsRoutes({
         db: deps.db,
         queue: deps.queue,
       }),
