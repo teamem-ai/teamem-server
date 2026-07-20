@@ -377,6 +377,79 @@ export async function updateJobStatus(
   return rows[0];
 }
 
+// ── Per-event compilation status (for compilation endpoint) ──────────────
+
+/**
+ * For each requested event, determine whether it is already active in a
+ * non-terminal job or has already been compiled.
+ *
+ * Returns two sets:
+ *   - activeEventIds: events currently in a queued or processing job
+ *   - compiledEventIds: events with a compiled outcome in a completed job
+ *
+ * Both sets are always scoped by teamId + projectId (red line 5.5).
+ * Events not in either set are eligible for compilation (queued).
+ */
+export async function getEventCompilationStatus(
+  db: AppDb,
+  teamId: string,
+  projectId: string,
+  eventIds: readonly string[],
+): Promise<{
+  activeEventIds: Set<string>;
+  compiledEventIds: Set<string>;
+}> {
+  if (eventIds.length === 0) {
+    return { activeEventIds: new Set(), compiledEventIds: new Set() };
+  }
+
+  // Events that are in active (non-terminal) jobs — queued or processing.
+  const activeRows = await db
+    .select({ eventId: schema.jobEvents.eventId })
+    .from(schema.jobEvents)
+    .innerJoin(
+      schema.jobs,
+      and(
+        eq(schema.jobEvents.jobId, schema.jobs.id),
+        eq(schema.jobEvents.teamId, schema.jobs.teamId),
+        eq(schema.jobEvents.projectId, schema.jobs.projectId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.jobEvents.teamId, teamId),
+        eq(schema.jobEvents.projectId, projectId),
+        sql`${schema.jobEvents.eventId} = ANY(ARRAY[${sql.join(
+          eventIds.map((id) => sql`${id}`),
+          sql`, `,
+        )}]::text[])`,
+        sql`${schema.jobs.status} IN ('queued', 'processing')`,
+      ),
+    );
+
+  // Events that were already compiled (any job_event row with status='compiled').
+  // We don't require the job to still be completed — a compiled event stays compiled.
+  const compiledRows = await db
+    .select({ eventId: schema.jobEvents.eventId })
+    .from(schema.jobEvents)
+    .where(
+      and(
+        eq(schema.jobEvents.teamId, teamId),
+        eq(schema.jobEvents.projectId, projectId),
+        sql`${schema.jobEvents.eventId} = ANY(ARRAY[${sql.join(
+          eventIds.map((id) => sql`${id}`),
+          sql`, `,
+        )}]::text[])`,
+        eq(schema.jobEvents.status, 'compiled' as const),
+      ),
+    );
+
+  const activeEventIds = new Set(activeRows.map((r) => r.eventId));
+  const compiledEventIds = new Set(compiledRows.map((r) => r.eventId));
+
+  return { activeEventIds, compiledEventIds };
+}
+
 // ── Per-event results ───────────────────────────────────────────────────────
 
 /**
