@@ -49,8 +49,18 @@ export interface CompileQueue {
   start(): Promise<void>;
   /** Gracefully stop pg-boss (drains in-flight work, then closes its pool). */
   stop(): Promise<void>;
-  /** Enqueue a compile job; returns the job id (or null if deduplicated). */
-  send(data: Record<string, unknown>): Promise<string | null>;
+  /**
+   * Enqueue a compile job; returns the job id (or null if deduplicated).
+   *
+   * When `options.id` is set, pg-boss uses that value as the job's
+   * primary key. If a job with that id already exists, the send is
+   * rejected with the pg-boss-level unique-constraint error, which the
+   * caller can catch to treat as an idempotent no-op.
+   */
+  send(
+    data: Record<string, unknown>,
+    options?: { id?: string },
+  ): Promise<string | null>;
   /** Register a single consumer for the compile queue. */
   work(handler: CompileJobHandler): Promise<string>;
   /** Detach this instance's consumer without stopping the queue. */
@@ -98,8 +108,8 @@ export function createCompileQueue(
     async stop() {
       await boss.stop();
     },
-    send(data) {
-      return boss.send(COMPILE_QUEUE, data);
+    send(data, options) {
+      return boss.send(COMPILE_QUEUE, data, options);
     },
     work(handler) {
       // pg-boss delivers a batch; fan it out one job at a time so a handler
