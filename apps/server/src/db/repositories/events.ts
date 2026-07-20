@@ -24,7 +24,7 @@ import * as schema from '../schema.js';
 import type { AppDb } from '../client.js';
 import type { ScopeContext } from '../../auth/scope.js';
 import { isProjectScope, getTeamId, getProjectId } from '../../auth/scope.js';
-import { encodeCursor, type CursorPayload } from '@teamem/schema';
+import { decodeCursor, encodeCursor, type CursorPayload } from '@teamem/schema';
 
 // ── Error types ─────────────────────────────────────────────────────────────
 
@@ -294,41 +294,24 @@ export async function listEvents(
     conditions.push(eq(schema.events.kind, params.sourceKind as any));
   }
 
-  // Cursor: decode and apply position + validate filter hash.
+  // Cursor: decode and apply position + validate filter hash. Decoding uses
+  // the canonical @teamem/schema validator (N3) — do not hand-roll a second
+  // copy of the cursor contract here.
   if (params.cursor) {
-    let cursorPayload: CursorPayload;
-    try {
-      const raw = JSON.parse(
-        Buffer.from(params.cursor, 'base64url').toString('utf8'),
-      );
-      // Light validate the cursor shape without importing the full schema —
-      // we validate resource/sort/filterHash here and use the position.
-      if (
-        typeof raw !== 'object' ||
-        raw === null ||
-        (raw as Record<string, unknown>)['resource'] !== 'events' ||
-        (raw as Record<string, unknown>)['sort'] !== 'created_at' ||
-        (raw as Record<string, unknown>)['v'] !== 1 ||
-        (raw as Record<string, unknown>)['projectId'] !== projectId
-      ) {
-        throw new Error('cursor_invalid');
-      }
-      if ((raw as Record<string, unknown>)['filterHash'] !== currentFilterHash) {
-        throw new Error('cursor_invalid');
-      }
-      const pos = (raw as Record<string, unknown>)['position'] as Record<string, unknown>;
-      if (typeof pos['sortValue'] !== 'string' || typeof pos['id'] !== 'string') {
-        throw new Error('cursor_invalid');
-      }
-      cursorPayload = raw as unknown as CursorPayload;
-    } catch {
+    const decoded = decodeCursor(params.cursor);
+    if (
+      decoded === null ||
+      decoded.resource !== 'events' ||
+      decoded.projectId !== projectId ||
+      decoded.filterHash !== currentFilterHash
+    ) {
       throw new Error('cursor_invalid');
     }
 
     // Apply cursor pagination: (created_at < sortValue)
     // OR (created_at = sortValue AND id < id) — tie-breaker.
-    const cursorSortValue = cursorPayload.position.sortValue;
-    const cursorId = cursorPayload.position.id;
+    const cursorSortValue = decoded.position.sortValue;
+    const cursorId = decoded.position.id;
 
     conditions.push(
       or(
