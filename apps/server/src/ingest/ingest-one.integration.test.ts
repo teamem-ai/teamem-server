@@ -28,6 +28,7 @@ import {
   type Pool,
 } from '../test/database.js';
 import { ingestOne, IngestOneError, type IngestOneAuth } from './ingest-one.js';
+import type { CompileQueue } from '../queue/boss.js';
 import { stripPrivateTags } from '../security/private-tags.js';
 import { payloadHash } from '../security/payload-hash.js';
 import { PAYLOAD_SCHEMA_VERSION, type IngestEventRequest } from '@teamem/schema';
@@ -604,6 +605,111 @@ describe.skipIf(!url)('ingestOne pipeline (live Postgres)', () => {
       const row = rows[0] as Record<string, unknown>;
       expect(row['external_id']).toBe('my-org/my-repo');
       expect(row['url']).toBe('https://github.com/my-org/my-repo/blob/main/README.md');
+    });
+  });
+
+  // ── CLI 验收步骤 1: queue spy injection ─────────────────────────────────
+
+  describe('queue integration — injectable spy', () => {
+    /** Build a lightweight queue spy that records send() calls. */
+    function createQueueSpy(): CompileQueue & { sent: Array<{ jobId: string; eventId: string }> } {
+      const sent: Array<{ jobId: string; eventId: string }> = [];
+      const noop = () => Promise.resolve();
+      return {
+        sent,
+        start: noop,
+        stop: noop,
+        work: () => Promise.resolve('ok'),
+        offWork: noop,
+        async send(data) {
+          sent.push({ jobId: data.jobId as string, eventId: data.eventId as string });
+          return 'fake-pg-boss-job-id';
+        },
+      };
+    }
+
+    it('compile=true + new job → queue.send called exactly once with {jobId, eventId}', async () => {
+      const spy = createQueueSpy();
+      const req = makeRequest({ options: { compile: true, wait: false } });
+
+      const result = await ingestOne({ db, queue: spy }, req, auth);
+
+      expect(result.status).toBe('inserted');
+      expect(result.jobId).toBeTruthy();
+      expect(spy.sent).toHaveLength(1);
+      expect(spy.sent[0]).toMatchObject({
+        jobId: result.jobId,
+        eventId: result.eventId,
+      });
+    });
+
+    it('duplicate replay → queue.send is NOT called', async () => {
+      const spy = createQueueSpy();
+      const req = makeRequest({ options: { compile: true, wait: false } });
+
+      // First call — expect one send
+      const first = await ingestOne({ db, queue: spy }, req, auth);
+      expect(first.status).toBe('inserted');
+      expect(spy.sent).toHaveLength(1);
+
+      // Replay with fresh spy — must not call send again
+      const spy2 = createQueueSpy();
+      const second = await ingestOne({ db, queue: spy2 }, req, auth);
+      expect(second.status).toBe('duplicate');
+      expect(spy2.sent).toHaveLength(0);
+    });
+
+    it('compile=false → queue.send is NOT called', async () => {
+      const spy = createQueueSpy();
+      const req = makeRequest({ options: { compile: false, wait: false } });
+
+      const result = await ingestOne({ db, queue: spy }, req, auth);
+
+      expect(result.status).toBe('inserted');
+      expect(result.jobId).toBeNull();
+      expect(spy.sent).toHaveLength(0);
+    });
+
+    it('queue.send throws → event + job still persisted, result still inserted', async () => {
+      const faultySpy = {
+        ...createQueueSpy(),
+        async send() {
+          throw new Error('pg-boss connection lost');
+        },
+      };
+      const req = makeRequest({ options: { compile: true, wait: false } });
+
+      const result = await ingestOne({ db, queue: faultySpy }, req, auth);
+
+      // Event and job must still exist despite enqueue failure
+      expect(result.status).toBe('inserted');
+      expect(result.jobId).toBeTruthy();
+
+      const { rows: eventRows } = await db.execute(
+        `SELECT id FROM events WHERE id = '${result.eventId}'`,
+      );
+      expect(eventRows).toHaveLength(1);
+
+      const { rows: jobRows } = await db.execute(
+        `SELECT id, status FROM jobs WHERE id = '${result.jobId}'`,
+      );
+      expect(jobRows).toHaveLength(1);
+      expect((jobRows[0] as Record<string, unknown>)['status']).toBe('queued');
+    });
+
+    it('queue absent (undefined) → job created, no send attempted, result still valid', async () => {
+      const req = makeRequest({ options: { compile: true, wait: false } });
+
+      // No queue at all — must not throw
+      const result = await ingestOne({ db }, req, auth);
+
+      expect(result.status).toBe('inserted');
+      expect(result.jobId).toBeTruthy();
+
+      const { rows: jobRows } = await db.execute(
+        `SELECT id FROM jobs WHERE id = '${result.jobId}'`,
+      );
+      expect(jobRows).toHaveLength(1);
     });
   });
 });
