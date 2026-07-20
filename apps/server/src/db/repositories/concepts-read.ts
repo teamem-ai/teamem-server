@@ -1,18 +1,16 @@
 /**
- * Concept page read repository (M0-READ-04).
+ * Concept page read repository (M0-READ-03 + M0-READ-04).
  *
- * Provides scoped detail lookups — every query carries both team_id and
- * project_id (red line 5.5). Never fetches first and authorizes later.
+ * Provides:
+ * - Scoped detail lookups by UUID or path (M0-READ-04)
+ * - Scoped list query with type/status/tag/contributor filtering,
+ *   composite cursor pagination, and GIN-based tag filtering (M0-READ-03)
  *
- * Two resolution paths:
- * - By canonical UUID (the immutable identity — N5)
- * - By path (current or historical alias — looks up through concept_paths)
- *
- * Returns the full Concept DTO assembled from concepts + concept_paths +
- * concept_evidence + concept_contributors, or null when the resource does
- * not exist or belongs to a different tenant/project.
+ * Every query carries both team_id and project_id (red line 5.5).
+ * Never fetches first and authorizes later.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, lt, gt, or, desc, asc, inArray } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import type { Concept, Evidence } from '@teamem/schema';
 import { CONCEPT_SCHEMA_VERSION } from '@teamem/schema';
 import * as schema from '../schema.js';
@@ -124,7 +122,7 @@ async function assembleConcept(
   };
 }
 
-// ── Public API ──────────────────────────────────────────────────────────────
+// ── Public API: detail lookups (M0-READ-04) ────────────────────────────────
 
 /**
  * Fetch a concept page by its canonical UUID, scoped to team + project.
@@ -189,4 +187,166 @@ export async function getConceptByPath(
 
   // 2. Delegate to UUID lookup (reuses the scoped concept fetch + assembly).
   return getConceptByUuid(db, teamId, projectId, pathRows[0]!.conceptUuid);
+}
+
+// ── Public API: list query (M0-READ-03) ────────────────────────────────────
+
+/** Raw concept row from the list query. */
+export interface ConceptRow {
+  readonly uuid: string;
+  readonly teamId: string;
+  readonly projectId: string;
+  readonly schemaVersion: number;
+  readonly type: string;
+  readonly status: string;
+  readonly confidence: string;
+  readonly title: string;
+  readonly body: string;
+  readonly tags: string[];
+  readonly firstSeen: Date;
+  readonly lastConfirmed: Date;
+  readonly supersedesUuid: string | null;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+  /** Current path from concept_paths (null if somehow missing — should never happen). */
+  readonly path: string | null;
+}
+
+const CONCEPT_WITH_PATH_COLUMNS = {
+  uuid: schema.concepts.uuid,
+  teamId: schema.concepts.teamId,
+  projectId: schema.concepts.projectId,
+  schemaVersion: schema.concepts.schemaVersion,
+  type: schema.concepts.type,
+  status: schema.concepts.status,
+  confidence: schema.concepts.confidence,
+  title: schema.concepts.title,
+  body: schema.concepts.body,
+  tags: schema.concepts.tags,
+  firstSeen: schema.concepts.firstSeen,
+  lastConfirmed: schema.concepts.lastConfirmed,
+  supersedesUuid: schema.concepts.supersedesUuid,
+  createdAt: schema.concepts.createdAt,
+  updatedAt: schema.concepts.updatedAt,
+  path: schema.conceptPaths.path,
+};
+
+export interface ListConceptsParams {
+  readonly teamId: string;
+  readonly projectId: string;
+  readonly type?: string;
+  readonly status?: string;
+  readonly tag?: string;
+  readonly contributor?: string;
+  /** ISO 8601 timestamp of the cursor boundary row's last_confirmed. */
+  readonly cursorSortValue?: string;
+  /** UUID of the cursor boundary row. */
+  readonly cursorId?: string;
+  readonly limit: number;
+}
+
+export interface ListConceptsResult {
+  readonly rows: ConceptRow[];
+  readonly hasMore: boolean;
+}
+
+/**
+ * List concepts scoped to a team + project, with optional filters and
+ * composite cursor pagination.
+ *
+ * Sort order: `last_confirmed DESC, uuid ASC` (frozen by the concepts cursor
+ * contract — Q10 freshness order).
+ *
+ * Filter semantics:
+ * - `type` and `status`: exact match on the concept row (simple equality).
+ * - `tag`: uses the `concepts_tags_gin` GIN index — `tags @> ARRAY[$tag]`.
+ * - `contributor`: subquery on `concept_contributors` using
+ *   `concept_contributors_filter_idx` on (project_id, principal_id).
+ *
+ * Always returns `limit + 1` rows internally for hasMore detection; the
+ * extra row is stripped from the result.
+ */
+export async function listConcepts(
+  db: AppDb,
+  params: ListConceptsParams,
+): Promise<ListConceptsResult> {
+  const { teamId, projectId, limit } = params;
+
+  // ── Build WHERE conditions ────────────────────────────────────────────
+  const conditions: Array<ReturnType<typeof eq> | ReturnType<typeof lt> | ReturnType<typeof gt> | ReturnType<typeof or> | ReturnType<typeof inArray> | ReturnType<typeof sql>> = [
+    eq(schema.concepts.teamId, teamId),
+    eq(schema.concepts.projectId, projectId),
+  ];
+
+  if (params.type) {
+    conditions.push(eq(schema.concepts.type, params.type as typeof schema.concepts.type.enumValues[number]));
+  }
+  if (params.status) {
+    conditions.push(eq(schema.concepts.status, params.status as typeof schema.concepts.status.enumValues[number]));
+  }
+
+  // Tag filter — GIN-indexed array containment (concepts_tags_gin).
+  if (params.tag) {
+    conditions.push(
+      sql`${schema.concepts.tags} @> ARRAY[${params.tag}]::text[]`,
+    );
+  }
+
+  // Contributor filter — subquery (concept_contributors_filter_idx).
+  if (params.contributor) {
+    conditions.push(
+      inArray(
+        schema.concepts.uuid,
+        db
+          .select({ conceptUuid: schema.conceptContributors.conceptUuid })
+          .from(schema.conceptContributors)
+          .where(
+            and(
+              eq(schema.conceptContributors.teamId, teamId),
+              eq(schema.conceptContributors.projectId, projectId),
+              eq(schema.conceptContributors.principalId, params.contributor),
+            ),
+          ),
+      ),
+    );
+  }
+
+  // Cursor pagination: items AFTER (sortValue, id) in (last_confirmed DESC, uuid ASC).
+  if (params.cursorSortValue && params.cursorId) {
+    const cursorDate = new Date(params.cursorSortValue);
+    conditions.push(
+      or(
+        lt(schema.concepts.lastConfirmed, cursorDate),
+        and(
+          eq(schema.concepts.lastConfirmed, cursorDate),
+          gt(schema.concepts.uuid, params.cursorId),
+        ),
+      )!,
+    );
+  }
+
+  // ── Execute query ─────────────────────────────────────────────────────
+  const rows = await db
+    .select(CONCEPT_WITH_PATH_COLUMNS)
+    .from(schema.concepts)
+    .leftJoin(
+      schema.conceptPaths,
+      and(
+        eq(schema.conceptPaths.conceptUuid, schema.concepts.uuid),
+        eq(schema.conceptPaths.isCurrent, true),
+      ),
+    )
+    .where(and(...conditions) as ReturnType<typeof and>)
+    .orderBy(desc(schema.concepts.lastConfirmed), asc(schema.concepts.uuid))
+    .limit(limit + 1);
+
+  const hasMore = rows.length > limit;
+  if (hasMore) {
+    rows.pop();
+  }
+
+  return {
+    rows: rows as unknown as ConceptRow[],
+    hasMore,
+  };
 }
