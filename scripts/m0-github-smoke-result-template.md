@@ -1,140 +1,150 @@
 # M0 GitHub Webhook Smoke Test — Result Template
 
+> Fill in this template when running the smoke test. Replace `«placeholder»` values with
+> actual results from the test run.
+
 ## Run Information
 
 | Field | Value |
 |---|---|
-| **Date / Time** | `2026-07-19T23:09:48Z` |
-| **Tester** | duan-li (automated smoke test) |
-| **Repository** | `duan-li/gocker` |
+| **Date / Time** | `«ISO 8601»` |
+| **Tester** | `«name»` |
+| **Repository** | `«owner/repo»` |
 | **Webhook Secret** | `configured` _(REQUIRED)_ |
-| **Server URL** | `http://127.0.0.1:8080` |
+| **API Key** | `configured` _(REQUIRED for /v1/events read)_ |
+| **Server URL** | `«TEAMEM_BASE_URL»` |
 
 ## 1. Webhook Setup
 
 | Check | Expected | Actual | Result |
 |---|---|---|---|
-| Temporary webhook created on repo | `id` returned | `654527940` | ✓ |
-| Webhook configured with secret | `config.secret` set | configured (26 chars) | ✓ |
-| Events subscribed: push, issues, pull_request, pull_request_review | all 4 | 6 events subscribed | ✓ |
+| Temporary webhook created on repo | `id` returned | `«HOOK_ID»` | «✓/✗» |
+| Webhook configured with secret | secret set | configured | «✓/✗» |
+| Events subscribed: push, issues, pull_request, pull_request_review | all 4 | «count» | «✓/✗» |
 
 ## 2. Real GitHub Events Created
 
 | Event Type | Created? | Identifier |
 |---|---|---|
-| Push | ✓ | commit `61cf4694` |
-| Issue | ✓ | `#10` |
-| Pull Request | ✓ | `#11` |
-| PR Review | ✓ | review ID `4731651667` |
+| Push | «✓/✗» | commit `«sha»` |
+| Issue | «✓/✗» | `#«number»` |
+| Pull Request | «✓/✗» | `#«number»` |
+| PR Review | «✓/✗» | review ID `«id»` |
 
 ## 3. Real Webhook Deliveries (from GitHub Delivery Log)
 
 | Delivery Type | Found in GitHub Log? | Delivery ID | Payload Size |
 |---|---|---|---|
-| `push` | ✓ | `3832190144476102656` | 7454 bytes |
-| `issues` | ✓ | `3832190149423267840` | 8440 bytes |
-| `pull_request` | ✓ | `3832190157065289728` | 21353 bytes |
-| `pull_request_review` | ✓ | `3832190155278516224` | 22661 bytes |
+| `push` | «✓/✗» | `«delivery_id»` | «size» bytes |
+| `issues` | «✓/✗» | `«delivery_id»` | «size» bytes |
+| `pull_request` | «✓/✗» | `«delivery_id»` | «size» bytes |
+| `pull_request_review` | «✓/✗» | `«delivery_id»` | «size» bytes |
 
-## 4. HTTP Webhook Ingest
+## 4. HTTP Webhook Ingest (POST /v1/connectors/github/webhook)
 
 | Event Type | Delivery ID Used | Events Ingested | Status |
 |---|---|---:|---|
-| Push (`github_commit`) | `3832190144476102656` | `1` | ✓ |
-| Issue (`github_issue`) | `3832190149423267840` | `1` | ✓ |
-| PR (`github_pr`) | `3832190157065289728` | `1` | ✓ |
-| Review (`github_pr_comment`) | `3832190155278516224` | `1` | ✓ |
+| Push (`github_commit`) | `«delivery_id»` | `«n»` | «✓/✗» |
+| Issue (`github_issue`) | `«delivery_id»` | `«n»` | «✓/✗» |
+| PR (`github_pr`) | `«delivery_id»` | `«n»` | «✓/✗» |
+| Review (`github_pr_comment`) | `«delivery_id»` | `«n»` | «✓/✗» |
 
 ## 5. Verification — `GET /v1/events`
 
 | Check | Expected | Actual | Result |
 |---|---|---|---|
-| `github_commit` present | ≥ 1 | `2` (incl. previous run) | ✓ |
-| `github_issue` present | ≥ 1 | `2` | ✓ |
-| `github_pr` present | ≥ 1 | `2` | ✓ |
-| `github_pr_comment` present | ≥ 1 | `2` | ✓ |
-| `channel` = `github` for all | `github` | `github` | ✓ |
-| `actorProvenance` = `webhook_verified` | `webhook_verified` | `webhook_verified` | ✓ |
-| `url` starts with `https://github.com/` | `https://github.com/...` | `https://github.com/...` | ✓ |
+| `github_commit` present | ≥ 1 | `«count»` | «✓/✗» |
+| `github_issue` present | ≥ 1 | `«count»` | «✓/✗» |
+| `github_pr` present | ≥ 1 | `«count»` | «✓/✗» |
+| `github_pr_comment` present | ≥ 1 | `«count»` | «✓/✗» |
+| `source.channel` = `github` for all | `github` | `«value»` | «✓/✗» |
+| `actorProvenance` = `webhook_verified` | `webhook_verified` | `«value»` | «✓/✗» |
+| `source.url` starts with `https://github.com/` | `https://github.com/...` | `«url»` | «✓/✗» |
 
 ## 6. Verification — PostgreSQL
 
 | Check | Expected | Actual | Result |
 |---|---|---|---|
-| `github_commit` rows | ≥ 1 | `1` | ✓ |
-| `github_commit.channel` = `github` | `github` | `github` | ✓ |
-| `github_commit.source_event` = `push` | `push` | `push` | ✓ |
-| `github_commit.item_key` = commit SHA | ≥ 40 chars | `61cf4694...` (40 chars) | ✓ |
-| `github_commit.occurred_at_provenance` = `provider` | `provider` | `provider` | ✓ |
-| `github_commit.actor_provenance` = `webhook_verified` | `webhook_verified` | `webhook_verified` | ✓ |
-| `github_issue.source_event` = `issues` | `issues` | `issues` | ✓ |
-| `github_issue.source_action` not null | not null | `labeled` | ✓ |
-| `github_pr.source_event` = `pull_request` | `pull_request` | `pull_request` | ✓ |
-| `github_pr_comment.url` has `#` fragment | contains `#` | contains `#pullrequestreview-4731651667` | ✓ |
-| All events: `actor_provenance` = `webhook_verified` | `webhook_verified` | `webhook_verified` | ✓ |
+| `github_commit` rows | ≥ 1 | `«count»` | «✓/✗» |
+| `github_commit.channel` = `github` | `github` | `«value»` | «✓/✗» |
+| `github_commit.source_event` = `push` | `push` | `«value»` | «✓/✗» |
+| `github_commit.item_key` = commit SHA | ≥ 40 chars | `«sha»` (40 chars) | «✓/✗» |
+| `github_commit.occurred_at_provenance` = `provider` | `provider` | `«value»` | «✓/✗» |
+| `github_commit.actor_provenance` = `webhook_verified` | `webhook_verified` | `«value»` | «✓/✗» |
+| `github_issue.source_event` = `issues` | `issues` | `«value»` | «✓/✗» |
+| `github_issue.source_action` not null | not null | `«value»` | «✓/✗» |
+| `github_pr.source_event` = `pull_request` | `pull_request` | `«value»` | «✓/✗» |
+| `github_pr_comment.source_event` is set | not null | `«value»` | «✓/✗» |
+| `github_pr_comment.url` has `#` fragment | contains `#` | `«fragment»` | «✓/✗» |
+| All events: `actor_provenance` = `webhook_verified` | `webhook_verified` | `«value»` | «✓/✗» |
 
 ## 7. Verification — Jobs
 
 | Check | Expected | Actual | Result |
 |---|---|---|---|
-| Smoke events linked to `job_events` | all smoke events | 0 linked (no pg-boss) | ✗ |
-| At least one `jobs` row present | ≥ 1 | `0` (no pg-boss) | ✗ |
-| Job status recorded | `queued` / `processing` / `completed` / `failed` | N/A | ✗ |
+| Smoke events linked to `job_events` | all smoke events | `«linked»`/`«total»` | «✓/✗» |
+| At least one `jobs` row present | ≥ 1 | `«count»` | «✓/✗» |
+| Job status recorded | `queued` / `completed` / `failed` | `«status»` | «✓/✗» |
 
-_Note: Jobs empty — the webhook→event path used for this run did not include enqueue. The persist→enqueue step belongs to the ingestion pipeline (M0-GH-08)._
+_Note: The connector webhook endpoint (M0-GH-08) creates compile jobs after persistence.
+If the server is running with a pg-boss queue, jobs should be enqueued and processed.
+Without a running worker, jobs will stay in `queued` status._
 
 ## 8. Idempotency
 
 | Check | Expected | Result |
 |---|---|---|
-| Replay same payload → all `duplicate` status | all duplicate | ✓ (1/1 duplicate) |
-| Modified payload (different hash) → rejected | HTTP 409 | ✓ (HTTP 409) |
-
-_Note: Conflict test fixed to modify `commits[0].message` — the field the push normalizer actually stores in its event payload. HTTP 409 confirmed._
+| Replay same payload → all `duplicate` status | all duplicate | «✓/✗» |
+| Modified payload (different hash) → rejected | HTTP 409 | «✓/✗» |
 
 ## 9. Redaction (§5.3)
 
 | Check | Expected | Result |
 |---|---|---|
-| `<private>` tag stripped from PR review body | no `<private>` in stored payload | ✗ (LEAKED — endpoint missing stripPrivateTags) |
-| `SECRET_TOKEN` content stripped | no secret in stored payload | ✗ (LEAKED) |
+| `<private>` tag stripped from PR review body | no `<private>` in stored payload | «✓/✗» |
+| `SECRET_TOKEN` content stripped | no secret in stored payload | «✓/✗» |
+| Public content preserved | "Public review start … public review end" present | «✓/✗» |
 
-_**The redaction test works correctly**: it detected that the endpoint used for this run does not strip `<private>` tags from PR review payloads. The comment normalizer (`comments.ts`) intentionally does not self-redact — it relies on the ingestion pipeline's `stripPrivateTags` step (§5.3). This endpoint (temporary, not in this branch) is missing that step. M0-GH-08 must include `stripPrivateTags` in the webhook handler between normalization and persistence for all event types, especially PR reviews and comments whose normalizers do not self-redact._
+_Note: The connector webhook endpoint runs `stripPrivateTags` after normalization and
+before persistence (red line 5.3). PR review/comment normalizers do not self-redact — they
+rely on this pipeline step. The test verifies the pipeline is intact._
 
 ## 10. Summary
 
 | Metric | Count |
 |---|---|
-| Total assertions | `58` |
-| Passed | `55` |
-| Failed | `3` |
-
-**Failed assertions:**
-1. jobs: at least one job is present _(expected — no pg-boss)_
-2. jobs: every smoke event linked through job_events _(expected — no pg-boss)_
-3. Redaction: `<private>` tag LEAKED _(script correctly detected missing stripPrivateTags in temporary endpoint — M0-GH-08 must fix)_
-
-**Key improvements from previous run:**
-- Idempotency conflict (HTTP 409): now ✓ (previously ✗)
-- Redaction test: now runs and detects violations (previously skipped with bug)
+| Total assertions | `«n»` |
+| Passed | `«n»` |
+| Failed | `«n»` |
 
 ## Regression Checks
 
 | Check | Result |
 |---|---|
-| `pnpm lint` | ✓ PASS (0 errors) |
-| `pnpm typecheck` | ✓ PASS (apps/web, packages/schema, apps/server) |
-| `pnpm test -- --run` | ✓ 735 passed, 168 skipped |
-| `bash -n scripts/m0-github-smoke.sh` | ✓ syntax OK |
+| `pnpm lint` | «✓/✗» |
+| `pnpm typecheck` | «✓/✗» |
+| `pnpm test -- --run` | «✓/✗» («n» passed, «n» skipped) |
+| `bash -n scripts/m0-github-smoke.sh` | «✓/✗» |
 
 ## Notes
 
-1. **Endpoint dependency**: The smoke test requires `POST /v1/events/github` and `GET /v1/events`. These are owned by M0-GH-08. This green-run used a temporary local endpoint. Until M0-GH-08 merges, the script fails at `check_prereqs` with a clear message.
+1. **Endpoint**: The smoke test sends webhook payloads to `POST /v1/connectors/github/webhook?project=…`
+   (the real M0-GH-08 connector webhook endpoint) and reads events from `GET /v1/events`
+   (requires a valid API key with `read` scope).
 
-2. **Branch scope**: This branch contains only `scripts/m0-github-smoke.sh` and this result template. No server-side code.
+2. **API key**: The events list endpoint requires Bearer token authentication.
+   Use `TEAMEM_API_KEY` (a `tm_`-prefixed token) with `read` and `read:payload` scopes.
+   Run `pnpm --filter @teamem/server bootstrap -- --team-name M0 --project-name demo`
+   to generate one.
 
-3. **Redaction (red line 5.3)**: The script validates redaction by injecting a PR review with `<private>` tags and checking the stored payload. The test correctly detected the leak in the temporary endpoint. M0-GH-08 must ensure `stripPrivateTags` runs after normalization and before persistence in the webhook handler, covering all event types (especially PR reviews and comments whose normalizers do not self-redact).
+3. **Webhook secret**: The script signs each payload with `TEAMEM_WEBHOOK_SECRET` and
+   sends it in the `X-Hub-Signature-256` header. The server must be started with the
+   same secret via `TEAMEM_GITHUB_WEBHOOK_SECRET` for the GitHub connector to register.
 
-4. **Conflict test (contract 6.2)**: Now works — modifying `commits[0].message` triggers HTTP 409 because the push normalizer stores commit messages in its event payload. Previous version modified `head_commit.message` which the normalizer ignores.
+4. **Delivery log approach**: The script creates a temporary webhook pointing to a fake URL,
+   then fetches the actual payloads from GitHub's delivery log and re-delivers them to
+   teamem with proper HMAC signatures. This avoids needing a public callback URL while
+   still testing with real GitHub webhook payloads.
 
-5. **Jobs (enqueue)**: The M0 pipeline requires persist→enqueue. The temporary endpoint used for this run does not enqueue. M0-GH-08 must create compilation jobs after persistence.
+5. **Cleanup**: Set `TEAMEM_SMOKE_KEEP_DATA=true` to preserve database rows for inspection.
+   The temporary webhook and branch are always cleaned up.
