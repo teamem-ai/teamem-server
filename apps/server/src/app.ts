@@ -21,6 +21,9 @@ import {
   buildConnectorWebhookRoutes,
 } from './http/routes/connector-webhook.js';
 import { buildConceptsReadRoutes } from './http/routes/concepts-read.js';
+import {
+  buildEventsReadRoutes,
+} from './http/routes/events-read.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -85,6 +88,14 @@ export function buildApp(deps: AppDeps = {}) {
     app.route(
       '/',
       buildConceptsReadRoutes({ db: deps.db }),
+    );
+
+    // Read routes — event list + detail with scope, cursor, and audit.
+    app.route(
+      '/',
+      buildEventsReadRoutes({
+        db: deps.db,
+      }),
     );
   }
 

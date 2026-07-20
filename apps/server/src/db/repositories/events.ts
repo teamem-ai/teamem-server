@@ -18,10 +18,13 @@
  * hashed by the caller — this repository only stores what it is given
  * (red line 5.3: validate → strip → persist order).
  */
-import { randomUUID } from 'node:crypto';
-import { and, eq, inArray as drizzleInArray } from 'drizzle-orm';
+import { randomUUID, createHash } from 'node:crypto';
+import { and, eq, inArray as drizzleInArray, or, lt, sql } from 'drizzle-orm';
 import * as schema from '../schema.js';
 import type { AppDb } from '../client.js';
+import type { ScopeContext } from '../../auth/scope.js';
+import { isProjectScope, getTeamId, getProjectId } from '../../auth/scope.js';
+import { encodeCursor, type CursorPayload } from '@teamem/schema';
 
 // ── Error types ─────────────────────────────────────────────────────────────
 
@@ -222,6 +225,192 @@ const EVENT_COLUMNS = {
   envelopeVersion: schema.events.envelopeVersion,
   createdAt: schema.events.createdAt,
 };
+
+// ── List query helpers ──────────────────────────────────────────────────────
+
+/**
+ * Parameters for a cursor-paginated event list query.
+ * Sort: created_at desc, id desc (N8).
+ */
+export interface ListEventsParams {
+  readonly scope: ScopeContext;
+  readonly projectId: string;
+  readonly sourceKind?: string;
+  readonly cursor?: string;
+  readonly limit: number;
+}
+
+/** Result of a list-events query. */
+export interface ListEventsResult {
+  readonly rows: EventRow[];
+  readonly nextCursor: string | null;
+}
+
+/**
+ * Compute a stable hash of the list filters so the cursor can detect
+ * a changed filter set and reject the stale cursor (cursor_invalid, N3).
+ */
+function computeFilterHash(params: { sourceKind?: string }): string {
+  const normalized = `sourceKind=${params.sourceKind ?? ''}`;
+  return createHash('sha256').update(normalized, 'utf8').digest('hex').slice(0, 16);
+}
+
+/**
+ * List events with cursor-based pagination, ordered by created_at DESC, id DESC.
+ *
+ * Supports optional sourceKind filtering. Every query includes both team_id
+ * and project_id (red line 5.5). The cursor is a base64url-encoded JSON object
+ * that carries the last-seen sort value, id, and a filter hash — tampered or
+ * stale cursors are rejected as cursor_invalid.
+ *
+ * Returns up to `limit` rows + a nextCursor (null when no more pages).
+ */
+export async function listEvents(
+  db: AppDb,
+  params: ListEventsParams,
+): Promise<ListEventsResult> {
+  const teamId = getTeamId(params.scope);
+  const projectId = params.projectId;
+
+  // For project-scoped keys, enforce the key's project matches the request.
+  if (isProjectScope(params.scope)) {
+    const scopeProjectId = getProjectId(params.scope);
+    if (projectId !== scopeProjectId) {
+      // Mismatch — return empty list rather than leaking existence info.
+      return { rows: [], nextCursor: null };
+    }
+  }
+
+  const currentFilterHash = computeFilterHash({ sourceKind: params.sourceKind });
+
+  // Build WHERE conditions
+  const conditions = [
+    eq(schema.events.teamId, teamId),
+    eq(schema.events.projectId, projectId),
+  ];
+
+  if (params.sourceKind) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    conditions.push(eq(schema.events.kind, params.sourceKind as any));
+  }
+
+  // Cursor: decode and apply position + validate filter hash.
+  if (params.cursor) {
+    let cursorPayload: CursorPayload;
+    try {
+      const raw = JSON.parse(
+        Buffer.from(params.cursor, 'base64url').toString('utf8'),
+      );
+      // Light validate the cursor shape without importing the full schema —
+      // we validate resource/sort/filterHash here and use the position.
+      if (
+        typeof raw !== 'object' ||
+        raw === null ||
+        (raw as Record<string, unknown>)['resource'] !== 'events' ||
+        (raw as Record<string, unknown>)['sort'] !== 'created_at' ||
+        (raw as Record<string, unknown>)['v'] !== 1 ||
+        (raw as Record<string, unknown>)['projectId'] !== projectId
+      ) {
+        throw new Error('cursor_invalid');
+      }
+      if ((raw as Record<string, unknown>)['filterHash'] !== currentFilterHash) {
+        throw new Error('cursor_invalid');
+      }
+      const pos = (raw as Record<string, unknown>)['position'] as Record<string, unknown>;
+      if (typeof pos['sortValue'] !== 'string' || typeof pos['id'] !== 'string') {
+        throw new Error('cursor_invalid');
+      }
+      cursorPayload = raw as unknown as CursorPayload;
+    } catch {
+      throw new Error('cursor_invalid');
+    }
+
+    // Apply cursor pagination: (created_at < sortValue)
+    // OR (created_at = sortValue AND id < id) — tie-breaker.
+    const cursorSortValue = cursorPayload.position.sortValue;
+    const cursorId = cursorPayload.position.id;
+
+    conditions.push(
+      or(
+        lt(schema.events.createdAt, new Date(cursorSortValue)),
+        and(
+          eq(schema.events.createdAt, new Date(cursorSortValue)),
+          lt(schema.events.id, cursorId),
+        ),
+      )!,
+    );
+  }
+
+  // Fetch limit + 1 to detect if there's a next page.
+  const rows = await db
+    .select(EVENT_COLUMNS)
+    .from(schema.events)
+    .where(and(...conditions))
+    .orderBy(sql`${schema.events.createdAt} DESC`, sql`${schema.events.id} DESC`)
+    .limit(params.limit + 1);
+
+  const hasMore = rows.length > params.limit;
+  const resultRows = (hasMore ? rows.slice(0, params.limit) : rows) as unknown as EventRow[];
+
+  let nextCursor: string | null = null;
+  if (hasMore && resultRows.length > 0) {
+    const lastRow = resultRows[resultRows.length - 1]!;
+    const nextPayload: CursorPayload = {
+      resource: 'events',
+      sort: 'created_at',
+      v: 1,
+      projectId,
+      position: {
+        sortValue: lastRow.createdAt.toISOString(),
+        id: lastRow.id,
+      },
+      filterHash: currentFilterHash,
+    };
+    nextCursor = encodeCursor(nextPayload);
+  }
+
+  return { rows: resultRows, nextCursor };
+}
+
+/**
+ * Fetch a single event by ID within an explicit tenant/project scope.
+ *
+ * For all-projects scope, matches any project within the team. For project
+ * scope, matches only the bound project. Returns undefined when the event
+ * does not exist OR belongs to a different team (anti-enumeration: identical
+ * 404 for genuinely missing and cross-team IDs).
+ */
+export async function getEventById(
+  db: AppDb,
+  scope: ScopeContext,
+  projectId: string,
+  eventId: string,
+): Promise<EventRow | undefined> {
+  const teamId = getTeamId(scope);
+
+  const conditions = [
+    eq(schema.events.id, eventId),
+    eq(schema.events.teamId, teamId),
+    eq(schema.events.projectId, projectId),
+  ];
+
+  // For project scope, also restrict to the key's project.
+  if (isProjectScope(scope)) {
+    const scopeProjectId = getProjectId(scope);
+    if (projectId !== scopeProjectId) {
+      return undefined;
+    }
+    conditions.push(eq(schema.events.projectId, scopeProjectId));
+  }
+
+  const rows = await db
+    .select(EVENT_COLUMNS)
+    .from(schema.events)
+    .where(and(...conditions))
+    .limit(1);
+
+  return rows[0] as unknown as EventRow | undefined;
+}
 
 /**
  * Fetch events by their IDs, scoped to a specific team + project.
