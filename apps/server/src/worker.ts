@@ -19,31 +19,35 @@ import { parseServerEnv } from './config/env.js';
 import { fatalStartup, installShutdownHandlers } from './lifecycle.js';
 import { createCompileQueue } from './queue/boss.js';
 import { createCompileJobHandler } from './queue/worker.js';
+import { acknowledgeCompileJob } from './worker/embedded.js';
 import { createDbHandle } from './db/client.js';
 import { createLlmClient } from './llm/factory.js';
+import type { CompileJobHandler } from './queue/boss.js';
 
 export async function runWorker(): Promise<void> {
-  // The worker needs a database URL AND LLM configuration. Reuse the
-  // server env parser which validates all required env vars.
+  // Parse config + env (database URL is required; LLM keys are optional).
   const config = loadRuntimeConfig();
   const env = parseServerEnv();
-
-  // Select the first configured LLM provider for compilation.
-  const llmProvider = env.llmProviders[0];
-  if (!llmProvider) {
-    throw new Error(
-      'No LLM provider configured. Set one of TEAMEM_ANTHROPIC_API_KEY, ' +
-      'TEAMEM_OPENAI_API_KEY, TEAMEM_OPENROUTER_API_KEY, or ' +
-      'TEAMEM_OPENAI_COMPAT_BASE_URL + TEAMEM_OPENAI_COMPAT_API_KEY.',
-    );
-  }
 
   // Create a dedicated database handle for the worker's lifespan.
   const dbHandle = createDbHandle(config.databaseUrl);
   const db = dbHandle.db;
 
-  // Build the LLM client from the first configured provider.
-  const llm = createLlmClient(llmProvider);
+  // Resolve a compile handler: real F1 when an LLM is configured, honest
+  // no-op otherwise — just like the all-in-one composition root.
+  let handler: CompileJobHandler;
+  const llmProvider = env.llmProviders[0];
+  if (llmProvider) {
+    const llm = createLlmClient(llmProvider);
+    handler = createCompileJobHandler({ db, llm });
+  } else {
+    console.warn(
+      '[worker] no LLM provider configured — compile jobs will be acknowledged ' +
+      'but not processed. Configure TEAMEM_ANTHROPIC_API_KEY, ' +
+      'TEAMEM_OPENAI_API_KEY, or equivalent.',
+    );
+    handler = acknowledgeCompileJob;
+  }
 
   // pg-boss lives inside Postgres — the queue start verifies connectivity.
   const queue = createCompileQueue(config.databaseUrl, {
@@ -51,7 +55,7 @@ export async function runWorker(): Promise<void> {
   });
 
   await queue.start();
-  await queue.work(createCompileJobHandler({ db, llm }));
+  await queue.work(handler);
 
   installShutdownHandlers(async () => {
     await queue.offWork();
