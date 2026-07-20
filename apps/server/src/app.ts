@@ -16,6 +16,17 @@ import {
   buildEventsWriteRoutes,
   type EventsWriteDeps,
 } from './http/routes/events-write.js';
+import { buildJobsReadRoutes } from './http/routes/jobs-read.js';
+import {
+  buildConnectorWebhookRoutes,
+} from './http/routes/connector-webhook.js';
+import { buildConceptsReadRoutes } from './http/routes/concepts-read.js';
+import {
+  buildEventsReadRoutes,
+} from './http/routes/events-read.js';
+import {
+  buildCompilationsRoutes,
+} from './ingest/create-compilation.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -57,6 +68,45 @@ export function buildApp(deps: AppDeps = {}) {
         db: deps.db,
         queue: deps.queue,
         waitTimeoutMs: deps.waitTimeoutMs,
+      }),
+    );
+    // Job read routes (list + detail)
+    app.route(
+      '/',
+      buildJobsReadRoutes({ db: deps.db }),
+    );
+
+    // Connector webhook routes (no Bearer-token auth — webhook signatures
+    // are the auth mechanism, verified inside each connector's
+    // handleWebhook()).
+    app.route(
+      '/',
+      buildConnectorWebhookRoutes({
+        db: deps.db,
+        queue: deps.queue,
+      }),
+    );
+
+    // Compilation routes — explicit compilation trigger for stored events.
+    app.route(
+      '/',
+      buildCompilationsRoutes({
+        db: deps.db,
+        queue: deps.queue,
+      }),
+    );
+
+    // Concept read routes — detail by UUID and by path (M0-READ-04).
+    app.route(
+      '/',
+      buildConceptsReadRoutes({ db: deps.db }),
+    );
+
+    // Read routes — event list + detail with scope, cursor, and audit.
+    app.route(
+      '/',
+      buildEventsReadRoutes({
+        db: deps.db,
       }),
     );
   }
