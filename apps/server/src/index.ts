@@ -10,6 +10,7 @@
  * this file only supplies the concrete resources.
  */
 import { loadRuntimeConfig } from './config/runtime.js';
+import { parseServerEnv } from './config/env.js';
 import { startRuntime, type Runtime, type RuntimeStartup } from './composition-root.js';
 import { createDbHandle } from './db/client.js';
 import { createCompileQueue } from './queue/boss.js';
@@ -17,6 +18,8 @@ import { startEmbeddedWorker } from './worker/embedded.js';
 import { startServer } from './server.js';
 import { bootstrapMain } from './commands/bootstrap.js';
 import { installShutdownHandlers } from './lifecycle.js';
+import { GitHubConnector } from './connectors/github/connector.js';
+import { registerConnector } from './connectors/registry.js';
 
 /** Build the real startup factories over a validated runtime config. */
 export function createRuntimeStartup(config: {
@@ -66,6 +69,17 @@ export function createRuntimeStartup(config: {
 /** Load config and start the runtime with real resources. */
 export async function main(): Promise<Runtime> {
   const config = loadRuntimeConfig();
+
+  // Register GitHub connector when webhook secret is configured.
+  const env = parseServerEnv();
+  if (env.github?.webhookSecret) {
+    const githubConnector = new GitHubConnector({
+      webhookSecret: env.github.webhookSecret,
+    });
+    registerConnector(githubConnector);
+    console.log('[connector] github registered');
+  }
+
   return startRuntime(config, createRuntimeStartup(config), (msg) =>
     console.log(`[runtime] ${msg}`),
   );
