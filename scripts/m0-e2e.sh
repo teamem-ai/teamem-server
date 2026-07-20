@@ -132,16 +132,21 @@ run_bootstrap() {
   info "Repo root: $REPO_ROOT"
   info "Entrypoint: $entrypoint"
 
-  local bootstrap_cmd
+  local bootstrap_cmd bootstrap_dir
   if [[ "$entrypoint" == *.ts ]]; then
-    # Use tsx for TypeScript; run from repo root so tsconfig paths resolve.
+    # pnpm workspace: tsx lives in apps/server/node_modules/.bin, not at
+    # the repo root.  Run from apps/server/ so npx can find it, and use a
+    # path relative to that directory.
     bootstrap_cmd="npx tsx"
+    bootstrap_dir="$REPO_ROOT/apps/server"
+    entrypoint="src/index.ts"
   else
     bootstrap_cmd="node"
+    bootstrap_dir="$REPO_ROOT"
   fi
 
-  info "Running bootstrap from $REPO_ROOT..."
-  E2E_BOOTSTRAP_OUT="$(cd "$REPO_ROOT" && TEAMEM_DATABASE_URL="$DATABASE_URL" \
+  info "Running bootstrap from $bootstrap_dir..."
+  E2E_BOOTSTRAP_OUT="$(cd "$bootstrap_dir" && TEAMEM_DATABASE_URL="$DATABASE_URL" \
     $bootstrap_cmd "$entrypoint" --bootstrap \
     --team-name "$TEAM_NAME" \
     --project-name "$PROJECT_NAME" \
@@ -298,6 +303,10 @@ vector similarity search in a single system.
 - **Redis/Valkey** — adds a second stateful service to manage.
 - **Qdrant/Milvus** — separate vector DB with its own operational burden.
 - **SQLite + pgvector** — not suitable for multi-process server workloads.'
+
+  # Save the content so idempotency replay can reuse the EXACT same text
+  # (same payload hash → 200 duplicate, not 409 conflict).
+  echo "$content" > "${E2E_TMP}/compile-content.txt"
 
   local compile_payload
   compile_payload="$(jq -n \
@@ -571,8 +580,10 @@ test_event_detail() {
   assert "  source.kind = cli_init" "[ \"$kind\" = \"cli_init\" ]"
 
   # Payload should be present (detail has payload; list does not).
-  local payload_present; payload_present="$(echo "$edata" | jq -r '.payload // "missing"')"
-  assert "  payload is present in detail" "[ \"$payload_present\" != \"missing\" ]"
+  # Use jq has() rather than embedding the JSON blob in a shell [ … ] test —
+  # the blob's embedded double-quotes would break [ argument parsing.
+  assert "  payload is present in detail" \
+    "[ \"\$(echo \"\$edata\" | jq -r 'has(\"payload\")')\" = \"true\" ]"
 
   # Payload must NOT contain <private> tags (already verified but double-check).
   local payload_str; payload_str="$(echo "$edata" | jq -c '.payload')"
@@ -596,15 +607,20 @@ test_idempotency() {
     return
   fi
 
-  # Replay the same compile payload.
-  local content='## Decision
-We decided to use PostgreSQL with the pgvector extension as our primary database.'
+  # Replay the SAME payload that was used for the original compile=true
+  # event.  The content was saved to a temp file by test_compile_true_pipeline.
+  local replay_content
+  replay_content="$(cat "${E2E_TMP}/compile-content.txt" 2>/dev/null || true)"
+  if [[ -z "$replay_content" ]]; then
+    warn "No saved compile content — skipping replay (re-run with a real compile event first)"
+    return
+  fi
 
   local replay_payload
   replay_payload="$(jq -n \
     --arg projectId "$E2E_PROJECT_ID" \
     --arg ts "$TIMESTAMP" \
-    --arg content "$content" \
+    --arg content "$replay_content" \
     '{
     projectId: $projectId,
     source: {
