@@ -9,6 +9,7 @@ import {
   isoDateTime,
   jobId,
   listLimit,
+  listResponse,
   principalId,
   projectId,
   requestId,
@@ -98,3 +99,6 @@ export const jobListQuery = z.strictObject({
   cursor: z.string().optional(),
   limit: listLimit,
 });
+
+/** Named endpoint response DTO for GET /v1/jobs (N3). */
+export const jobListResponse = listResponse(jobListItem);
