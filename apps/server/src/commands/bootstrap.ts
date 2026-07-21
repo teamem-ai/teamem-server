@@ -24,6 +24,8 @@ import { eq, and, isNull } from 'drizzle-orm';
 import { createDb, closeDb, type AppDb } from '../db/client.js';
 import * as schema from '../db/schema.js';
 import { generateApiKeyToken, hashToken } from '../auth/api-key.js';
+import { formatMcpAddCommand } from './format-mcp-command.js';
+import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT } from '../config/env.js';
 import type { ApiScope } from '@teamem/schema';
 
 // ── Argument types ───────────────────────────────────────────────────────────
@@ -52,6 +54,13 @@ export interface BootstrapResult {
     /** Present ONLY on creation or rotation; never persisted. */
     token?: string;
     action: 'created' | 'reused' | 'rotated';
+    /**
+     * Pasteable `claude mcp add` command (DUA-211).
+     *
+     * Present ONLY when `token` is present. Contains the plaintext token —
+     * the caller must print it exactly once and NEVER log or persist it.
+     */
+    mcpAddCommand?: string;
   };
 }
 
@@ -348,12 +357,24 @@ async function ensureBootstrapKey(
     allProjects: false,
   });
 
+  // Build the pasteable claude mcp add command (DUA-211).
+  // Host/port come from the server config so the command is correct for
+  // the current deployment.
+  const mcpHost = process.env['TEAMEM_HOST']?.trim() || DEFAULT_SERVER_HOST;
+  const mcpPortRaw = process.env['TEAMEM_PORT']?.trim();
+  const mcpPort = mcpPortRaw ? Number(mcpPortRaw) : DEFAULT_SERVER_PORT;
+  const mcpAddCommand = formatMcpAddCommand(
+    { host: mcpHost, port: mcpPort },
+    token,
+  );
+
   return {
     id: keyId,
     name: BOOTSTRAP_KEY_NAME,
     scopes: M0_BOOTSTRAP_SCOPES,
     allProjects: false,
     token, // <-- THE ONLY PLACE the plaintext token exists
+    mcpAddCommand, // <-- pasteable command (DUA-211)
     action: rotate ? 'rotated' : 'created',
   };
 }

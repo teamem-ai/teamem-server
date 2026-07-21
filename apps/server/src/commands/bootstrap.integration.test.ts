@@ -95,6 +95,12 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
     expect(result.key.token).toBeDefined();
     expect(result.key.token).toMatch(/^tm_[A-Za-z0-9_-]{40,}$/);
 
+    // MCP add command (DUA-211): present when token is present
+    expect(result.key.mcpAddCommand).toBeDefined();
+    expect(result.key.mcpAddCommand).toContain('claude mcp add --transport http teamem');
+    expect(result.key.mcpAddCommand).toContain(`--header "Authorization: Bearer ${result.key.token}"`);
+    expect(result.key.mcpAddCommand).toMatch(/http:\/\/[^:]+:\d+\/mcp/);
+
     // Verify only hash is stored in DB
     const tokenHash = hashToken(result.key.token!);
     const dbKeys = await db
@@ -181,10 +187,11 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
     expect(second.principal!.action).toBe('reused');
     expect(second.principal!.id).toBe(first.principal!.id);
 
-    // Key is reused — NO token leaked
+    // Key is reused — NO token leaked, NO mcpAddCommand
     expect(second.key.action).toBe('reused');
     expect(second.key.id).toBe(firstKeyId);
     expect(second.key.token).toBeUndefined(); // <-- THE critical assertion: no token on replay
+    expect(second.key.mcpAddCommand).toBeUndefined(); // <-- DUA-211: no command on replay
 
     // Verify only ONE key row exists (no duplicate)
     const keyCount = await db
@@ -224,11 +231,13 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
     const rotateArgs: BootstrapArgs = { ...args, rotate: true };
     const second = await runBootstrap(db, rotateArgs);
 
-    // New key minted
+    // New key minted — token AND mcpAddCommand present
     expect(second.key.action).toBe('rotated');
     expect(second.key.id).not.toBe(firstKeyId);
     expect(second.key.token).toBeDefined();
     expect(second.key.token).not.toBe(firstToken);
+    expect(second.key.mcpAddCommand).toBeDefined();
+    expect(second.key.mcpAddCommand).toContain(`--header "Authorization: Bearer ${second.key.token}"`);
 
     // Old key is now revoked
     const oldKey = await db
