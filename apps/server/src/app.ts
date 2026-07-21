@@ -31,6 +31,8 @@ import {
   buildEventsBatchRoutes,
   type EventsBatchDeps,
 } from './http/routes/events-batch.js';
+import { buildMcpRoutes } from './mcp/server.js';
+import { ToolRegistry } from './mcp/registry.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -117,6 +119,14 @@ export function buildApp(deps: AppDeps = {}) {
       buildEventsReadRoutes({
         db: deps.db,
       }),
+    );
+
+    // MCP streamable HTTP endpoint (M1-MCP-01 scaffold).
+    // Uses the same Bearer-token auth as the REST API.
+    const mcpRegistry = new ToolRegistry();
+    app.route(
+      '/',
+      buildMcpRoutes({ db: deps.db, registry: mcpRegistry }),
     );
   }
 
