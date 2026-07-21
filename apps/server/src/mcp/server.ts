@@ -183,13 +183,7 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
 
     // ── Step 2: Handle notifications (no id) ────────────────────────
     if (req.id === undefined) {
-      // notifications/initialized — the client signals it is ready.
-      // Per JSON-RPC 2.0, notifications receive no response.
-      // We return 202 Accepted with an empty body.
-      if (req.method === 'notifications/initialized') {
-        return c.body(null, 202);
-      }
-      // Unknown notifications are silently accepted per JSON-RPC.
+      // Per JSON-RPC 2.0, notifications (no `id`) receive no response.
       return c.body(null, 202);
     }
 
