@@ -67,6 +67,51 @@ You must respond with a JSON object matching one of these two shapes:
   "reason": "<brief explanation of why this event was skipped>"
 }`;
 
+const SKIP_CRITERIA = `\
+## Skip Criteria — When to Skip an Event
+
+Only skip an event when it clearly contains NO reusable team knowledge.
+You MUST provide a specific, honest reason — never skip just to save effort.
+
+### Events that SHOULD be skipped (with specific reason):
+
+1. **No decision, constraint, or operational knowledge**
+   - The event is purely mechanical with no rationale, trade-off, or context.
+   - Example: a typo fix like "fix typo" with no broader context.
+
+2. **Pure mechanical / cosmetic changes**
+   - Whitespace-only changes, formatting-only changes, comment typo fixes.
+   - Linter/auto-formatter configuration changes with no team convention discussion.
+   - Example: "apply prettier formatting" with no discussion of why the config changed.
+
+3. **Automated dependency bumps with no decision context**
+   - Dependabot, Renovate, or similar automated version bumps.
+   - The bump itself contains no team decision, trade-off analysis, or migration notes.
+   - Example: "Bump eslint from 8.57.0 to 8.57.1" with auto-generated body.
+
+4. **Meaningless or placeholder messages**
+   - Single-word messages like "asdf", "WIP", "test", "tmp", ".", emoji-only.
+   - Messages that carry zero semantic content.
+   - Example: commit message "asdf" or "🚀".
+
+5. **Auto-generated merge commits**
+   - Git-generated merge commits ("Merge branch 'X' into Y").
+   - The merged commits themselves may contain knowledge, but the merge commit is mechanical.
+
+6. **Vague updates with no detail**
+   - "update README", "update docs" with no actual content or decision.
+   - Version-only tags like "v1.2.3" with no release notes.
+
+### Events that should NOT be skipped:
+- Commit messages that explain a rationale, trade-off, or architectural decision.
+- PR/issue bodies that discuss conventions, gotchas, or runbooks.
+- Any content that a new team member would benefit from knowing.
+- Even brief messages if they contain a decision (e.g., "Switch to JWT for auth — simpler than sessions").
+
+### When in doubt:
+- If the event is borderline (could go either way), prefer EXTRACT with confidence "low".
+- Skipping is for clearly valueless events only — err on the side of extraction.`;
+
 const SERVER_OWNED_FACTS = `\
 CRITICAL: The following fields are SERVER-OWNED and must NOT appear in your output:
 - uuid, schemaVersion, firstSeen, lastConfirmed, createdAt, updatedAt
@@ -96,11 +141,14 @@ ${CONCEPT_TYPE_GUIDANCE}
 
 ${OUTPUT_FORMAT}
 
+${SKIP_CRITERIA}
+
 ${SERVER_OWNED_FACTS}
 
 Rules:
 - Only extract knowledge that is clearly supported by the event content.
 - Prefer accuracy over completeness: if you are uncertain, use confidence "low" or skip.
+- When you skip, your reason must be specific — e.g. "Automated dependency bump with no team decision" not just "no knowledge".
 - The body should be self-contained markdown — a new team member should understand it without external context.
 - Tags should be lowercase, relevant keywords for discoverability.
 - Path segments use lowercase kebab-case (e.g. decisions/use-postgres, conventions/pr-reviews).

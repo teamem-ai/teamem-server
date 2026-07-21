@@ -32,6 +32,7 @@ import type { AppDb } from '../../db/client.js';
 import type { LlmClient, LlmError } from '../../llm/types.js';
 import { f1Output } from './output.js';
 import { buildF1Prompt } from './prompt.js';
+import { prefilterNoise } from './skip-filter.js';
 import { toConcept } from './to-concept.js';
 import { getEventsByIds } from '../../db/repositories/events.js';
 import { createConcept } from '../../db/repositories/concepts-write.js';
@@ -223,7 +224,30 @@ export async function handleCompileJob(
 
   for (const event of events) {
     try {
-      // 3a. Build the F1 prompt from the event's source facts + redacted payload.
+      // 3a. Run deterministic noise checks before calling the LLM.
+      //     Obvious noise (meaningless commits, dependabot bumps, etc.)
+      //     is skipped immediately without consuming LLM tokens.
+      const prefilterResult = prefilterNoise(
+        event.channel,
+        event.kind,
+        event.payload as Record<string, unknown>,
+      );
+
+      if (prefilterResult) {
+        // Deterministic skip — record and continue.
+        await recordSkipped(
+          db,
+          teamId,
+          projectId,
+          jobId,
+          event.id,
+          'no_knowledge',
+        );
+        skippedCount++;
+        continue;
+      }
+
+      // 3b. Build the F1 prompt from the event's source facts + redacted payload.
       const { system, user } = buildF1Prompt({
         channel: event.channel,
         kind: event.kind,
@@ -231,7 +255,7 @@ export async function handleCompileJob(
         payload: event.payload as Record<string, unknown>,
       });
 
-      // 3b. Call the LLM with provider-native structured output.
+      // 3c. Call the LLM with provider-native structured output.
       const response = await llm.structured({
         schema: f1Output,
         systemPrompt: system,
