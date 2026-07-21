@@ -2,8 +2,9 @@
  * F2 merge-decision structured output contract tests.
  *
  * Validates the F2 decision schema (decision.ts) against success paths,
- * failure paths, boundary/security counterexamples, and the red-line
- * "contradicts → disputed" rule.
+ * failure paths, boundary/security counterexamples, the red-line
+ * "contradicts → disputed" rule, and TypeScript narrowing via
+ * discriminated union.
  *
  * No database required — pure Zod validation tests.
  * No mocks — the schema IS the contract under test.
@@ -15,9 +16,7 @@ import { f2Decision, f2Relationship, type F2Decision } from './decision.js';
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
 
-function validDecision(
-  overrides?: Partial<Record<string, unknown>>,
-): F2Decision {
+function confirms(overrides?: Record<string, unknown>): Record<string, unknown> {
   return {
     relationship: 'confirms',
     targetConceptId: VALID_UUID,
@@ -25,29 +24,25 @@ function validDecision(
     mergedBody: '## Decision\n\nWe chose Postgres over MongoDB.\n\n### Rationale\n\n- Strong ACID guarantees\n- Mature ecosystem',
     resultStatus: 'active',
     ...overrides,
-  } as F2Decision;
+  };
 }
 
 // ── Relationship value coverage (CLI acceptance: all four values pass) ──────
 
 describe('f2Decision — relationship coverage (all four values pass)', () => {
   it('accepts relationship "confirms"', () => {
-    const result = f2Decision.safeParse(
-      validDecision({ relationship: 'confirms' }),
-    );
+    const result = f2Decision.safeParse(confirms());
     expect(result.success).toBe(true);
   });
 
   it('accepts relationship "extends"', () => {
-    const result = f2Decision.safeParse(
-      validDecision({ relationship: 'extends' }),
-    );
+    const result = f2Decision.safeParse(confirms({ relationship: 'extends' }));
     expect(result.success).toBe(true);
   });
 
   it('accepts relationship "contradicts" with resultStatus=disputed', () => {
     const result = f2Decision.safeParse(
-      validDecision({
+      confirms({
         relationship: 'contradicts',
         resultStatus: 'disputed',
       }),
@@ -57,7 +52,7 @@ describe('f2Decision — relationship coverage (all four values pass)', () => {
 
   it('accepts relationship "unrelated" with null targetConceptId', () => {
     const result = f2Decision.safeParse(
-      validDecision({
+      confirms({
         relationship: 'unrelated',
         targetConceptId: null,
       }),
@@ -70,15 +65,14 @@ describe('f2Decision — relationship coverage (all four values pass)', () => {
 
 describe('f2Decision — success paths', () => {
   it('accepts a valid confirms decision', () => {
-    const result = f2Decision.safeParse(validDecision());
+    const result = f2Decision.safeParse(confirms());
     expect(result.success).toBe(true);
   });
 
   it('accepts extends with existing concept UUID', () => {
     const result = f2Decision.safeParse(
-      validDecision({
+      confirms({
         relationship: 'extends',
-        targetConceptId: VALID_UUID,
         mergedTitle: 'Expanded: Use Postgres',
         mergedBody: 'Updated body with new details.',
         resultStatus: 'active',
@@ -89,9 +83,8 @@ describe('f2Decision — success paths', () => {
 
   it('accepts contradicts with disputed status', () => {
     const result = f2Decision.safeParse(
-      validDecision({
+      confirms({
         relationship: 'contradicts',
-        targetConceptId: VALID_UUID,
         mergedTitle: 'Reconsider Postgres for primary datastore',
         mergedBody: 'New evidence suggests MongoDB may be preferable.',
         resultStatus: 'disputed',
@@ -102,7 +95,7 @@ describe('f2Decision — success paths', () => {
 
   it('accepts unrelated with null targetConceptId', () => {
     const result = f2Decision.safeParse(
-      validDecision({
+      confirms({
         relationship: 'unrelated',
         targetConceptId: null,
         mergedTitle: 'New concept about CI pipeline',
@@ -113,145 +106,104 @@ describe('f2Decision — success paths', () => {
     expect(result.success).toBe(true);
   });
 
-  it('accepts confirms with a different valid concept status', () => {
+  it('accepts confirms with superseded status', () => {
     const result = f2Decision.safeParse(
-      validDecision({
-        relationship: 'confirms',
-        resultStatus: 'active',
-      }),
-    );
-    expect(result.success).toBe(true);
-  });
-
-  it('accepts extends with superseded status', () => {
-    // Extending a superseded concept may revive it — the model decides.
-    const result = f2Decision.safeParse(
-      validDecision({
-        relationship: 'extends',
-        resultStatus: 'superseded',
-      }),
+      confirms({ resultStatus: 'superseded' }),
     );
     expect(result.success).toBe(true);
   });
 
   it('accepts confirms with needs-review status', () => {
     const result = f2Decision.safeParse(
-      validDecision({
-        relationship: 'confirms',
-        resultStatus: 'needs-review',
-      }),
+      confirms({ resultStatus: 'needs-review' }),
     );
     expect(result.success).toBe(true);
   });
 
   it('accepts complex markdown in mergedBody', () => {
     const result = f2Decision.safeParse(
-      validDecision({
+      confirms({
         mergedBody:
           '## Overview\n\nThis is a **bold** decision.\n\n```typescript\nconst x = 1;\n```\n\nSee [link](https://example.com) for details.',
       }),
     );
     expect(result.success).toBe(true);
   });
+
+  it('accepts mergedBody at exactly 50000 characters', () => {
+    const body = 'A'.repeat(50_000);
+    expect(body.length).toBe(50_000);
+    const result = f2Decision.safeParse(confirms({ mergedBody: body }));
+    expect(result.success).toBe(true);
+  });
 });
 
 // ── Red line: contradicts → resultStatus must be "disputed" ─────────────────
+//    Encoded as z.literal('disputed') on the contradicts branch, so
+//    non-disputed statuses fail at the literal level (not via superRefine).
 
-describe('f2Decision — red line: contradicts → disputed (not confidence cut)', () => {
+describe('f2Decision — red line: contradicts → disputed (encoded as literal)', () => {
   it('rejects contradicts with resultStatus "active"', () => {
     const result = f2Decision.safeParse(
-      validDecision({
-        relationship: 'contradicts',
-        targetConceptId: VALID_UUID,
-        resultStatus: 'active',
-      }),
+      confirms({ relationship: 'contradicts', resultStatus: 'active' }),
     );
     expect(result.success).toBe(false);
-    if (!result.success) {
-      const issues = result.error.issues;
-      const resultStatusIssue = issues.find(
-        (i) =>
-          i.path.length === 1 &&
-          i.path[0] === 'resultStatus',
-      );
-      expect(resultStatusIssue).toBeDefined();
-      expect(resultStatusIssue?.message).toContain('disputed');
-    }
   });
 
   it('rejects contradicts with resultStatus "superseded"', () => {
     const result = f2Decision.safeParse(
-      validDecision({
-        relationship: 'contradicts',
-        targetConceptId: VALID_UUID,
-        resultStatus: 'superseded',
-      }),
+      confirms({ relationship: 'contradicts', resultStatus: 'superseded' }),
     );
     expect(result.success).toBe(false);
   });
 
   it('rejects contradicts with resultStatus "needs-review"', () => {
     const result = f2Decision.safeParse(
-      validDecision({
-        relationship: 'contradicts',
-        targetConceptId: VALID_UUID,
-        resultStatus: 'needs-review',
-      }),
+      confirms({ relationship: 'contradicts', resultStatus: 'needs-review' }),
     );
     expect(result.success).toBe(false);
   });
 });
 
-// ── Unrelated → targetConceptId must be null ────────────────────────────────
+// ── Unrelated → targetConceptId must be null (encoded as z.null()) ─────────
 
 describe('f2Decision — unrelated → targetConceptId must be null', () => {
-  it('rejects unrelated with non-null targetConceptId', () => {
+  it('rejects unrelated with a UUID string as targetConceptId', () => {
+    // z.null() only accepts JavaScript null, not a UUID string
     const result = f2Decision.safeParse(
-      validDecision({
-        relationship: 'unrelated',
-        targetConceptId: VALID_UUID,
-      }),
+      confirms({ relationship: 'unrelated', targetConceptId: VALID_UUID }),
     );
     expect(result.success).toBe(false);
-    if (!result.success) {
-      const issues = result.error.issues;
-      const targetIssue = issues.find(
-        (i) =>
-          i.path.length === 1 &&
-          i.path[0] === 'targetConceptId',
-      );
-      expect(targetIssue).toBeDefined();
-      expect(targetIssue?.message).toContain('null');
-    }
+  });
+
+  it('rejects unrelated with arbitrary string as targetConceptId', () => {
+    const result = f2Decision.safeParse(
+      confirms({ relationship: 'unrelated', targetConceptId: 'some-string' }),
+    );
+    expect(result.success).toBe(false);
   });
 });
 
-// ── Non-unrelated → targetConceptId must not be null ────────────────────────
+// ── Non-unrelated → targetConceptId must be a valid UUID (non-null) ────────
 
-describe('f2Decision — non-unrelated → targetConceptId must not be null', () => {
+describe('f2Decision — non-unrelated → targetConceptId must be a valid UUID', () => {
   it('rejects confirms with null targetConceptId', () => {
     const result = f2Decision.safeParse(
-      validDecision({
-        relationship: 'confirms',
-        targetConceptId: null,
-      }),
+      confirms({ targetConceptId: null }),
     );
     expect(result.success).toBe(false);
   });
 
   it('rejects extends with null targetConceptId', () => {
     const result = f2Decision.safeParse(
-      validDecision({
-        relationship: 'extends',
-        targetConceptId: null,
-      }),
+      confirms({ relationship: 'extends', targetConceptId: null }),
     );
     expect(result.success).toBe(false);
   });
 
   it('rejects contradicts with null targetConceptId', () => {
     const result = f2Decision.safeParse(
-      validDecision({
+      confirms({
         relationship: 'contradicts',
         resultStatus: 'disputed',
         targetConceptId: null,
@@ -261,12 +213,12 @@ describe('f2Decision — non-unrelated → targetConceptId must not be null', ()
   });
 });
 
-// ── Failure paths: unknown fields rejected (strict object) ──────────────────
+// ── Failure paths: unknown fields rejected (strict object on every branch) ──
 
-describe('f2Decision — unknown field rejection (strictObject)', () => {
+describe('f2Decision — unknown field rejection (strictObject per branch)', () => {
   it('rejects with extra field "uuid"', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       uuid: 'a3bb189e-8bf9-3888-9912-ace4e6543002',
     });
     expect(result.success).toBe(false);
@@ -274,7 +226,7 @@ describe('f2Decision — unknown field rejection (strictObject)', () => {
 
   it('rejects with extra field "evidence"', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       evidence: [
         { kind: 'pr', ref: 'https://example.com', at: '2026-07-17T00:00:00.000Z' },
       ],
@@ -284,7 +236,7 @@ describe('f2Decision — unknown field rejection (strictObject)', () => {
 
   it('rejects with extra field "contributors"', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       contributors: ['pri_01H'],
     });
     expect(result.success).toBe(false);
@@ -292,7 +244,7 @@ describe('f2Decision — unknown field rejection (strictObject)', () => {
 
   it('rejects with extra field "createdAt"', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       createdAt: '2026-07-17T00:00:00.000Z',
     });
     expect(result.success).toBe(false);
@@ -300,7 +252,7 @@ describe('f2Decision — unknown field rejection (strictObject)', () => {
 
   it('rejects with extra field "schemaVersion"', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       schemaVersion: 1,
     });
     expect(result.success).toBe(false);
@@ -308,7 +260,7 @@ describe('f2Decision — unknown field rejection (strictObject)', () => {
 
   it('rejects with extra field "aliases"', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       aliases: ['old/path'],
     });
     expect(result.success).toBe(false);
@@ -316,7 +268,7 @@ describe('f2Decision — unknown field rejection (strictObject)', () => {
 
   it('rejects with extra field "supersedes"', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       supersedes: 'a3bb189e-8bf9-3888-9912-ace4e6543002',
     });
     expect(result.success).toBe(false);
@@ -324,7 +276,7 @@ describe('f2Decision — unknown field rejection (strictObject)', () => {
 
   it('rejects with extra field "firstSeen"', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       firstSeen: '2026-07-17T00:00:00.000Z',
     });
     expect(result.success).toBe(false);
@@ -332,7 +284,7 @@ describe('f2Decision — unknown field rejection (strictObject)', () => {
 
   it('rejects with extra field "lastConfirmed"', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       lastConfirmed: '2026-07-17T00:00:00.000Z',
     });
     expect(result.success).toBe(false);
@@ -340,7 +292,7 @@ describe('f2Decision — unknown field rejection (strictObject)', () => {
 
   it('rejects with extra field "updatedAt"', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       updatedAt: '2026-07-17T00:00:00.000Z',
     });
     expect(result.success).toBe(false);
@@ -348,8 +300,32 @@ describe('f2Decision — unknown field rejection (strictObject)', () => {
 
   it('rejects with extra field "actorProvenance"', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       actorProvenance: 'webhook_verified',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects extra fields on unrelated branch', () => {
+    const result = f2Decision.safeParse({
+      relationship: 'unrelated',
+      targetConceptId: null,
+      mergedTitle: 'Title',
+      mergedBody: 'Body',
+      resultStatus: 'active',
+      uuid: '550e8400-e29b-41d4-a716-446655440000',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects extra fields on contradicts branch', () => {
+    const result = f2Decision.safeParse({
+      relationship: 'contradicts',
+      targetConceptId: VALID_UUID,
+      mergedTitle: 'Title',
+      mergedBody: 'Body',
+      resultStatus: 'disputed',
+      confidence: 'low',
     });
     expect(result.success).toBe(false);
   });
@@ -368,37 +344,27 @@ describe('f2Decision — missing required fields', () => {
   }
 
   it('rejects without "relationship"', () => {
-    const result = f2Decision.safeParse(
-      omit(validDecision() as Record<string, unknown>, 'relationship'),
-    );
+    const result = f2Decision.safeParse(omit(confirms(), 'relationship'));
     expect(result.success).toBe(false);
   });
 
   it('rejects without "targetConceptId"', () => {
-    const result = f2Decision.safeParse(
-      omit(validDecision() as Record<string, unknown>, 'targetConceptId'),
-    );
+    const result = f2Decision.safeParse(omit(confirms(), 'targetConceptId'));
     expect(result.success).toBe(false);
   });
 
   it('rejects without "mergedTitle"', () => {
-    const result = f2Decision.safeParse(
-      omit(validDecision() as Record<string, unknown>, 'mergedTitle'),
-    );
+    const result = f2Decision.safeParse(omit(confirms(), 'mergedTitle'));
     expect(result.success).toBe(false);
   });
 
   it('rejects without "mergedBody"', () => {
-    const result = f2Decision.safeParse(
-      omit(validDecision() as Record<string, unknown>, 'mergedBody'),
-    );
+    const result = f2Decision.safeParse(omit(confirms(), 'mergedBody'));
     expect(result.success).toBe(false);
   });
 
   it('rejects without "resultStatus"', () => {
-    const result = f2Decision.safeParse(
-      omit(validDecision() as Record<string, unknown>, 'resultStatus'),
-    );
+    const result = f2Decision.safeParse(omit(confirms(), 'resultStatus'));
     expect(result.success).toBe(false);
   });
 });
@@ -408,64 +374,61 @@ describe('f2Decision — missing required fields', () => {
 describe('f2Decision — invalid values', () => {
   it('rejects unknown relationship value', () => {
     const result = f2Decision.safeParse(
-      validDecision({ relationship: 'invalid_relation' }),
+      confirms({ relationship: 'invalid_relation' }),
     );
     expect(result.success).toBe(false);
   });
 
-  it('rejects unknown resultStatus value', () => {
+  it('rejects unknown resultStatus on confirms branch', () => {
     const result = f2Decision.safeParse(
-      validDecision({ resultStatus: 'deleted' }),
+      confirms({ resultStatus: 'deleted' }),
     );
     expect(result.success).toBe(false);
   });
 
   it('rejects invalid UUID format for targetConceptId', () => {
     const result = f2Decision.safeParse(
-      validDecision({ targetConceptId: 'not-a-uuid' }),
+      confirms({ targetConceptId: 'not-a-uuid' }),
     );
     expect(result.success).toBe(false);
   });
 
   it('rejects empty mergedTitle', () => {
-    const result = f2Decision.safeParse(
-      validDecision({ mergedTitle: '' }),
-    );
+    const result = f2Decision.safeParse(confirms({ mergedTitle: '' }));
     expect(result.success).toBe(false);
   });
 
   it('rejects empty mergedBody', () => {
-    const result = f2Decision.safeParse(
-      validDecision({ mergedBody: '' }),
-    );
+    const result = f2Decision.safeParse(confirms({ mergedBody: '' }));
     expect(result.success).toBe(false);
   });
 
   it('rejects non-string relationship', () => {
-    const result = f2Decision.safeParse(
-      validDecision({ relationship: 123 }),
-    );
+    const result = f2Decision.safeParse(confirms({ relationship: 123 }));
     expect(result.success).toBe(false);
   });
 
   it('rejects non-string mergedTitle', () => {
-    const result = f2Decision.safeParse(
-      validDecision({ mergedTitle: null }),
-    );
+    const result = f2Decision.safeParse(confirms({ mergedTitle: null }));
     expect(result.success).toBe(false);
   });
 
   it('rejects non-string mergedBody', () => {
+    const result = f2Decision.safeParse(confirms({ mergedBody: 42 }));
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects targetConceptId as string "null" on confirms', () => {
     const result = f2Decision.safeParse(
-      validDecision({ mergedBody: 42 }),
+      confirms({ targetConceptId: 'null' }),
     );
     expect(result.success).toBe(false);
   });
 
-  it('rejects targetConceptId as string "null"', () => {
-    const result = f2Decision.safeParse(
-      validDecision({ targetConceptId: 'null' }),
-    );
+  it('rejects mergedBody exceeding 50000 characters', () => {
+    const body = 'A'.repeat(50_001);
+    expect(body.length).toBe(50_001);
+    const result = f2Decision.safeParse(confirms({ mergedBody: body }));
     expect(result.success).toBe(false);
   });
 });
@@ -495,20 +458,19 @@ describe('f2Decision — boundary / security counterexamples', () => {
 
   it('accepts mergedTitle at exactly 500 characters', () => {
     const title = 'A'.repeat(500);
-    const result = f2Decision.safeParse(validDecision({ mergedTitle: title }));
+    const result = f2Decision.safeParse(confirms({ mergedTitle: title }));
     expect(result.success).toBe(true);
   });
 
   it('rejects mergedTitle exceeding 500 characters', () => {
     const title = 'A'.repeat(501);
-    const result = f2Decision.safeParse(validDecision({ mergedTitle: title }));
+    const result = f2Decision.safeParse(confirms({ mergedTitle: title }));
     expect(result.success).toBe(false);
   });
 
   it('rejects model-invented UUID as extra field (not targetConceptId)', () => {
-    // The model might try to put a uuid at top level, which should fail
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       uuid: '550e8400-e29b-41d4-a716-446655440000',
     });
     expect(result.success).toBe(false);
@@ -516,7 +478,7 @@ describe('f2Decision — boundary / security counterexamples', () => {
 
   it('rejects model-invented confidence as extra field (belongs to concept, not decision)', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       confidence: 'high',
     });
     expect(result.success).toBe(false);
@@ -524,7 +486,7 @@ describe('f2Decision — boundary / security counterexamples', () => {
 
   it('rejects model-invented path as extra field', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       path: 'decisions/use-postgres',
     });
     expect(result.success).toBe(false);
@@ -532,7 +494,7 @@ describe('f2Decision — boundary / security counterexamples', () => {
 
   it('rejects model-invented type as extra field', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       type: 'decision',
     });
     expect(result.success).toBe(false);
@@ -540,7 +502,7 @@ describe('f2Decision — boundary / security counterexamples', () => {
 
   it('rejects model-invented tags as extra field', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       tags: ['database'],
     });
     expect(result.success).toBe(false);
@@ -569,23 +531,12 @@ describe('f2Decision — resultStatus coverage', () => {
   const statuses = ['active', 'superseded', 'disputed', 'needs-review'] as const;
 
   for (const status of statuses) {
-    if (status === 'disputed') {
-      // disputed is valid in general, but for confirms it's unusual —
-      // the schema allows it; the compiler may have its own rules.
-      it(`accepts confirms with resultStatus "${status}"`, () => {
-        const result = f2Decision.safeParse(
-          validDecision({ relationship: 'confirms', resultStatus: status }),
-        );
-        expect(result.success).toBe(true);
-      });
-    } else {
-      it(`accepts confirms with resultStatus "${status}"`, () => {
-        const result = f2Decision.safeParse(
-          validDecision({ relationship: 'confirms', resultStatus: status }),
-        );
-        expect(result.success).toBe(true);
-      });
-    }
+    it(`accepts confirms with resultStatus "${status}"`, () => {
+      const result = f2Decision.safeParse(
+        confirms({ resultStatus: status }),
+      );
+      expect(result.success).toBe(true);
+    });
   }
 });
 
@@ -594,7 +545,7 @@ describe('f2Decision — resultStatus coverage', () => {
 describe('f2Decision — strictObject integrity', () => {
   it('rejects otherwise-valid object with one extra key', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       extraKey: 'should fail',
     });
     expect(result.success).toBe(false);
@@ -602,10 +553,81 @@ describe('f2Decision — strictObject integrity', () => {
 
   it('rejects multiple extra keys', () => {
     const result = f2Decision.safeParse({
-      ...validDecision(),
+      ...confirms(),
       field1: true,
       field2: 42,
     });
     expect(result.success).toBe(false);
+  });
+});
+
+// ── Type narrowing: discriminated union narrows per branch ──────────────────
+
+describe('f2Decision — discriminated union type narrowing', () => {
+  it('narrows targetConceptId to string on confirms', () => {
+    const result = f2Decision.parse(confirms());
+    if (result.relationship === 'confirms') {
+      // TypeScript narrows: targetConceptId is string
+      const id: string = result.targetConceptId;
+      expect(id).toBe(VALID_UUID);
+    } else {
+      throw new Error('Expected confirms');
+    }
+  });
+
+  it('narrows targetConceptId to string on extends', () => {
+    const result = f2Decision.parse(confirms({ relationship: 'extends' }));
+    if (result.relationship === 'extends') {
+      const id: string = result.targetConceptId;
+      expect(id).toBe(VALID_UUID);
+    } else {
+      throw new Error('Expected extends');
+    }
+  });
+
+  it('narrows targetConceptId to string on contradicts', () => {
+    const result = f2Decision.parse(
+      confirms({ relationship: 'contradicts', resultStatus: 'disputed' }),
+    );
+    if (result.relationship === 'contradicts') {
+      const id: string = result.targetConceptId;
+      expect(id).toBe(VALID_UUID);
+      // resultStatus is narrowed to the literal 'disputed'
+      const status: 'disputed' = result.resultStatus;
+      expect(status).toBe('disputed');
+    } else {
+      throw new Error('Expected contradicts');
+    }
+  });
+
+  it('narrows targetConceptId to null on unrelated', () => {
+    const result = f2Decision.parse(
+      confirms({ relationship: 'unrelated', targetConceptId: null }),
+    );
+    if (result.relationship === 'unrelated') {
+      const id: null = result.targetConceptId;
+      expect(id).toBeNull();
+    } else {
+      throw new Error('Expected unrelated');
+    }
+  });
+
+  it('exhaustive check compiles with all four branches', () => {
+    function handle(d: F2Decision): string {
+      switch (d.relationship) {
+        case 'confirms':
+          return `confirms ${d.targetConceptId}: ${d.mergedTitle}`;
+        case 'extends':
+          return `extends ${d.targetConceptId}: ${d.mergedTitle}`;
+        case 'contradicts':
+          // d.resultStatus is 'disputed', d.targetConceptId is string
+          return `contradicts ${d.targetConceptId} (${d.resultStatus}): ${d.mergedTitle}`;
+        case 'unrelated':
+          // d.targetConceptId is null
+          return `unrelated (new): ${d.mergedTitle}`;
+      }
+    }
+    const result = handle(f2Decision.parse(confirms()));
+    expect(result).toContain('confirms');
   });
 });
