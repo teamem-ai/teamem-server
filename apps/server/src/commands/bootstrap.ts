@@ -24,6 +24,8 @@ import { eq, and, isNull } from 'drizzle-orm';
 import { createDb, closeDb, type AppDb } from '../db/client.js';
 import * as schema from '../db/schema.js';
 import { generateApiKeyToken, hashToken } from '../auth/api-key.js';
+import { formatMcpAddCommand, type McpCommandConfig } from './format-mcp-command.js';
+import { parseServerEnv } from '../config/env.js';
 import type { ApiScope } from '@teamem/schema';
 
 // ── Argument types ───────────────────────────────────────────────────────────
@@ -52,6 +54,13 @@ export interface BootstrapResult {
     /** Present ONLY on creation or rotation; never persisted. */
     token?: string;
     action: 'created' | 'reused' | 'rotated';
+    /**
+     * Pasteable `claude mcp add` command (DUA-211).
+     *
+     * Present ONLY when `token` is present. Contains the plaintext token —
+     * the caller must print it exactly once and NEVER log or persist it.
+     */
+    mcpAddCommand?: string;
   };
 }
 
@@ -149,6 +158,8 @@ const BOOTSTRAP_PROVIDER_KIND = 'teamem';
 export async function runBootstrap(
   db: AppDb,
   args: BootstrapArgs,
+  /** Server host/port for the pasteable MCP command (DUA-211). */
+  mcpConfig?: McpCommandConfig,
 ): Promise<BootstrapResult> {
   // --- Team (idempotent by name) ---
   const teamResult = await ensureTeam(db, args.teamName);
@@ -173,6 +184,7 @@ export async function runBootstrap(
     projectResult.id,
     principalResult?.id ?? null,
     args.rotate,
+    mcpConfig,
   );
 
   return {
@@ -292,6 +304,8 @@ async function ensureBootstrapKey(
   projectId: string,
   principalId: string | null,
   rotate: boolean,
+  /** Server host/port for the pasteable MCP command (DUA-211). */
+  mcpConfig?: McpCommandConfig,
 ): Promise<BootstrapResult['key']> {
   // Look for an existing, non-revoked bootstrap key for this project
   const existing = await db
@@ -348,12 +362,20 @@ async function ensureBootstrapKey(
     allProjects: false,
   });
 
+  // Build the pasteable claude mcp add command (DUA-211).
+  // Host/port come from the validated server config, threaded through
+  // runBootstrap so we never re-parse raw process.env.
+  const mcpAddCommand = mcpConfig
+    ? formatMcpAddCommand(mcpConfig, token)
+    : undefined;
+
   return {
     id: keyId,
     name: BOOTSTRAP_KEY_NAME,
     scopes: M0_BOOTSTRAP_SCOPES,
     allProjects: false,
     token, // <-- THE ONLY PLACE the plaintext token exists
+    mcpAddCommand, // <-- pasteable command (DUA-211)
     action: rotate ? 'rotated' : 'created',
   };
 }
@@ -391,7 +413,13 @@ export async function bootstrapMain(args?: BootstrapArgs): Promise<void> {
     // Verify connectivity
     await db.$client.query('SELECT 1');
 
-    const result = await runBootstrap(db, parsedArgs);
+    // Read validated server host/port for the pasteable MCP command (DUA-211).
+    // Uses the same Zod-validated parser the server itself uses — no
+    // hand-rolled Number() or duplicate validation.
+    const { host, port } = parseServerEnv();
+    const mcpConfig = { host, port };
+
+    const result = await runBootstrap(db, parsedArgs, mcpConfig);
 
     // Print the result as JSON. The token (if present) is printed exactly once here.
     // SECURITY: do NOT log this output — it contains a plaintext token.

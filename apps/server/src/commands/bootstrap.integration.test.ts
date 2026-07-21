@@ -27,6 +27,10 @@ import {
   parseBootstrapArgs,
   type BootstrapArgs,
 } from './bootstrap.js';
+import type { McpCommandConfig } from './format-mcp-command.js';
+
+/** Explicit MCP config for integration tests so we never depend on env. */
+const TEST_MCP_CONFIG: McpCommandConfig = { host: 'localhost', port: 8080 };
 
 const url = process.env['TEST_DATABASE_URL'];
 
@@ -71,7 +75,7 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
       rotate: false,
     };
 
-    const result = await runBootstrap(db, args);
+    const result = await runBootstrap(db, args, TEST_MCP_CONFIG);
 
     // Team
     expect(result.team.action).toBe('created');
@@ -95,6 +99,12 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
     expect(result.key.token).toBeDefined();
     expect(result.key.token).toMatch(/^tm_[A-Za-z0-9_-]{40,}$/);
 
+    // MCP add command (DUA-211): present when token is present
+    expect(result.key.mcpAddCommand).toBeDefined();
+    expect(result.key.mcpAddCommand).toContain('claude mcp add --transport http teamem');
+    expect(result.key.mcpAddCommand).toContain(`--header "Authorization: Bearer ${result.key.token}"`);
+    expect(result.key.mcpAddCommand).toMatch(/http:\/\/[^:]+:\d+\/mcp/);
+
     // Verify only hash is stored in DB
     const tokenHash = hashToken(result.key.token!);
     const dbKeys = await db
@@ -116,7 +126,7 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
       rotate: false,
     };
 
-    const result = await runBootstrap(db, args);
+    const result = await runBootstrap(db, args, TEST_MCP_CONFIG);
 
     expect(result.principal).not.toBeNull();
     expect(result.principal!.name).toBe('my-service');
@@ -160,7 +170,7 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
     };
 
     // First run
-    const first = await runBootstrap(db, args);
+    const first = await runBootstrap(db, args, TEST_MCP_CONFIG);
     expect(first.team.action).toBe('created');
     expect(first.project.action).toBe('created');
     expect(first.principal!.action).toBe('created');
@@ -171,7 +181,7 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
     const firstKeyId = first.key.id;
 
     // Second run — same args
-    const second = await runBootstrap(db, args);
+    const second = await runBootstrap(db, args, TEST_MCP_CONFIG);
 
     // Entities are reused
     expect(second.team.action).toBe('reused');
@@ -181,10 +191,11 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
     expect(second.principal!.action).toBe('reused');
     expect(second.principal!.id).toBe(first.principal!.id);
 
-    // Key is reused — NO token leaked
+    // Key is reused — NO token leaked, NO mcpAddCommand
     expect(second.key.action).toBe('reused');
     expect(second.key.id).toBe(firstKeyId);
     expect(second.key.token).toBeUndefined(); // <-- THE critical assertion: no token on replay
+    expect(second.key.mcpAddCommand).toBeUndefined(); // <-- DUA-211: no command on replay
 
     // Verify only ONE key row exists (no duplicate)
     const keyCount = await db
@@ -214,7 +225,7 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
     };
 
     // First run — creates key
-    const first = await runBootstrap(db, args);
+    const first = await runBootstrap(db, args, TEST_MCP_CONFIG);
     expect(first.key.action).toBe('created');
     expect(first.key.token).toBeDefined();
     const firstKeyId = first.key.id;
@@ -222,13 +233,15 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
 
     // Second run with --rotate
     const rotateArgs: BootstrapArgs = { ...args, rotate: true };
-    const second = await runBootstrap(db, rotateArgs);
+    const second = await runBootstrap(db, rotateArgs, TEST_MCP_CONFIG);
 
-    // New key minted
+    // New key minted — token AND mcpAddCommand present
     expect(second.key.action).toBe('rotated');
     expect(second.key.id).not.toBe(firstKeyId);
     expect(second.key.token).toBeDefined();
     expect(second.key.token).not.toBe(firstToken);
+    expect(second.key.mcpAddCommand).toBeDefined();
+    expect(second.key.mcpAddCommand).toContain(`--header "Authorization: Bearer ${second.key.token}"`);
 
     // Old key is now revoked
     const oldKey = await db
@@ -271,7 +284,7 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
       rotate: false,
     };
 
-    const result = await runBootstrap(db, args);
+    const result = await runBootstrap(db, args, TEST_MCP_CONFIG);
     const token = result.key.token!;
 
     // Direct DB query: ensure the token_hash column is a 64-char hex string (SHA-256)
@@ -332,8 +345,8 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
       rotate: false,
     };
 
-    const resultA = await runBootstrap(db, argsA);
-    const resultB = await runBootstrap(db, argsB);
+    const resultA = await runBootstrap(db, argsA, TEST_MCP_CONFIG);
+    const resultB = await runBootstrap(db, argsB, TEST_MCP_CONFIG);
 
     // Different teams
     expect(resultA.team.id).not.toBe(resultB.team.id);
@@ -361,7 +374,7 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
     };
 
     // First project run — creates principal
-    const first = await runBootstrap(db, args);
+    const first = await runBootstrap(db, args, TEST_MCP_CONFIG);
     expect(first.principal!.action).toBe('created');
 
     // Second project, same team, same principal name — reuses principal
@@ -371,7 +384,7 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
       principalName: 'shared-service',
       rotate: false,
     };
-    const second = await runBootstrap(db, argsB);
+    const second = await runBootstrap(db, argsB, TEST_MCP_CONFIG);
     expect(second.principal!.action).toBe('reused');
     expect(second.principal!.id).toBe(first.principal!.id);
   });
