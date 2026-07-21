@@ -136,4 +136,122 @@ describe.skipIf(!url)('schema tenant & idempotency invariants (live Postgres)', 
       'job_events_event_fk',
     );
   });
+
+  // ── DUA-190: Full-text search tsvector column & GIN index ───────────────
+
+  it('DUA-190: search_tsv is auto-populated on insert (generated column)', async () => {
+    await exec(`
+      INSERT INTO concepts (uuid, team_id, project_id, schema_version, type,
+        status, confidence, title, body, first_seen, last_confirmed)
+      VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'team_a', 'prj_a', 1,
+        'concept', 'active', 'high',
+        'PostgreSQL Full-Text Search',
+        'Full-text search enables efficient text lookup in PostgreSQL using tsvector and GIN indexes.',
+        now(), now());
+    `);
+    const { rows } = await db.query(
+      `SELECT search_tsv FROM concepts WHERE uuid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'`,
+    );
+    expect(rows[0]).toBeDefined();
+    // The generated column must be non-null.
+    expect(rows[0].search_tsv).not.toBeNull();
+    // Should contain tokens from both title and body.
+    expect(typeof rows[0].search_tsv).toBe('string');
+    expect(rows[0].search_tsv).toContain('postgresql');
+    expect(rows[0].search_tsv).toContain('full-text');
+    expect(rows[0].search_tsv).toContain('search');
+    expect(rows[0].search_tsv).toContain('gin');
+  });
+
+  it('DUA-190: to_tsquery with simple config matches inserted concept', async () => {
+    await exec(`
+      INSERT INTO concepts (uuid, team_id, project_id, schema_version, type,
+        status, confidence, title, body, first_seen, last_confirmed)
+      VALUES ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'team_a', 'prj_a', 1,
+        'decision', 'active', 'high',
+        'Use TypeScript for Backend',
+        'We decided to use TypeScript on the server side for type safety and maintainability.',
+        now(), now());
+    `);
+    // GIN-indexed search via @@ operator.
+    const { rows: match } = await db.query(
+      `SELECT uuid, title FROM concepts
+       WHERE search_tsv @@ to_tsquery('simple', 'typescript')
+         AND uuid = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'`,
+    );
+    expect(match).toHaveLength(1);
+    expect(match[0].title).toBe('Use TypeScript for Backend');
+
+    // Non-matching term should return no rows.
+    const { rows: noMatch } = await db.query(
+      `SELECT uuid FROM concepts
+       WHERE search_tsv @@ to_tsquery('simple', 'python')
+         AND uuid = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'`,
+    );
+    expect(noMatch).toHaveLength(0);
+  });
+
+  it('DUA-190: tsvector updates when title or body changes (generated)', async () => {
+    await exec(`
+      INSERT INTO concepts (uuid, team_id, project_id, schema_version, type,
+        status, confidence, title, body, first_seen, last_confirmed)
+      VALUES ('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'team_a', 'prj_a', 1,
+        'concept', 'active', 'high',
+        'Original Title', 'Original body content.',
+        now(), now());
+    `);
+    // Verify initial state.
+    let { rows } = await db.query(
+      `SELECT search_tsv FROM concepts WHERE uuid = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'`,
+    );
+    expect(rows[0].search_tsv).toContain('original');
+    expect(rows[0].search_tsv).toContain('titl'); // simple config doesn't stem; 'title' stays 'title'
+
+    // Update the title.
+    await exec(`
+      UPDATE concepts SET title = 'Updated Architecture',
+        updated_at = now()
+      WHERE uuid = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    `);
+    ({ rows } = await db.query(
+      `SELECT search_tsv FROM concepts WHERE uuid = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'`,
+    ));
+    expect(rows[0].search_tsv).toContain('updated');
+    expect(rows[0].search_tsv).toContain('architecture');
+    // Title-only tokens from old title are gone ('title' was only in the
+    // old title; 'original' appears in both old title AND body so it
+    // survives — we must pick a word unique to the old title).
+    expect(rows[0].search_tsv).not.toContain(" 'title':");
+    // Body tokens still present.
+    expect(rows[0].search_tsv).toContain('original');
+    expect(rows[0].search_tsv).toContain('body');
+    expect(rows[0].search_tsv).toContain('content');
+  });
+
+  it('DUA-190: simple config preserves CJK and non-English tokens', async () => {
+    await exec(`
+      INSERT INTO concepts (uuid, team_id, project_id, schema_version, type,
+        status, confidence, title, body, first_seen, last_confirmed)
+      VALUES ('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'team_a', 'prj_a', 1,
+        'convention', 'active', 'high',
+        '中文全文检索测试',
+        '这是一个中文全文检索的测试页面，用于验证 simple 配置不会丢弃非英文内容。',
+        now(), now());
+    `);
+    const { rows } = await db.query(
+      `SELECT uuid, title FROM concepts
+       WHERE search_tsv @@ to_tsquery('simple', '中文全文检索测试')
+         AND uuid = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].title).toBe('中文全文检索测试');
+  });
+
+  it('DUA-190: GIN index is present on search_tsv', async () => {
+    const { rows } = await db.query(`
+      SELECT indexname FROM pg_indexes
+      WHERE tablename = 'concepts' AND indexname = 'concepts_search_fts_gin'
+    `);
+    expect(rows).toHaveLength(1);
+  });
 });
