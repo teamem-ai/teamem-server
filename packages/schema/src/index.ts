@@ -72,6 +72,30 @@ export const CONTRACT_ADDITIVE_CHANGES = [
         'literal has ever shipped externally.',
     },
   },
+  {
+    change: 'DUA-203: search request/response DTOs',
+    summary:
+      'New POST /v1/search endpoint DTOs: searchRequest (projectId, query, ' +
+      'optional type/status/limit with default 20 max 100) and searchResponse ' +
+      '(results as concept summary + relevance score + ftsFallback flag + ' +
+      'degraded flag + composite cursor). cursorPayload gains a search/relevance ' +
+      'variant for search pagination.',
+    impact: {
+      database: 'None — search reads existing concepts; no schema changes needed.',
+      api: 'No HTTP routes exist yet in M0 (apps/server/src/index.ts is still a ' +
+        'stub) — no live endpoint today. When POST /v1/search is built, it will ' +
+        'use these DTOs.',
+      cli: 'None — the CLI (teamem-ai/cli, M1) does not call this endpoint directly.',
+      mcp: 'The MCP search tool (M1) will consume searchResponse when built.',
+      ui: 'None — apps/web does not consume these DTOs yet.',
+      compiler: 'None — search is a read path; F1/F2 compilation is unaffected.',
+      export: 'None — OKF export is an M3 concern.',
+      externalTsConsumers:
+        'Fully additive: new file, new discriminated-union cursor variant, new ' +
+        'export. Existing imports and runtime behavior are unaffected. No ' +
+        'published npm release of @teamem/schema exists yet.',
+    },
+  },
 ] as const;
 
 export * from './common.js';
@@ -83,3 +107,4 @@ export * from './ingest.js';
 export * from './event.js';
 export * from './job.js';
 export * from './audit.js';
+export * from './search.js';

@@ -17,6 +17,8 @@ import {
   ingestEventRequest,
   jobEventResult,
   principalId,
+  searchRequest,
+  searchResponse,
   source,
   teamRole,
   CONTRACT_ADDITIVE_CHANGES,
@@ -275,6 +277,136 @@ describe('job per-event results (N4 — discriminated union, no ambiguity)', () 
         reason: 'no_knowledge',
       }).success,
     ).toBe(true);
+  });
+});
+
+describe('search (v0.3 — DUA-203)', () => {
+  const validSearchRequest = {
+    projectId: 'prj_abc123',
+    query: 'auth service architecture',
+  } as const;
+
+  const validSearchResult = {
+    uuid: 'a3bb189e-8bf9-3888-9912-ace4e6543002',
+    path: 'services/auth-api',
+    type: 'service',
+    status: 'active',
+    confidence: 'high',
+    title: 'Auth API',
+    tags: ['auth'],
+    lastConfirmed: '2026-07-10T09:30:00.000Z',
+    relevance: 0.87,
+    ftsFallback: false,
+  } as const;
+
+  it('accepts a valid search request and applies limit default', () => {
+    const parsed = searchRequest.parse(validSearchRequest);
+    expect(parsed.limit).toBe(20);
+    expect(parsed.query).toBe('auth service architecture');
+  });
+
+  it('accepts a search request with optional filters', () => {
+    const parsed = searchRequest.parse({
+      ...validSearchRequest,
+      type: 'service',
+      status: 'active',
+      limit: 5,
+    });
+    expect(parsed.type).toBe('service');
+    expect(parsed.status).toBe('active');
+    expect(parsed.limit).toBe(5);
+  });
+
+  it('rejects empty query', () => {
+    expect(
+      searchRequest.safeParse({ ...validSearchRequest, query: '' }).success,
+    ).toBe(false);
+  });
+
+  it('rejects limit > 100 (Q11 — schema enforces upper bound)', () => {
+    expect(
+      searchRequest.safeParse({ ...validSearchRequest, limit: 150 }).success,
+    ).toBe(false);
+  });
+
+  it('rejects invalid type/status values from concept enums', () => {
+    expect(
+      searchRequest.safeParse({ ...validSearchRequest, type: 'bogus' }).success,
+    ).toBe(false);
+    expect(
+      searchRequest.safeParse({ ...validSearchRequest, status: 'bogus' }).success,
+    ).toBe(false);
+  });
+
+  it('accepts a valid search response with results', () => {
+    const response = searchResponse.parse({
+      requestId: 'req_1',
+      results: [validSearchResult],
+      degraded: false,
+      nextCursor: null,
+    });
+    expect(response.results).toHaveLength(1);
+    expect(response.results[0]!.relevance).toBe(0.87);
+    expect(response.results[0]!.ftsFallback).toBe(false);
+    expect(response.degraded).toBe(false);
+  });
+
+  it('response sets degraded=true when semantic search fell back to FTS', () => {
+    const response = searchResponse.parse({
+      requestId: 'req_1',
+      results: [{ ...validSearchResult, ftsFallback: true, relevance: 0.5 }],
+      degraded: true,
+      nextCursor: null,
+    });
+    expect(response.degraded).toBe(true);
+    expect(response.results[0]!.ftsFallback).toBe(true);
+  });
+
+  it('rejects relevance outside [0, 1]', () => {
+    expect(
+      searchResponse.safeParse({
+        requestId: 'req_1',
+        results: [{ ...validSearchResult, relevance: 1.5 }],
+        degraded: false,
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      searchResponse.safeParse({
+        requestId: 'req_1',
+        results: [{ ...validSearchResult, relevance: -0.1 }],
+        degraded: false,
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('search cursor round-trips and rejects invalid resource/sort combos', () => {
+    const payload: CursorPayload = {
+      v: 1,
+      resource: 'search',
+      projectId: 'prj_abc123',
+      sort: 'relevance',
+      position: { sortValue: '0.87', id: 'uuid-x' },
+      filterHash: 'fh_search',
+    };
+    const token = encodeCursor(payload);
+    expect(decodeCursor(token)).toEqual(payload);
+
+    // Wrong sort for search resource
+    const bad = cursorPayload.safeParse({
+      v: 1,
+      resource: 'search',
+      projectId: 'prj_abc123',
+      sort: 'created_at',
+      position: { sortValue: '2026-07-10T09:30:00.000Z', id: 'x' },
+      filterHash: 'fh_search',
+    });
+    expect(bad.success).toBe(false);
+  });
+
+  it('CONTRACT_ADDITIVE_CHANGES includes DUA-203', () => {
+    expect(CONTRACT_ADDITIVE_CHANGES.some((c) => c.change.includes('DUA-203'))).toBe(true);
   });
 });
 
