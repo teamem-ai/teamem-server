@@ -103,6 +103,11 @@ export const cursorPayload = z.discriminatedUnion('resource', [
     sort: z.literal('created_at'),
     ...cursorBase,
   }),
+  z.strictObject({
+    resource: z.literal('search'),
+    sort: z.literal('relevance'),
+    ...cursorBase,
+  }),
 ]);
 export type CursorPayload = z.infer<typeof cursorPayload>;
 
