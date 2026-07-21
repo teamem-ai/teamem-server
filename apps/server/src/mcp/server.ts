@@ -17,9 +17,10 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppDb } from '../db/client.js';
+import type { CompileQueue } from '../queue/boss.js';
 import { requireAuth, getAuth } from '../http/auth.js';
 import { REQUEST_ID_KEY } from '../http/errors.js';
-import { ToolRegistry } from './registry.js';
+import { ToolRegistry, type ToolExecutionContext } from './registry.js';
 
 // ── MCP constants ───────────────────────────────────────────────────────────
 
@@ -124,11 +125,20 @@ function handleToolsList(
   });
 }
 
+// ── tools/call params schema ────────────────────────────────────────────────
+
+const toolsCallParamsSchema = z.object({
+  name: z.string().min(1),
+  arguments: z.record(z.string(), z.unknown()).optional(),
+});
+
 // ── Dependencies ────────────────────────────────────────────────────────────
 
 export interface McpDeps {
   db: AppDb;
   registry: ToolRegistry;
+  /** Optional compile queue — passed through to tool handlers. */
+  queue?: CompileQueue;
 }
 
 // ── Route builder ───────────────────────────────────────────────────────────
@@ -203,6 +213,48 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
           return c.json(handleInitialize(req, rpcId), 200);
         case 'tools/list':
           return c.json(handleToolsList(req, rpcId, deps.registry), 200);
+        case 'tools/call': {
+          // Parse params: { name: string, arguments?: object }
+          const paramsParsed = toolsCallParamsSchema.safeParse(req.params ?? {});
+          if (!paramsParsed.success) {
+            return c.json(
+              jsonRpcError(
+                rpcId,
+                JSONRPC_INVALID_REQUEST,
+                'Invalid params: expected { name: string, arguments?: object }',
+              ),
+              200,
+            );
+          }
+
+          const toolName = paramsParsed.data.name;
+          const toolArgs = paramsParsed.data.arguments ?? {};
+
+          // Build execution context from auth + deps
+          const auth = getAuth(c);
+          const execCtx: ToolExecutionContext = {
+            db: deps.db,
+            queue: deps.queue,
+            auth,
+          };
+
+          try {
+            const result = await deps.registry.execute(toolName, toolArgs, execCtx);
+            return c.json(jsonRpcSuccess(rpcId, result), 200);
+          } catch (err) {
+            if (err instanceof Error && err.message.startsWith('Tool not found:')) {
+              return c.json(
+                jsonRpcError(
+                  rpcId,
+                  JSONRPC_METHOD_NOT_FOUND,
+                  `Tool not found: ${toolName}`,
+                ),
+                200,
+              );
+            }
+            throw err;
+          }
+        }
         default:
           return c.json(
             jsonRpcError(
