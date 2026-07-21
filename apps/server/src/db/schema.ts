@@ -25,6 +25,7 @@ import { sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  customType,
   foreignKey,
   index,
   integer,
@@ -39,6 +40,22 @@ import {
   uuid,
   vector,
 } from 'drizzle-orm/pg-core';
+
+// ── Custom types ────────────────────────────────────────────────────────────
+
+/**
+ * PostgreSQL `tsvector` full-text search column.  Stored as a GENERATED
+ * column in the database (to_tsvector('simple', title || ' ' || body)) so
+ * the ORM never writes to it directly.
+ *
+ * `notNull: true, default: true` tells Drizzle the column is always
+ * present but need never appear in an INSERT — the DB populates it.
+ */
+const tsvector = customType<{ data: string; notNull: true; default: true }>({
+  dataType() {
+    return 'tsvector';
+  },
+});
 
 // ── Enums (Q1 note: pgEnum chosen over text+CHECK — ALTER TYPE ADD VALUE is
 //    the cheap migration path for additive changes) ─────────────────────────
@@ -337,6 +354,12 @@ export const concepts = pgTable(
     supersedesUuid: uuid('supersedes_uuid'), // self-reference; loser retained
     // Embedding: text-embedding-3-small / 1536 dims (M0 column, M1 values).
     embedding: vector('embedding', { dimensions: 1536 }),
+    // Full-text search tsvector generated from title + body.  Uses `simple`
+    // config so multi-language (incl. CJK) queries degrade gracefully instead
+    // of being silently dropped by an English-only stemmer (DUA-190).
+    // Maintained by a GENERATED ALWAYS AS STORED expression in the database;
+    // the ORM never writes to it directly.
+    searchTsv: tsvector('search_tsv'),
     createdAt: createdAt(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
@@ -355,6 +378,8 @@ export const concepts = pgTable(
       'hnsw',
       t.embedding.op('vector_cosine_ops'),
     ),
+    // GIN index for full-text search (semantic fallback + hybrid keyword recall).
+    index('concepts_search_fts_gin').using('gin', t.searchTsv),
     index('concepts_team_idx').on(t.teamId),
   ],
 );
