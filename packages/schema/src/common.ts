@@ -108,6 +108,11 @@ export const cursorPayload = z.discriminatedUnion('resource', [
     sort: z.literal('relevance'),
     ...cursorBase,
   }),
+  z.strictObject({
+    resource: z.literal('timeline'),
+    sort: z.literal('occurred_at'), // MCP timeline tool (DUA-209)
+    ...cursorBase,
+  }),
 ]);
 export type CursorPayload = z.infer<typeof cursorPayload>;
 

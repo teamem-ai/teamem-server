@@ -31,8 +31,13 @@ import {
   buildEventsBatchRoutes,
   type EventsBatchDeps,
 } from './http/routes/events-batch.js';
-import { buildMcpRoutes } from './mcp/server.js';
+import { buildMcpRoutes, type ToolHandler } from './mcp/server.js';
 import { ToolRegistry } from './mcp/registry.js';
+import {
+  timelineHandler,
+  TIMELINE_TOOL_NAME,
+  TIMELINE_TOOL_DESCRIPTION,
+} from './mcp/tools/timeline.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -124,9 +129,38 @@ export function buildApp(deps: AppDeps = {}) {
     // MCP streamable HTTP endpoint (M1-MCP-01 scaffold).
     // Uses the same Bearer-token auth as the REST API.
     const mcpRegistry = new ToolRegistry();
+
+    // Register timeline tool (DUA-209).
+    mcpRegistry.register({
+      name: TIMELINE_TOOL_NAME,
+      description: TIMELINE_TOOL_DESCRIPTION,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          projectId: { type: 'string', description: 'The project ID to query' },
+          cursor: {
+            type: 'string',
+            description: 'Opaque cursor for pagination; omit for the first page',
+          },
+          limit: {
+            type: 'number',
+            description: 'Maximum entries per page (default 20, max 100)',
+          },
+        },
+        required: ['projectId'],
+      },
+    });
+
+    const toolHandlers = new Map<string, ToolHandler>();
+    toolHandlers.set(TIMELINE_TOOL_NAME, timelineHandler as ToolHandler);
+
     app.route(
       '/',
-      buildMcpRoutes({ db: deps.db, registry: mcpRegistry }),
+      buildMcpRoutes({
+        db: deps.db,
+        registry: mcpRegistry,
+        toolHandlers,
+      }),
     );
   }
 
