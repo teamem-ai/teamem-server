@@ -75,6 +75,19 @@ export interface CreateConceptInput {
   readonly evidence: ConceptEvidenceInput[];
   /** Contributor candidates — only trusted (webhook_verified / credential_bound) are persisted. */
   readonly contributors?: ConceptContributorInput[];
+  /**
+   * Optional 1536-dimensional embedding vector for semantic search.
+   *
+   * When the deployment capability is `vector`, the caller generates an
+   * embedding from title + body and passes it here.  When capability is
+   * `fts-only`, this field is omitted (undefined / null) and the database
+   * stores SQL NULL — the legal degradation state (§5.5).
+   *
+   * The vector is validated to have exactly {@link EMBEDDING_DIMENSION}
+   * (1536) elements by the embedding adapter before reaching this
+   * repository; this layer trusts the caller.
+   */
+  readonly embedding?: number[] | null;
 }
 
 // ── Result type ─────────────────────────────────────────────────────────────
@@ -152,6 +165,12 @@ export async function createConcept(
 
   return db.transaction(async (tx) => {
     // 1. Insert the concept row.
+    //
+    // The `embedding` column is included only when a non-null vector is
+    // provided.  The PgVector.mapToDriverValue uses JSON.stringify, which
+    // would produce the string "null" for a JS null — an invalid vector
+    // literal.  By omitting the key entirely when embedding is nullish, the
+    // database stores SQL NULL, which is the correct fts-only degradation.
     const [concept] = await tx
       .insert(schema.concepts)
       .values({
@@ -167,6 +186,7 @@ export async function createConcept(
         firstSeen: input.firstSeen,
         lastConfirmed: input.lastConfirmed,
         supersedesUuid: input.supersedesUuid ?? null,
+        ...(input.embedding != null ? { embedding: input.embedding } : {}),
       })
       .returning({ uuid: schema.concepts.uuid });
 
