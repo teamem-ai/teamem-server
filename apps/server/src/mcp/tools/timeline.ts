@@ -35,6 +35,7 @@ import {
   type ScopeContext,
 } from '../../auth/scope.js';
 import { writeAuditRecord } from '../../db/repositories/audit.js';
+import { McpToolError, JSONRPC_INVALID_PARAMS } from '../server.js';
 import { isoDateTime } from '@teamem/schema';
 
 // ── Tool definition ─────────────────────────────────────────────────────────
@@ -328,17 +329,26 @@ export async function timelineHandler(
 
 // ── Error types ─────────────────────────────────────────────────────────────
 
-export class TimelineValidationError extends Error {
-  readonly name = 'TimelineValidationError';
-}
-
-export class TimelineCursorInvalidError extends Error {
-  readonly name = 'TimelineCursorInvalidError';
-  constructor() {
-    super('cursor_invalid');
+export class TimelineValidationError extends McpToolError {
+  constructor(message: string) {
+    super(message, JSONRPC_INVALID_PARAMS);
+    this.name = 'TimelineValidationError';
   }
 }
 
-export class TimelineInternalError extends Error {
-  readonly name = 'TimelineInternalError';
+export class TimelineCursorInvalidError extends McpToolError {
+  constructor() {
+    super('cursor_invalid', JSONRPC_INVALID_PARAMS);
+    this.name = 'TimelineCursorInvalidError';
+  }
+}
+
+export class TimelineInternalError extends McpToolError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = 'TimelineInternalError';
+    if (options?.cause !== undefined) {
+      this.cause = options.cause;
+    }
+  }
 }

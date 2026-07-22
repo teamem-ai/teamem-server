@@ -65,7 +65,29 @@ interface JsonRpcError {
 const JSONRPC_PARSE_ERROR = -32700;
 const JSONRPC_INVALID_REQUEST = -32600;
 const JSONRPC_METHOD_NOT_FOUND = -32601;
+/** Invalid method parameter(s). Use for validation errors, bad cursors, etc. */
+export const JSONRPC_INVALID_PARAMS = -32602;
 const JSONRPC_INTERNAL_ERROR = -32603;
+
+// ── McpToolError base class ────────────────────────────────────────────────
+
+/**
+ * Base error for MCP tool handlers that carries a JSON-RPC error code.
+ *
+ * Tool implementations should throw this (or a subclass) to signal the
+ * appropriate JSON-RPC error code to the transport layer. The default
+ * code is JSONRPC_INTERNAL_ERROR (-32603); validation failures should
+ * use JSONRPC_INVALID_PARAMS (-32602).
+ */
+export class McpToolError extends Error {
+  readonly jsonRpcCode: number;
+
+  constructor(message: string, jsonRpcCode: number = JSONRPC_INTERNAL_ERROR) {
+    super(message);
+    this.name = 'McpToolError';
+    this.jsonRpcCode = jsonRpcCode;
+  }
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -178,16 +200,24 @@ async function handleToolsCall(
   } catch (err) {
     const message =
       err instanceof Error ? err.message : 'Tool execution failed';
+
+    // Determine the JSON-RPC error code from the error type:
+    // - McpToolError subclasses carry their own code (e.g. INVALID_PARAMS)
+    // - All other errors default to INTERNAL_ERROR
+    const code =
+      err instanceof McpToolError ? err.jsonRpcCode : JSONRPC_INTERNAL_ERROR;
+
     console.error(
       JSON.stringify({
         event: 'mcp_tool_error',
         requestId,
         tool: name,
         errorClass: (err as Error).constructor?.name ?? 'unknown',
+        jsonRpcCode: code,
         message,
       }),
     );
-    return jsonRpcError(id, JSONRPC_INTERNAL_ERROR, message);
+    return jsonRpcError(id, code, message);
   }
 }
 
