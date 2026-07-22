@@ -17,6 +17,7 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppDb } from '../db/client.js';
+import type { AuthContext } from '../db/repositories/api-keys.js';
 import { requireAuth, getAuth } from '../http/auth.js';
 import { REQUEST_ID_KEY } from '../http/errors.js';
 import { ToolRegistry } from './registry.js';
@@ -85,6 +86,13 @@ function jsonRpcError(
   };
 }
 
+// ── tools/call params schema ────────────────────────────────────────────────
+
+const toolsCallParamsSchema = z.object({
+  name: z.string().min(1),
+  arguments: z.record(z.string(), z.unknown()).optional(),
+});
+
 // ── Method handlers ─────────────────────────────────────────────────────────
 
 /**
@@ -110,9 +118,7 @@ function handleInitialize(
 /**
  * Handle the `tools/list` request.
  *
- * Returns the current tool list from the registry.  In this scaffolding
- * the registry is empty; future tasks will register concrete tools
- * (search, get_page, timeline, memory_write).
+ * Returns the current tool list from the registry.
  */
 function handleToolsList(
   _req: JsonRpcRequest,
@@ -122,6 +128,51 @@ function handleToolsList(
   return jsonRpcSuccess(id, {
     tools: registry.listTools(),
   });
+}
+
+/**
+ * Handle the `tools/call` request.
+ *
+ * Looks up the tool handler by name, validates params, derives the
+ * ToolContext from the AuthContext, and delegates to the handler.
+ *
+ * Tool errors (not found, invalid args, etc.) are returned as MCP
+ * CallToolResult with `isError: true`, not as JSON-RPC errors.  This
+ * lets the LLM see structured error information.
+ */
+async function handleToolsCall(
+  req: JsonRpcRequest,
+  id: string | number,
+  registry: ToolRegistry,
+  db: AppDb,
+  auth: AuthContext,
+  requestId: string,
+): Promise<JsonRpcSuccess> {
+  // Validate params shape
+  const parsed = toolsCallParamsSchema.safeParse(req.params ?? {});
+  if (!parsed.success) {
+    return jsonRpcSuccess(id, {
+      content: [{ type: 'text', text: `Invalid params: ${parsed.error.message}` }],
+      isError: true,
+    });
+  }
+
+  const { name, arguments: args } = parsed.data;
+
+  // Look up handler
+  const handler = registry.getHandler(name);
+  if (!handler) {
+    return jsonRpcSuccess(id, {
+      content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+      isError: true,
+    });
+  }
+
+  // Build tool context and delegate
+  const ctx = { db, auth, requestId };
+  const result = await handler(args ?? {}, ctx);
+
+  return jsonRpcSuccess(id, result);
 }
 
 // ── Dependencies ────────────────────────────────────────────────────────────
@@ -191,7 +242,7 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
     // AuthContext is available via getAuth(c) — scope.teamId / scope
     // (tagged union) are ready for downstream tools to use.
     // The scope derivation from the API key is complete at this point.
-    void getAuth(c);
+    const auth = getAuth(c);
 
     // At this point req.id is guaranteed non-undefined (notification path
     // returned early above). Narrow for the method handlers.
@@ -203,6 +254,18 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
           return c.json(handleInitialize(req, rpcId), 200);
         case 'tools/list':
           return c.json(handleToolsList(req, rpcId, deps.registry), 200);
+        case 'tools/call':
+          return c.json(
+            await handleToolsCall(
+              req,
+              rpcId,
+              deps.registry,
+              deps.db,
+              auth,
+              requestId,
+            ),
+            200,
+          );
         default:
           return c.json(
             jsonRpcError(
