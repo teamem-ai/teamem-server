@@ -18,7 +18,8 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:compose": "bash ../../scripts/m0-compose-smoke.sh",
-    "m0:f1-reliability": "vitest run --config vitest.f1.config.ts"
+    "m0:f1-reliability": "vitest run --config vitest.f1.config.ts",
+    "m1:f1-signal": "vitest run --config vitest.f1.config.ts"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
