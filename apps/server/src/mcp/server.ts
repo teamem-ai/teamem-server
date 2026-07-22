@@ -199,7 +199,6 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
     // AuthContext is available via getAuth(c) — scope.teamId / scope
     // (tagged union) are ready for downstream tools to use.
     // The scope derivation from the API key is complete at this point.
-    const auth = getAuth(c);
 
     // At this point req.id is guaranteed non-undefined (notification path
     // returned early above). Narrow for the method handlers.
