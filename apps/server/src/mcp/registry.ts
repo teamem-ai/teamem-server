@@ -9,6 +9,7 @@
  * via `listTools()` for the `tools/list` JSON-RPC method.
  */
 import { z } from 'zod';
+import type { ApiScope } from '@teamem/schema';
 import type { AppDb } from '../db/client.js';
 import type { CompileQueue } from '../queue/boss.js';
 import type { AuthContext } from '../db/repositories/api-keys.js';
@@ -63,6 +64,14 @@ export type ToolHandler = (
 interface RegisteredTool {
   definition: McpTool;
   handler: ToolHandler;
+  /**
+   * API key scopes required to invoke this tool.
+   * When non-empty, every scope must be present in the key's scopes list.
+   * Read tools (search, get_page, timeline) require ['read']; write tools
+   * (memory_write) require ['events:write']; tools that read payloads
+   * require ['read', 'read:payload'].
+   */
+  requiredScopes: readonly ApiScope[];
 }
 
 // ── Registry ────────────────────────────────────────────────────────────────
@@ -71,11 +80,21 @@ export class ToolRegistry {
   private tools: Map<string, RegisteredTool> = new Map();
 
   /**
-   * Register a tool with its handler. Idempotent — replacing a tool
-   * with the same name updates both definition and handler (last-write-wins).
+   * Register a tool with its handler and required API key scopes.
+   * Idempotent — replacing a tool with the same name updates definition,
+   * handler, and required scopes (last-write-wins).
+   *
+   * @param tool           Tool definition for tools/list.
+   * @param handler        Async handler invoked on tools/call.
+   * @param requiredScopes API key scopes required to call this tool.
+   *                        Defaults to empty (no scope requirement).
    */
-  register(tool: McpTool, handler: ToolHandler): void {
-    this.tools.set(tool.name, { definition: tool, handler });
+  register(
+    tool: McpTool,
+    handler: ToolHandler,
+    requiredScopes: readonly ApiScope[] = [],
+  ): void {
+    this.tools.set(tool.name, { definition: tool, handler, requiredScopes });
   }
 
   /** Return a snapshot of all registered tool definitions (for tools/list). */
@@ -85,6 +104,10 @@ export class ToolRegistry {
 
   /**
    * Execute a tool by name with the given arguments and context.
+   *
+   * Before invoking the handler, verifies that the authenticated API key
+   * possesses every scope required by the tool.  Missing scopes produce
+   * a structured error result (isError: true) — no exception is thrown.
    *
    * @throws Error when the tool name is not registered.
    */
@@ -97,6 +120,24 @@ export class ToolRegistry {
     if (!registered) {
       throw new Error(`Tool not found: ${name}`);
     }
+
+    // ── Per-tool scope enforcement (AGENTS.md §8) ──────────────────────
+    if (registered.requiredScopes.length > 0) {
+      const missing = registered.requiredScopes.filter(
+        (s) => !ctx.auth.scopes.includes(s),
+      );
+      if (missing.length > 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: `This tool requires the following scope(s): ${missing.join(', ')}. ` +
+              `Your API key does not have them.`,
+          }],
+          isError: true,
+        };
+      }
+    }
+
     return registered.handler(args, ctx);
   }
 }

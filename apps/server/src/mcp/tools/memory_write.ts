@@ -305,5 +305,6 @@ export function registerMemoryWriteTool(registry: ToolRegistry): void {
       },
     },
     handleMemoryWrite,
+    ['events:write'],
   );
 }

@@ -420,3 +420,87 @@ describe('memory_write tool — job creation failure', () => {
     expect(result.content[0]!.text).toContain(eventId);
   });
 });
+
+describe('memory_write tool — API key scope enforcement (AGENTS.md §8)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects a key without events:write scope', async () => {
+    const auth = mockAuthContext({ scopes: ['read'] });
+
+    const result = await executeMemoryWrite(
+      { content: 'test' },
+      createExecCtx(auth),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain('events:write');
+    expect(result.content[0]!.text).toContain('does not have them');
+    expect(mockedInsertEvent).not.toHaveBeenCalled();
+  });
+
+  it('accepts a key with events:write scope', async () => {
+    const auth = mockAuthContext({ scopes: ['events:write'] });
+    const eventId = `evt_${randomUUID().replace(/-/g, '')}`;
+
+    mockedInsertEvent.mockResolvedValueOnce({ eventId, status: 'inserted' });
+    mockedCreateJob.mockResolvedValueOnce({
+      job: {
+        id: randomUUID(),
+        teamId: 'team_mcp',
+        projectId: 'prj_mcp',
+        kind: 'ingest_event',
+        status: 'queued',
+        attempts: 0,
+        initiatedByKind: 'credential',
+        initiatedByCredentialId: 'key_mcp_test',
+        initiatedByPrincipalId: null,
+        initiatedByConnector: null,
+        idempotencyKey: `compile:${eventId}`,
+        idempotencyRequestHash: 'hash',
+        resultSnapshot: null,
+        eventCount: 1,
+        error: null,
+        startedAt: null,
+        finishedAt: null,
+        createdAt: new Date(),
+      },
+      created: true,
+    });
+
+    const result = await executeMemoryWrite(
+      { content: 'test' },
+      createExecCtx(auth),
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(mockedInsertEvent).toHaveBeenCalled();
+  });
+
+  it('rejects a key with empty scopes', async () => {
+    const auth = mockAuthContext({ scopes: [] });
+
+    const result = await executeMemoryWrite(
+      { content: 'test' },
+      createExecCtx(auth),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain('events:write');
+    expect(mockedInsertEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects a key with read:payload but not events:write', async () => {
+    const auth = mockAuthContext({ scopes: ['read', 'read:payload'] });
+
+    const result = await executeMemoryWrite(
+      { content: 'test' },
+      createExecCtx(auth),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain('events:write');
+    expect(mockedInsertEvent).not.toHaveBeenCalled();
+  });
+});
