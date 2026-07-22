@@ -489,11 +489,74 @@ describe('buildF1Prompt', () => {
     expect(user).toBeTruthy();
   });
 
-  it('system message includes all six concept types', () => {
+  it('system message includes all six concept types by name', () => {
     const { system } = buildF1Prompt(promptContext);
     for (const type of ['service', 'concept', 'decision', 'gotcha', 'convention', 'runbook']) {
       expect(system).toContain(type);
     }
+  });
+
+  // ── Semantic role framing: each type answers a specific question ──────
+  it('system message includes semantic role framing for each type', () => {
+    const { system } = buildF1Prompt(promptContext);
+    // decision → 为什么 (Why)
+    expect(system).toContain('Why did we choose this');
+    // gotcha → 别做 (What to avoid)
+    expect(system).toContain('What should I avoid');
+    // service → 是什么 (What is this running system)
+    expect(system).toContain('What is this running system');
+    // concept → 是什么 (What is this idea)
+    expect(system).toContain('What is this idea');
+    // runbook → 怎么操作 (How to perform)
+    expect(system).toContain('How do I perform this operational task');
+    // convention → 怎么写 (How should we write)
+    expect(system).toContain('How should we write');
+  });
+
+  // ── Conflict priority rules ───────────────────────────────────────────
+  it('system message includes type conflict resolution priority rules', () => {
+    const { system } = buildF1Prompt(promptContext);
+    expect(system).toContain('Type Conflict Resolution');
+    expect(system).toContain('Priority Rules');
+    // The priority order must be stated
+    expect(system).toContain('decision > gotcha > runbook > convention > service > concept');
+    // Key rules
+    expect(system).toContain('decision wins');
+    expect(system).toContain('gotcha wins');
+    expect(system).toContain('runbook wins');
+    expect(system).toContain('convention wins');
+  });
+
+  // ── Confidence admission gates ────────────────────────────────────────
+  it('system message includes three-tier confidence admission criteria', () => {
+    const { system } = buildF1Prompt(promptContext);
+    expect(system).toContain('Evidentiary Admission Gates');
+    // High gate: ≥2 independent or single authoritative
+    expect(system).toContain('≥2 independent');
+    expect(system).toContain('authoritative source');
+    // Medium gate: single clear source
+    expect(system).toContain('Single clear source');
+    // Low gate: inference or weak signal
+    expect(system).toContain('Inference, speculation');
+    // Default to medium
+    expect(system).toContain('Most extracts should be "medium"');
+  });
+
+  it('system message lists all three confidence levels', () => {
+    const { system } = buildF1Prompt(promptContext);
+    expect(system).toContain('### high');
+    expect(system).toContain('### medium');
+    expect(system).toContain('### low');
+  });
+
+  // ── Skip criteria ─────────────────────────────────────────────────────
+  it('system message includes explicit skip criteria', () => {
+    const { system } = buildF1Prompt(promptContext);
+    expect(system).toContain('Skip Criteria');
+    expect(system).toContain('typo fix');
+    expect(system).toContain('version bump');
+    expect(system).toContain('WIP');
+    expect(system).toContain('self-contained body');
   });
 
   it('system message explicitly forbids server-owned fields', () => {
@@ -508,6 +571,7 @@ describe('buildF1Prompt', () => {
     expect(system).toContain('updatedAt');
     expect(system).toContain('aliases');
     expect(system).toContain('supersedes');
+    expect(system).toContain('status');
   });
 
   it('system message includes extract and skip output formats', () => {
@@ -516,7 +580,13 @@ describe('buildF1Prompt', () => {
     expect(system).toContain('"action": "skip"');
   });
 
-  it('system message includes explicit skip criteria', () => {
+  it('system message includes structured output enforcement warning', () => {
+    const { system } = buildF1Prompt(promptContext);
+    expect(system).toContain('strict validation');
+    expect(system).toContain('rejected');
+  });
+
+  it('system message includes explicit skip criteria details', () => {
     const { system } = buildF1Prompt(promptContext);
     expect(system).toContain('Skip Criteria');
     expect(system).toContain('No decision, constraint, or operational knowledge');
