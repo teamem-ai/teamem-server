@@ -22,6 +22,7 @@ import { createCompileJobHandler } from './queue/worker.js';
 import { acknowledgeCompileJob } from './worker/embedded.js';
 import { createDbHandle } from './db/client.js';
 import { createLlmClient } from './llm/factory.js';
+import { createEmbeddingClient } from './llm/embedding/factory.js';
 import type { CompileJobHandler } from './queue/boss.js';
 
 export async function runWorker(): Promise<void> {
@@ -39,7 +40,8 @@ export async function runWorker(): Promise<void> {
   const llmProvider = env.llmProviders[0];
   if (llmProvider) {
     const llm = createLlmClient(llmProvider);
-    handler = createCompileJobHandler({ db, llm });
+    const embeddingClient = createEmbeddingClient(llmProvider);
+    handler = createCompileJobHandler({ db, llm, embeddingClient });
   } else {
     console.warn(
       '[worker] no LLM provider configured — compile jobs will be acknowledged ' +

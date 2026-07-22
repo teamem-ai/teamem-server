@@ -17,6 +17,7 @@ import { createCompileQueue } from './queue/boss.js';
 import { startEmbeddedWorker } from './worker/embedded.js';
 import { createCompileJobHandler } from './queue/worker.js';
 import { createLlmClient } from './llm/factory.js';
+import { createEmbeddingClient } from './llm/embedding/factory.js';
 import { startServer } from './server.js';
 import { bootstrapMain } from './commands/bootstrap.js';
 import { installShutdownHandlers } from './lifecycle.js';
@@ -36,6 +37,8 @@ export function createRuntimeStartup(config: {
   const llmProvider = env.llmProviders[0];
   const llm =
     llmProvider ? createLlmClient(llmProvider) : undefined;
+  const embeddingClient =
+    llmProvider ? createEmbeddingClient(llmProvider) : null;
 
   return {
     async startDatabase() {
@@ -80,7 +83,7 @@ export function createRuntimeStartup(config: {
       // no-op placeholder otherwise so the queue is still consumed and
       // acknowledged (prevents unbounded retry loops).
       const handler = llm
-        ? createCompileJobHandler({ db: dbHandle.db, llm })
+        ? createCompileJobHandler({ db: dbHandle.db, llm, embeddingClient })
         : undefined;
       return startEmbeddedWorker(queue, handler);
     },

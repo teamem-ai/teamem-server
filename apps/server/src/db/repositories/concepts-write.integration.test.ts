@@ -527,4 +527,122 @@ describe.skipIf(!url)('ConceptWriteRepository (live Postgres)', () => {
       expect(allEvidence).toHaveLength(1);
     });
   });
+
+  // ── Embedding persistence (M1-EMB-04) ──────────────────────────────────
+
+  describe('embedding persistence', () => {
+    it('CLI step 1: vector mode — writes embedding and verifies 1536 dimensions', async () => {
+      const path = `svc-emb-vec-${randomUUID()}`;
+      const embedding = Array.from({ length: 1536 }, () => Math.random());
+
+      const result = await createConcept(
+        db,
+        validInput({ path, embedding }),
+      );
+
+      expect(result.uuid).toBeTruthy();
+
+      // Verify the concept row was persisted with the embedding.
+      const rows = await db
+        .select()
+        .from(schema.concepts)
+        .where(eq(schema.concepts.uuid, result.uuid));
+      expect(rows).toHaveLength(1);
+
+      const concept = rows[0]!;
+      // embedding must be non-null.
+      expect(concept.embedding).not.toBeNull();
+      // The vector should have 1536 dimensions.
+      expect(concept.embedding).toHaveLength(1536);
+      // All elements should be numbers, and sample values should roundtrip
+      // (with minor float precision changes from JSON serialization).
+      const emb = concept.embedding!;
+      for (let i = 0; i < 1536; i++) {
+        expect(typeof emb[i]).toBe('number');
+      }
+      expect(emb[0]!).toBeCloseTo(embedding[0]!, 5);
+      expect(emb[1]!).toBeCloseTo(embedding[1]!, 5);
+
+      // Other first-class columns are intact.
+      expect(concept.title).toBe('Test Service');
+      expect(concept.body).toBe('A test concept page.');
+      expect(concept.type).toBe('service');
+      expect(concept.status).toBe('active');
+      expect(concept.confidence).toBe('high');
+    });
+
+    it('CLI step 2: fts-only mode — leaves embedding null, all other columns intact', async () => {
+      const path = `svc-emb-fts-${randomUUID()}`;
+
+      // No embedding field passed → fts-only degradation.
+      const result = await createConcept(
+        db,
+        validInput({ path }),
+      );
+
+      expect(result.uuid).toBeTruthy();
+
+      const rows = await db
+        .select()
+        .from(schema.concepts)
+        .where(eq(schema.concepts.uuid, result.uuid));
+      expect(rows).toHaveLength(1);
+
+      const concept = rows[0]!;
+      // embedding must be null — legal fts-only state.
+      expect(concept.embedding).toBeNull();
+
+      // All other first-class columns are intact (red line: embedding is
+      // additive; it does not degrade any existing column).
+      expect(concept.title).toBe('Test Service');
+      expect(concept.body).toBe('A test concept page.');
+      expect(concept.type).toBe('service');
+      expect(concept.status).toBe('active');
+      expect(concept.confidence).toBe('high');
+      expect(concept.tags).toEqual(['test', 'example']);
+      expect(concept.firstSeen).toBeTruthy();
+      expect(concept.lastConfirmed).toBeTruthy();
+    });
+
+    it('explicit null embedding leaves column null (same as fts-only)', async () => {
+      const path = `svc-emb-null-${randomUUID()}`;
+
+      const result = await createConcept(
+        db,
+        validInput({ path, embedding: null }),
+      );
+
+      expect(result.uuid).toBeTruthy();
+
+      const rows = await db
+        .select()
+        .from(schema.concepts)
+        .where(eq(schema.concepts.uuid, result.uuid));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.embedding).toBeNull();
+    });
+
+    it('CLI step 3: embedding write with invalid evidence still fails (no partial data)', async () => {
+      // Embedding is provided but evidence is empty → the entire write
+      // must fail BEFORE any database work, including the embedding write.
+      const path = `svc-emb-rollback-${randomUUID()}`;
+      const embedding = Array.from({ length: 1536 }, () => Math.random());
+
+      await expect(
+        createConcept(
+          db,
+          validInput({ path, embedding, evidence: [] }),
+        ),
+      ).rejects.toThrow(InvalidConceptError);
+
+      // Verify nothing was persisted — no concept, no path, no embedding.
+      // The evidence-is-empty check throws before any database work starts,
+      // so the path must not exist.
+      const paths = await db
+        .select()
+        .from(schema.conceptPaths)
+        .where(eq(schema.conceptPaths.path, path));
+      expect(paths).toHaveLength(0);
+    });
+  });
 });

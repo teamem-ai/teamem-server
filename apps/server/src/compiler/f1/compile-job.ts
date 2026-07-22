@@ -30,6 +30,7 @@
  */
 import type { AppDb } from '../../db/client.js';
 import type { LlmClient, LlmError } from '../../llm/types.js';
+import type { EmbeddingClient } from '../../llm/embedding/port.js';
 import { f1Output } from './output.js';
 import { buildF1Prompt } from './prompt.js';
 import { prefilterNoise } from './skip-filter.js';
@@ -48,10 +49,15 @@ import {
  *
  * `db` and `llm` are the only resources the handler owns — every other
  * dependency is a pure function imported at module scope.
+ *
+ * `embeddingClient` is optional — when absent (Claude provider, no
+ * embedding-capable provider configured), the handler leaves the embedding
+ * column NULL and the system falls back to full-text search (§5.5).
  */
 export interface CompileJobDeps {
   readonly db: AppDb;
   readonly llm: LlmClient;
+  readonly embeddingClient?: EmbeddingClient | null;
 }
 
 // ── Job data shape ─────────────────────────────────────────────────────────
@@ -314,13 +320,37 @@ export async function handleCompileJob(
         continue;
       }
 
-      // 3e. Transactionally persist the concept page aggregate.
+      // 3e. Generate embedding from title + body when vector capability is
+      //     available.  Embedding generation failure is a compilation failure
+      //     — the entire concept write is rolled back (no partial data).
+      let embedding: number[] | undefined;
+      if (deps.embeddingClient) {
+        try {
+          const embeddingText = `${conceptResult.conceptInput.title}\n\n${conceptResult.conceptInput.body}`;
+          const vectors = await deps.embeddingClient.generate([embeddingText]);
+          embedding = vectors[0];
+        } catch (embeddingErr: unknown) {
+          // Embedding generation failure → compilation failure.
+          // Re-throw so the outer catch records the per-event failure
+          // and the concept write is not attempted (no partial data).
+          const message =
+            embeddingErr instanceof Error
+              ? embeddingErr.message
+              : 'Embedding generation failed';
+          throw new Error(`Embedding generation failed: ${message}`);
+        }
+      }
+
+      // 3f. Transactionally persist the concept page aggregate.
       //     createConcept generates its own UUID via defaultRandom(); the
       //     UUID from toConcept is intentionally replaced by the DB-generated
       //     one — the handler tracks the actual persisted UUID.
-      const persisted = await createConcept(db, conceptResult.conceptInput);
+      const persisted = await createConcept(db, {
+        ...conceptResult.conceptInput,
+        embedding: embedding ?? null,
+      });
 
-      // 3f. Record the compiled outcome using the database-generated UUID.
+      // 3g. Record the compiled outcome using the database-generated UUID.
       await recordCompiled(db, teamId, projectId, jobId, event.id, [
         persisted.uuid,
       ]);
