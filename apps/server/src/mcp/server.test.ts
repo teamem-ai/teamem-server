@@ -575,3 +575,123 @@ describe('MCP internal auth errors', () => {
     expect(json.error.message).toBe('Internal error');
   });
 });
+
+// ── Tests: per-tool scope enforcement (AGENTS.md §8) ────────────────────────
+
+describe('MCP tools/call scope enforcement', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects tools/call when key lacks the required scope', async () => {
+    const auth = mockAuthContext({ scopes: ['read'] });
+    mockedResolve.mockResolvedValueOnce(auth);
+
+    const registry = new ToolRegistry();
+    registry.register(
+      {
+        name: 'write_tool',
+        description: 'A write tool',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      async () => ({ content: [{ type: 'text', text: 'ok' }] }),
+      ['events:write'],
+    );
+
+    const app = createTestApp(registry);
+    const token = validToken();
+
+    const res = await app.request('/mcp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(makeRpcRequest('tools/call', {
+        name: 'write_tool',
+        arguments: {},
+      })),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.jsonrpc).toBe('2.0');
+    expect(json.id).toBe(1);
+    // The tool call itself succeeds at the JSON-RPC level, but the
+    // result carries isError:true because the scope check failed.
+    expect(json.result.isError).toBe(true);
+    expect(json.result.content[0].text).toContain('events:write');
+  });
+
+  it('allows tools/call when key has the required scope', async () => {
+    const auth = mockAuthContext({ scopes: ['events:write'] });
+    mockedResolve.mockResolvedValueOnce(auth);
+
+    const registry = new ToolRegistry();
+    registry.register(
+      {
+        name: 'write_tool',
+        description: 'A write tool',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      async () => ({ content: [{ type: 'text', text: 'ok' }] }),
+      ['events:write'],
+    );
+
+    const app = createTestApp(registry);
+    const token = validToken();
+
+    const res = await app.request('/mcp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(makeRpcRequest('tools/call', {
+        name: 'write_tool',
+        arguments: {},
+      })),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.result.isError).toBeUndefined();
+    expect(json.result.content[0].text).toBe('ok');
+  });
+
+  it('tools with no required scopes work with any key', async () => {
+    const auth = mockAuthContext({ scopes: [] });
+    mockedResolve.mockResolvedValueOnce(auth);
+
+    const registry = new ToolRegistry();
+    // No requiredScopes → defaults to []
+    registry.register(
+      {
+        name: 'read_tool',
+        description: 'A read-only tool',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      async () => ({ content: [{ type: 'text', text: 'data' }] }),
+    );
+
+    const app = createTestApp(registry);
+    const token = validToken();
+
+    const res = await app.request('/mcp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(makeRpcRequest('tools/call', {
+        name: 'read_tool',
+        arguments: {},
+      })),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.result.isError).toBeUndefined();
+    expect(json.result.content[0].text).toBe('data');
+  });
+});

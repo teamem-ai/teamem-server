@@ -17,10 +17,10 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppDb } from '../db/client.js';
-import type { AuthContext } from '../db/repositories/api-keys.js';
+import type { CompileQueue } from '../queue/boss.js';
 import { requireAuth, getAuth } from '../http/auth.js';
 import { REQUEST_ID_KEY } from '../http/errors.js';
-import { ToolRegistry } from './registry.js';
+import { ToolRegistry, type ToolExecutionContext, type ToolResult } from './registry.js';
 
 // ── MCP constants ───────────────────────────────────────────────────────────
 
@@ -109,6 +109,20 @@ function jsonRpcError(
   };
 }
 
+/**
+ * Build a tools/call error as a CallToolResult (isError: true) rather than
+ * a JSON-RPC protocol error. Per the MCP spec, errors that occur while
+ * dispatching a specific tool call (unknown tool name, bad call params)
+ * are reported to the client inside the result, not the JSON-RPC envelope,
+ * so a single tools/call failure doesn't look like a transport-level fault.
+ */
+function toolCallErrorResult(message: string): ToolResult {
+  return {
+    content: [{ type: 'text', text: message }],
+    isError: true,
+  };
+}
+
 // ── tools/call params schema ────────────────────────────────────────────────
 
 const toolsCallParamsSchema = z.object({
@@ -153,86 +167,13 @@ function handleToolsList(
   });
 }
 
-/**
- * Handle the `tools/call` request.
- *
- * Looks up the tool handler by name, validates params, derives the
- * ToolContext from the AuthContext, and delegates to the handler.
- *
- * Tool errors (not found, invalid args, etc.) are returned as MCP
- * CallToolResult with `isError: true`, not as JSON-RPC errors.  This
- * lets the LLM see structured error information.
- *
- * Handlers that throw McpToolError subclasses are caught here and
- * mapped to JSON-RPC errors with the appropriate error code
- * (e.g. INVALID_PARAMS for validation failures, INTERNAL_ERROR for
- * genuine infrastructure errors).  Handlers should prefer returning
- * isError content rather than throwing, but this catch provides a
- * safety net and ensures the LLM never sees a bare INTERNAL_ERROR
- * for an invalid-params problem.
- */
-async function handleToolsCall(
-  req: JsonRpcRequest,
-  id: string | number,
-  registry: ToolRegistry,
-  db: AppDb,
-  auth: AuthContext,
-  requestId: string,
-): Promise<JsonRpcSuccess | JsonRpcError> {
-  // Validate params shape
-  const parsed = toolsCallParamsSchema.safeParse(req.params ?? {});
-  if (!parsed.success) {
-    return jsonRpcSuccess(id, {
-      content: [{ type: 'text', text: `Invalid params: ${parsed.error.message}` }],
-      isError: true,
-    });
-  }
-
-  const { name, arguments: args } = parsed.data;
-
-  // Look up handler
-  const handler = registry.getHandler(name);
-  if (!handler) {
-    return jsonRpcSuccess(id, {
-      content: [{ type: 'text', text: `Unknown tool: ${name}` }],
-      isError: true,
-    });
-  }
-
-  // Build tool context and delegate
-  const ctx = { db, auth, requestId };
-  try {
-    const result = await handler(args ?? {}, ctx);
-    return jsonRpcSuccess(id, result);
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Tool execution failed';
-
-    // Determine the JSON-RPC error code from the error type:
-    // - McpToolError subclasses carry their own code (e.g. INVALID_PARAMS)
-    // - All other errors default to INTERNAL_ERROR
-    const code =
-      err instanceof McpToolError ? err.jsonRpcCode : JSONRPC_INTERNAL_ERROR;
-
-    console.error(
-      JSON.stringify({
-        event: 'mcp_tool_error',
-        requestId,
-        tool: name,
-        errorClass: (err as Error).constructor?.name ?? 'unknown',
-        jsonRpcCode: code,
-        message,
-      }),
-    );
-    return jsonRpcError(id, code, message);
-  }
-}
-
 // ── Dependencies ────────────────────────────────────────────────────────────
 
 export interface McpDeps {
   db: AppDb;
   registry: ToolRegistry;
+  /** Optional compile queue — passed through to tool handlers. */
+  queue?: CompileQueue;
 }
 
 // ── Route builder ───────────────────────────────────────────────────────────
@@ -295,7 +236,6 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
     // AuthContext is available via getAuth(c) — scope.teamId / scope
     // (tagged union) are ready for downstream tools to use.
     // The scope derivation from the API key is complete at this point.
-    const auth = getAuth(c);
 
     // At this point req.id is guaranteed non-undefined (notification path
     // returned early above). Narrow for the method handlers.
@@ -307,18 +247,49 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
           return c.json(handleInitialize(req, rpcId), 200);
         case 'tools/list':
           return c.json(handleToolsList(req, rpcId, deps.registry), 200);
-        case 'tools/call':
-          return c.json(
-            await handleToolsCall(
-              req,
-              rpcId,
-              deps.registry,
-              deps.db,
-              auth,
-              requestId,
-            ),
-            200,
-          );
+        case 'tools/call': {
+          // Parse params: { name: string, arguments?: object }
+          const paramsParsed = toolsCallParamsSchema.safeParse(req.params ?? {});
+          if (!paramsParsed.success) {
+            return c.json(
+              jsonRpcSuccess(
+                rpcId,
+                toolCallErrorResult(
+                  'Invalid params: expected { name: string, arguments?: object }',
+                ),
+              ),
+              200,
+            );
+          }
+
+          const toolName = paramsParsed.data.name;
+          const toolArgs = paramsParsed.data.arguments ?? {};
+
+          // Build execution context from auth + deps
+          const auth = getAuth(c);
+          const execCtx: ToolExecutionContext = {
+            db: deps.db,
+            queue: deps.queue,
+            auth,
+            requestId,
+          };
+
+          try {
+            const result = await deps.registry.execute(toolName, toolArgs, execCtx);
+            return c.json(jsonRpcSuccess(rpcId, result), 200);
+          } catch (err) {
+            if (err instanceof Error && err.message.startsWith('Tool not found:')) {
+              return c.json(
+                jsonRpcSuccess(
+                  rpcId,
+                  toolCallErrorResult(`Unknown tool: ${toolName}`),
+                ),
+                200,
+              );
+            }
+            throw err;
+          }
+        }
         default:
           return c.json(
             jsonRpcError(
