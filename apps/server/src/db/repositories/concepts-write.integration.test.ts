@@ -644,5 +644,57 @@ describe.skipIf(!url)('ConceptWriteRepository (live Postgres)', () => {
         .where(eq(schema.conceptPaths.path, path));
       expect(paths).toHaveLength(0);
     });
+
+    it('CLI step 3-bis: DB-level rollback — duplicate path with embedding leaves no orphan data', async () => {
+      // This exercises a real DB-level rollback (inside the transaction),
+      // not the pre-transaction validation guards.  The first write
+      // succeeds; the second fails on the unique path constraint.  The
+      // second attempt's embedding and evidence must not leak into the DB.
+      const path = `svc-emb-dbrollback-${randomUUID()}`;
+      const embedding1 = Array.from({ length: 1536 }, () => 0.1);
+      const embedding2 = Array.from({ length: 1536 }, () => 0.9);
+
+      // First concept with embedding — succeeds.
+      const first = await createConcept(
+        db,
+        validInput({ path, embedding: embedding1 }),
+      );
+      expect(first.uuid).toBeTruthy();
+
+      // Second concept — same path, different embedding — must fail.
+      await expect(
+        createConcept(
+          db,
+          validInput({ path, embedding: embedding2 }),
+        ),
+      ).rejects.toThrow();
+
+      // Only the first concept exists.
+      const allConcepts = await db
+        .select()
+        .from(schema.concepts)
+        .where(eq(schema.concepts.teamId, testTeam));
+      expect(allConcepts).toHaveLength(1);
+      expect(allConcepts[0]!.uuid).toBe(first.uuid);
+
+      // The first concept's embedding is still intact (embedding2 was never persisted).
+      const concept = await db
+        .select({ embedding: schema.concepts.embedding })
+        .from(schema.concepts)
+        .where(eq(schema.concepts.uuid, first.uuid));
+      expect(concept).toHaveLength(1);
+      expect(concept[0]!.embedding).not.toBeNull();
+      expect(concept[0]!.embedding).toHaveLength(1536);
+      // First value should be ~0.1, not ~0.9 (proving embedding2 was rolled back).
+      expect(concept[0]!.embedding![0]!).toBeCloseTo(0.1, 1);
+
+      // Only one path exists.
+      const paths = await db
+        .select()
+        .from(schema.conceptPaths)
+        .where(eq(schema.conceptPaths.path, path));
+      expect(paths).toHaveLength(1);
+      expect(paths[0]!.conceptUuid).toBe(first.uuid);
+    });
   });
 });

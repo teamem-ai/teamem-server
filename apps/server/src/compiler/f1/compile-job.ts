@@ -329,6 +329,16 @@ export async function handleCompileJob(
           const embeddingText = `${conceptResult.conceptInput.title}\n\n${conceptResult.conceptInput.body}`;
           const vectors = await deps.embeddingClient.generate([embeddingText]);
           embedding = vectors[0];
+          // The EmbeddingClient contract guarantees equal-length output,
+          // but a misbehaving provider could return [].  Guard against
+          // silently persisting NULL when embedding generation produced
+          // nothing — that would violate "embedding failure → compilation
+          // failure" (§5.5: never pretend vector search succeeded).
+          if (!embedding || embedding.length === 0) {
+            throw new Error(
+              'Embedding API returned an empty result',
+            );
+          }
         } catch (embeddingErr: unknown) {
           // Embedding generation failure → compilation failure.
           // Re-throw so the outer catch records the per-event failure
