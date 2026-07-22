@@ -17,10 +17,10 @@
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import type { AppDb } from '../db/client.js';
+import type { AuthContext } from '../db/repositories/api-keys.js';
 import { requireAuth, getAuth } from '../http/auth.js';
 import { REQUEST_ID_KEY } from '../http/errors.js';
 import { ToolRegistry } from './registry.js';
-import type { AuthContext } from '../db/repositories/api-keys.js';
 
 // ── MCP constants ───────────────────────────────────────────────────────────
 
@@ -72,12 +72,13 @@ const JSONRPC_INTERNAL_ERROR = -32603;
 // ── McpToolError base class ────────────────────────────────────────────────
 
 /**
- * Base error for MCP tool handlers that carries a JSON-RPC error code.
+ * Base error for MCP tool handlers that carry a JSON-RPC error code.
  *
- * Tool implementations should throw this (or a subclass) to signal the
- * appropriate JSON-RPC error code to the transport layer. The default
- * code is JSONRPC_INTERNAL_ERROR (-32603); validation failures should
- * use JSONRPC_INVALID_PARAMS (-32602).
+ * Tool implementations should prefer returning ToolResult with isError: true
+ * for validation / input errors.  This class exists as a safety net:
+ * exceptions thrown by handlers are caught and mapped via jsonRpcCode.
+ * The default code is JSONRPC_INTERNAL_ERROR (-32603); subclasses may
+ * override with JSONRPC_INVALID_PARAMS (-32602) or other codes.
  */
 export class McpToolError extends Error {
   readonly jsonRpcCode: number;
@@ -108,6 +109,13 @@ function jsonRpcError(
   };
 }
 
+// ── tools/call params schema ────────────────────────────────────────────────
+
+const toolsCallParamsSchema = z.object({
+  name: z.string().min(1),
+  arguments: z.record(z.string(), z.unknown()).optional(),
+});
+
 // ── Method handlers ─────────────────────────────────────────────────────────
 
 /**
@@ -133,9 +141,7 @@ function handleInitialize(
 /**
  * Handle the `tools/list` request.
  *
- * Returns the current tool list from the registry.  In this scaffolding
- * the registry is empty; future tasks will register concrete tools
- * (search, get_page, timeline, memory_write).
+ * Returns the current tool list from the registry.
  */
 function handleToolsList(
   _req: JsonRpcRequest,
@@ -147,56 +153,57 @@ function handleToolsList(
   });
 }
 
-// ── tools/call params schema ────────────────────────────────────────────────
-
-const toolsCallParamsSchema = z.object({
-  name: z.string().min(1),
-  arguments: z.record(z.string(), z.unknown()).optional(),
-});
-
 /**
  * Handle the `tools/call` request.
  *
- * Looks up the tool handler by name, parses the arguments, and executes
- * the handler. Returns MCP-formatted content on success, or a JSON-RPC
- * error on failure.
+ * Looks up the tool handler by name, validates params, derives the
+ * ToolContext from the AuthContext, and delegates to the handler.
+ *
+ * Tool errors (not found, invalid args, etc.) are returned as MCP
+ * CallToolResult with `isError: true`, not as JSON-RPC errors.  This
+ * lets the LLM see structured error information.
+ *
+ * Handlers that throw McpToolError subclasses are caught here and
+ * mapped to JSON-RPC errors with the appropriate error code
+ * (e.g. INVALID_PARAMS for validation failures, INTERNAL_ERROR for
+ * genuine infrastructure errors).  Handlers should prefer returning
+ * isError content rather than throwing, but this catch provides a
+ * safety net and ensures the LLM never sees a bare INTERNAL_ERROR
+ * for an invalid-params problem.
  */
 async function handleToolsCall(
   req: JsonRpcRequest,
   id: string | number,
-  deps: McpDeps,
-  c: Context,
+  registry: ToolRegistry,
+  db: AppDb,
+  auth: AuthContext,
+  requestId: string,
 ): Promise<JsonRpcSuccess | JsonRpcError> {
-  // 1. Parse params
-  const paramsParsed = toolsCallParamsSchema.safeParse(req.params);
-  if (!paramsParsed.success) {
-    return jsonRpcError(id, JSONRPC_INVALID_REQUEST, 'Invalid params: name is required');
-  }
-
-  const { name, arguments: toolArgs } = paramsParsed.data;
-
-  // 2. Look up handler
-  const handler = deps.toolHandlers?.get(name);
-  if (!handler) {
-    return jsonRpcError(id, JSONRPC_METHOD_NOT_FOUND, `Tool not found: ${name}`);
-  }
-
-  // 3. Build context
-  const auth = getAuth(c);
-  const requestId = c.get(REQUEST_ID_KEY) as string;
-
-  // 4. Execute handler
-  try {
-    const result = await handler(toolArgs ?? {}, { db: deps.db, auth, requestId });
-    // Return MCP-formatted content: { content: [{ type: 'text', text: ... }] }
+  // Validate params shape
+  const parsed = toolsCallParamsSchema.safeParse(req.params ?? {});
+  if (!parsed.success) {
     return jsonRpcSuccess(id, {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(result),
-        },
-      ],
+      content: [{ type: 'text', text: `Invalid params: ${parsed.error.message}` }],
+      isError: true,
     });
+  }
+
+  const { name, arguments: args } = parsed.data;
+
+  // Look up handler
+  const handler = registry.getHandler(name);
+  if (!handler) {
+    return jsonRpcSuccess(id, {
+      content: [{ type: 'text', text: `Unknown tool: ${name}` }],
+      isError: true,
+    });
+  }
+
+  // Build tool context and delegate
+  const ctx = { db, auth, requestId };
+  try {
+    const result = await handler(args ?? {}, ctx);
+    return jsonRpcSuccess(id, result);
   } catch (err) {
     const message =
       err instanceof Error ? err.message : 'Tool execution failed';
@@ -221,28 +228,11 @@ async function handleToolsCall(
   }
 }
 
-// ── Tool handler types ──────────────────────────────────────────────────────
-
-/** Context passed to every tool handler. */
-export interface ToolHandlerContext {
-  db: AppDb;
-  auth: AuthContext;
-  requestId: string;
-}
-
-/** A tool handler: receives arguments and context, returns the MCP result. */
-export type ToolHandler = (
-  args: unknown,
-  ctx: ToolHandlerContext,
-) => Promise<unknown>;
-
 // ── Dependencies ────────────────────────────────────────────────────────────
 
 export interface McpDeps {
   db: AppDb;
   registry: ToolRegistry;
-  /** Map of tool name → handler function. */
-  toolHandlers?: Map<string, ToolHandler>;
 }
 
 // ── Route builder ───────────────────────────────────────────────────────────
@@ -305,7 +295,7 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
     // AuthContext is available via getAuth(c) — scope.teamId / scope
     // (tagged union) are ready for downstream tools to use.
     // The scope derivation from the API key is complete at this point.
-    void getAuth(c);
+    const auth = getAuth(c);
 
     // At this point req.id is guaranteed non-undefined (notification path
     // returned early above). Narrow for the method handlers.
@@ -319,7 +309,14 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
           return c.json(handleToolsList(req, rpcId, deps.registry), 200);
         case 'tools/call':
           return c.json(
-            await handleToolsCall(req, rpcId, deps, c),
+            await handleToolsCall(
+              req,
+              rpcId,
+              deps.registry,
+              deps.db,
+              auth,
+              requestId,
+            ),
             200,
           );
         default:
@@ -335,16 +332,21 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
     } catch (err) {
       // Internal errors during method dispatch — log safely and return
       // a generic JSON-RPC internal error.
+      const code =
+        err instanceof McpToolError
+          ? err.jsonRpcCode
+          : JSONRPC_INTERNAL_ERROR;
       console.error(
         JSON.stringify({
           event: 'mcp_method_error',
           requestId,
           method: req.method,
           errorClass: (err as Error).constructor?.name ?? 'unknown',
+          jsonRpcCode: code,
         }),
       );
       return c.json(
-        jsonRpcError(req.id, JSONRPC_INTERNAL_ERROR, 'Internal error'),
+        jsonRpcError(req.id, code, 'Internal error'),
         200,
       );
     }

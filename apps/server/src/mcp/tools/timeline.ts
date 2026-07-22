@@ -27,7 +27,6 @@ import {
 import { actor as actorSchema } from '@teamem/schema';
 import * as schema from '../../db/schema.js';
 import type { AppDb } from '../../db/client.js';
-import type { AuthContext } from '../../db/repositories/api-keys.js';
 import {
   getTeamId,
   getProjectId,
@@ -36,16 +35,37 @@ import {
 } from '../../auth/scope.js';
 import { writeAuditRecord } from '../../db/repositories/audit.js';
 import { McpToolError, JSONRPC_INVALID_PARAMS } from '../server.js';
+import type { McpTool, ToolHandler, ToolResult } from '../registry.js';
 import { isoDateTime } from '@teamem/schema';
 
 // ── Tool definition ─────────────────────────────────────────────────────────
 
 export const TIMELINE_TOOL_NAME = 'timeline';
 
-export const TIMELINE_TOOL_DESCRIPTION =
+const TIMELINE_TOOL_DESCRIPTION =
   'Return project events in a compact timeline ordered by occurred_at (source-event time). ' +
   'Use this to answer "what happened recently" questions. Returns id, occurredAt, kind, ' +
   'externalId, title, actor, and url for each entry. Supports cursor-based pagination.';
+
+export const timelineTool: McpTool = {
+  name: TIMELINE_TOOL_NAME,
+  description: TIMELINE_TOOL_DESCRIPTION,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      projectId: { type: 'string', description: 'The project ID to query' },
+      cursor: {
+        type: 'string',
+        description: 'Opaque cursor for pagination; omit for the first page',
+      },
+      limit: {
+        type: 'number',
+        description: 'Maximum entries per page (default 20, max 100)',
+      },
+    },
+    required: ['projectId'],
+  },
+};
 
 export const timelineInputSchema = z.object({
   projectId: projectIdSchema.describe('The project ID to query (required)'),
@@ -235,12 +255,6 @@ async function queryTimeline(
 
 // ── Tool handler ────────────────────────────────────────────────────────────
 
-export interface TimelineToolContext {
-  db: AppDb;
-  auth: AuthContext;
-  requestId: string;
-}
-
 /**
  * Execute the timeline tool.
  *
@@ -249,19 +263,29 @@ export interface TimelineToolContext {
  * 3. Queries events ordered by occurred_at DESC
  * 4. Returns compact timeline entries with cursor pagination
  * 5. Writes an audit record
+ *
+ * Errors are returned as ToolResult with isError: true, consistent with
+ * the MCP pattern — validation and cursor errors are surfaced to the LLM
+ * as structured text, not JSON-RPC errors.
  */
-export async function timelineHandler(
-  rawInput: unknown,
-  ctx: TimelineToolContext,
-): Promise<TimelineResponse> {
+export const timelineHandler: ToolHandler = async (
+  args,
+  ctx,
+): Promise<ToolResult> => {
   const { db, auth, requestId } = ctx;
 
   // 1. Validate input
-  const parsed = timelineInputSchema.safeParse(rawInput);
+  const parsed = timelineInputSchema.safeParse(args);
   if (!parsed.success) {
-    throw new TimelineValidationError(
-      parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
-    );
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Invalid arguments: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+        },
+      ],
+      isError: true,
+    };
   }
 
   const { projectId, cursor, limit } = parsed.data;
@@ -271,7 +295,11 @@ export async function timelineHandler(
     const scopeProjectId = getProjectId(auth.scope);
     if (projectId !== scopeProjectId) {
       // Return empty — don't leak project existence
-      return { data: [], nextCursor: null };
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify({ data: [], nextCursor: null }) },
+        ],
+      };
     }
   }
 
@@ -281,8 +309,13 @@ export async function timelineHandler(
     result = await queryTimeline(db, auth.scope, projectId, cursor, limit);
   } catch (err) {
     if (err instanceof Error && err.message === 'cursor_invalid') {
-      throw new TimelineCursorInvalidError();
+      return {
+        content: [{ type: 'text', text: 'cursor_invalid' }],
+        isError: true,
+      };
     }
+    // Genuine internal error — still throw so the transport layer can
+    // map it to JSONRPC_INTERNAL_ERROR and log the full cause.
     throw new TimelineInternalError('timeline query failed', {
       cause: err,
     });
@@ -324,8 +357,15 @@ export async function timelineHandler(
     );
   }
 
-  return { data, nextCursor: result.nextCursor };
-}
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({ data, nextCursor: result.nextCursor }),
+      },
+    ],
+  };
+};
 
 // ── Error types ─────────────────────────────────────────────────────────────
 

@@ -354,8 +354,9 @@ describe.skipIf(!url)('MCP timeline tool (live Postgres)', () => {
 
       expect(res.status).toBe(200);
       const json = await res.json();
-      expect(json.error).toBeDefined();
-      expect(json.error.message).toBe('cursor_invalid');
+      // Cursor errors are returned as CallToolResult with isError: true
+      expect(json.result.content[0].text).toBe('cursor_invalid');
+      expect(json.result.isError).toBe(true);
     });
   });
 
@@ -500,8 +501,9 @@ describe.skipIf(!url)('MCP timeline tool (live Postgres)', () => {
 
       expect(res.status).toBe(200);
       const json = await res.json();
-      expect(json.error).toBeDefined();
-      expect(json.error.message).toContain('Too big');
+      // Validation errors are returned as CallToolResult with isError: true
+      expect(json.result.content[0].text).toContain('Too big');
+      expect(json.result.isError).toBe(true);
     });
 
     it('returns tool not found for unknown tool', async () => {
@@ -518,8 +520,9 @@ describe.skipIf(!url)('MCP timeline tool (live Postgres)', () => {
 
       expect(res.status).toBe(200);
       const json = await res.json();
-      expect(json.error).toBeDefined();
-      expect(json.error.message).toBe('Tool not found: nonexistent_tool');
+      // Unknown tool returned as CallToolResult with isError: true
+      expect(json.result.content[0].text).toContain('Unknown tool: nonexistent_tool');
+      expect(json.result.isError).toBe(true);
     });
 
     it('returns invalid request when name is missing', async () => {
@@ -536,8 +539,9 @@ describe.skipIf(!url)('MCP timeline tool (live Postgres)', () => {
 
       expect(res.status).toBe(200);
       const json = await res.json();
-      expect(json.error).toBeDefined();
-      expect(json.error.code).toBe(-32600);
+      // Missing name param returned as CallToolResult with isError: true
+      expect(json.result.content[0].text).toContain('Invalid params');
+      expect(json.result.isError).toBe(true);
     });
   });
 

@@ -318,11 +318,14 @@ describe('MCP tools/list', () => {
     mockedResolve.mockResolvedValueOnce(mockAuthContext());
 
     const registry = new ToolRegistry();
-    registry.register({
-      name: 'test_tool',
-      description: 'A test tool',
-      inputSchema: { type: 'object', properties: {} },
-    });
+    registry.register(
+      {
+        name: 'test_tool',
+        description: 'A test tool',
+        inputSchema: { type: 'object', properties: {} },
+      },
+      async () => ({ content: [{ type: 'text', text: 'ok' }] }),
+    );
 
     const app = createTestApp(registry);
     const token = validToken();
