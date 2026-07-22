@@ -34,6 +34,7 @@ import {
 import { buildMcpRoutes } from './mcp/server.js';
 import { ToolRegistry } from './mcp/registry.js';
 import { getPageTool, getPageHandler } from './mcp/tools/get_page.js';
+import { timelineTool, timelineHandler } from './mcp/tools/timeline.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -126,6 +127,7 @@ export function buildApp(deps: AppDeps = {}) {
     // Uses the same Bearer-token auth as the REST API.
     const mcpRegistry = new ToolRegistry();
     mcpRegistry.register(getPageTool, getPageHandler);
+    mcpRegistry.register(timelineTool, timelineHandler);
     app.route(
       '/',
       buildMcpRoutes({ db: deps.db, registry: mcpRegistry }),

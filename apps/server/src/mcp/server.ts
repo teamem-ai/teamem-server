@@ -65,7 +65,30 @@ interface JsonRpcError {
 const JSONRPC_PARSE_ERROR = -32700;
 const JSONRPC_INVALID_REQUEST = -32600;
 const JSONRPC_METHOD_NOT_FOUND = -32601;
+/** Invalid method parameter(s). Use for validation errors, bad cursors, etc. */
+export const JSONRPC_INVALID_PARAMS = -32602;
 const JSONRPC_INTERNAL_ERROR = -32603;
+
+// ── McpToolError base class ────────────────────────────────────────────────
+
+/**
+ * Base error for MCP tool handlers that carry a JSON-RPC error code.
+ *
+ * Tool implementations should prefer returning ToolResult with isError: true
+ * for validation / input errors.  This class exists as a safety net:
+ * exceptions thrown by handlers are caught and mapped via jsonRpcCode.
+ * The default code is JSONRPC_INTERNAL_ERROR (-32603); subclasses may
+ * override with JSONRPC_INVALID_PARAMS (-32602) or other codes.
+ */
+export class McpToolError extends Error {
+  readonly jsonRpcCode: number;
+
+  constructor(message: string, jsonRpcCode: number = JSONRPC_INTERNAL_ERROR) {
+    super(message);
+    this.name = 'McpToolError';
+    this.jsonRpcCode = jsonRpcCode;
+  }
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -139,6 +162,14 @@ function handleToolsList(
  * Tool errors (not found, invalid args, etc.) are returned as MCP
  * CallToolResult with `isError: true`, not as JSON-RPC errors.  This
  * lets the LLM see structured error information.
+ *
+ * Handlers that throw McpToolError subclasses are caught here and
+ * mapped to JSON-RPC errors with the appropriate error code
+ * (e.g. INVALID_PARAMS for validation failures, INTERNAL_ERROR for
+ * genuine infrastructure errors).  Handlers should prefer returning
+ * isError content rather than throwing, but this catch provides a
+ * safety net and ensures the LLM never sees a bare INTERNAL_ERROR
+ * for an invalid-params problem.
  */
 async function handleToolsCall(
   req: JsonRpcRequest,
@@ -147,7 +178,7 @@ async function handleToolsCall(
   db: AppDb,
   auth: AuthContext,
   requestId: string,
-): Promise<JsonRpcSuccess> {
+): Promise<JsonRpcSuccess | JsonRpcError> {
   // Validate params shape
   const parsed = toolsCallParamsSchema.safeParse(req.params ?? {});
   if (!parsed.success) {
@@ -170,9 +201,31 @@ async function handleToolsCall(
 
   // Build tool context and delegate
   const ctx = { db, auth, requestId };
-  const result = await handler(args ?? {}, ctx);
+  try {
+    const result = await handler(args ?? {}, ctx);
+    return jsonRpcSuccess(id, result);
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'Tool execution failed';
 
-  return jsonRpcSuccess(id, result);
+    // Determine the JSON-RPC error code from the error type:
+    // - McpToolError subclasses carry their own code (e.g. INVALID_PARAMS)
+    // - All other errors default to INTERNAL_ERROR
+    const code =
+      err instanceof McpToolError ? err.jsonRpcCode : JSONRPC_INTERNAL_ERROR;
+
+    console.error(
+      JSON.stringify({
+        event: 'mcp_tool_error',
+        requestId,
+        tool: name,
+        errorClass: (err as Error).constructor?.name ?? 'unknown',
+        jsonRpcCode: code,
+        message,
+      }),
+    );
+    return jsonRpcError(id, code, message);
+  }
 }
 
 // ── Dependencies ────────────────────────────────────────────────────────────
@@ -279,16 +332,21 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
     } catch (err) {
       // Internal errors during method dispatch — log safely and return
       // a generic JSON-RPC internal error.
+      const code =
+        err instanceof McpToolError
+          ? err.jsonRpcCode
+          : JSONRPC_INTERNAL_ERROR;
       console.error(
         JSON.stringify({
           event: 'mcp_method_error',
           requestId,
           method: req.method,
           errorClass: (err as Error).constructor?.name ?? 'unknown',
+          jsonRpcCode: code,
         }),
       );
       return c.json(
-        jsonRpcError(req.id, JSONRPC_INTERNAL_ERROR, 'Internal error'),
+        jsonRpcError(req.id, code, 'Internal error'),
         200,
       );
     }
