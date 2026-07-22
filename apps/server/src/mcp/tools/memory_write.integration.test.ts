@@ -128,6 +128,7 @@ describe.skipIf(!url)('memory_write tool (live Postgres)', () => {
     return {
       db,
       auth: auth ?? mockAuthContext(),
+      requestId: 'test-int-req-id',
     };
   }
 

@@ -72,6 +72,7 @@ function createExecCtx(auth?: AuthContext): ToolExecutionContext {
   return {
     db: mockDb,
     auth: auth ?? mockAuthContext(),
+    requestId: 'test-req-id',
   };
 }
 

@@ -69,7 +69,7 @@ const CONNECTOR_KIND = 'mcp' as const;
 // ── Handler ─────────────────────────────────────────────────────────────────
 
 async function handleMemoryWrite(
-  rawArgs: Record<string, unknown>,
+  rawArgs: unknown,
   ctx: ToolExecutionContext,
 ): Promise<ToolResult> {
   const { db, queue, auth } = ctx;

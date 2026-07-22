@@ -551,7 +551,9 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
       const jobEvents = await getJobEvents(db, teamId, projectId, job.id);
       expect(jobEvents).toHaveLength(1);
       expect(jobEvents[0]!.status).toBe('skipped');
-      expect(jobEvents[0]!.reason).toBe('no_knowledge');
+      // The LLM's specific skip reason is now preserved (not replaced with
+      // a generic enum). The fixture's reason is the canned skip output.
+      expect(jobEvents[0]!.reason).toBe('Event contains no extractable team knowledge');
 
       // No concept pages created.
       const concepts = await db

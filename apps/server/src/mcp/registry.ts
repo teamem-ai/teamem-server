@@ -1,5 +1,5 @@
 /**
- * MCP Tool Registry (DUA-206 M1-MCP-01, extended DUA-210).
+ * MCP Tool Registry (DUA-206 M1-MCP-01, extended DUA-208, DUA-210).
  *
  * Maintains the list of registered MCP tools and their handlers.
  * The MCP transport layer reads tool definitions via `listTools()` for
@@ -30,13 +30,16 @@ export type McpTool = z.infer<typeof mcpToolSchema>;
 
 /**
  * Context passed to every tool handler at call time. Carries the
- * authenticated scope, database handle, and optional compile queue
- * so tools can persist events through the standard ingestion pipeline.
+ * authenticated scope, database handle, optional compile queue, and
+ * request ID (for audit records) so tools can operate through the
+ * standard ingestion pipeline.
  */
 export interface ToolExecutionContext {
   db: AppDb;
   queue?: CompileQueue;
   auth: AuthContext;
+  /** Request ID for correlation in logs and audit records. */
+  requestId: string;
 }
 
 /**
@@ -55,7 +58,7 @@ export interface ToolResult {
  * and returns a structured result for the MCP client.
  */
 export type ToolHandler = (
-  args: Record<string, unknown>,
+  args: unknown,
   ctx: ToolExecutionContext,
 ) => Promise<ToolResult>;
 
@@ -113,7 +116,7 @@ export class ToolRegistry {
    */
   async execute(
     name: string,
-    args: Record<string, unknown>,
+    args: unknown,
     ctx: ToolExecutionContext,
   ): Promise<ToolResult> {
     const registered = this.tools.get(name);

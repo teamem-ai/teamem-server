@@ -34,6 +34,7 @@ import {
 import { buildMcpRoutes } from './mcp/server.js';
 import { ToolRegistry } from './mcp/registry.js';
 import { registerMemoryWriteTool } from './mcp/tools/memory_write.js';
+import { getPageTool, getPageHandler } from './mcp/tools/get_page.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -125,10 +126,9 @@ export function buildApp(deps: AppDeps = {}) {
     // MCP streamable HTTP endpoint (M1-MCP-01 scaffold, extended DUA-210).
     // Uses the same Bearer-token auth as the REST API.
     const mcpRegistry = new ToolRegistry();
-
     // Register MCP tools — each tool wires its handler into the registry.
     registerMemoryWriteTool(mcpRegistry);
-
+    mcpRegistry.register(getPageTool, getPageHandler, ['read']);
     app.route(
       '/',
       buildMcpRoutes({ db: deps.db, registry: mcpRegistry, queue: deps.queue }),

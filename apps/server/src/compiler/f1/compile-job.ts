@@ -32,6 +32,7 @@ import type { AppDb } from '../../db/client.js';
 import type { LlmClient, LlmError } from '../../llm/types.js';
 import { f1Output } from './output.js';
 import { buildF1Prompt } from './prompt.js';
+import { prefilterNoise } from './skip-filter.js';
 import { toConcept } from './to-concept.js';
 import { getEventsByIds } from '../../db/repositories/events.js';
 import { createConcept } from '../../db/repositories/concepts-write.js';
@@ -95,8 +96,12 @@ async function recordCompiled(
 }
 
 /**
- * Record a skipped event outcome: the LLM returned `skip` or the mapper
- * could not construct evidence.
+ * Record a skipped event outcome: the LLM returned `skip`, the prefilter
+ * caught noise, or the mapper could not construct evidence.
+ *
+ * The `reason` string is stored as-is in the job_event row. Callers
+ * should pass the specific human-readable reason from the LLM or prefilter
+ * rather than a generic enum value (N8: reason is an open text registry).
  */
 async function recordSkipped(
   db: AppDb,
@@ -104,7 +109,7 @@ async function recordSkipped(
   projectId: string,
   jobId: string,
   eventId: string,
-  reason: 'no_knowledge' | 'already_compiled',
+  reason: string,
 ): Promise<void> {
   await upsertJobEvent(db, {
     teamId,
@@ -223,7 +228,30 @@ export async function handleCompileJob(
 
   for (const event of events) {
     try {
-      // 3a. Build the F1 prompt from the event's source facts + redacted payload.
+      // 3a. Run deterministic noise checks before calling the LLM.
+      //     Obvious noise (meaningless commits, dependabot bumps, etc.)
+      //     is skipped immediately without consuming LLM tokens.
+      const prefilterResult = prefilterNoise(
+        event.channel,
+        event.kind,
+        event.payload as Record<string, unknown>,
+      );
+
+      if (prefilterResult) {
+        // Deterministic skip — record with the specific reason.
+        await recordSkipped(
+          db,
+          teamId,
+          projectId,
+          jobId,
+          event.id,
+          prefilterResult.reason,
+        );
+        skippedCount++;
+        continue;
+      }
+
+      // 3b. Build the F1 prompt from the event's source facts + redacted payload.
       const { system, user } = buildF1Prompt({
         channel: event.channel,
         kind: event.kind,
@@ -231,7 +259,7 @@ export async function handleCompileJob(
         payload: event.payload as Record<string, unknown>,
       });
 
-      // 3b. Call the LLM with provider-native structured output.
+      // 3c. Call the LLM with provider-native structured output.
       const response = await llm.structured({
         schema: f1Output,
         systemPrompt: system,
@@ -239,15 +267,16 @@ export async function handleCompileJob(
         requestId: `${jobId}:${event.id}`,
       });
 
-      // 3c. Check the LLM's decision: extract or skip.
+      // 3d. Check the LLM's decision: extract or skip.
       if (response.output.action === 'skip') {
+        // Pass the LLM's specific reason through to storage.
         await recordSkipped(
           db,
           teamId,
           projectId,
           jobId,
           event.id,
-          'no_knowledge',
+          response.output.reason,
         );
         skippedCount++;
         continue;

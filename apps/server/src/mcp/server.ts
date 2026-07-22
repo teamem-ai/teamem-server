@@ -86,6 +86,13 @@ function jsonRpcError(
   };
 }
 
+// ── tools/call params schema ────────────────────────────────────────────────
+
+const toolsCallParamsSchema = z.object({
+  name: z.string().min(1),
+  arguments: z.record(z.string(), z.unknown()).optional(),
+});
+
 // ── Method handlers ─────────────────────────────────────────────────────────
 
 /**
@@ -111,9 +118,7 @@ function handleInitialize(
 /**
  * Handle the `tools/list` request.
  *
- * Returns the current tool list from the registry.  In this scaffolding
- * the registry is empty; future tasks will register concrete tools
- * (search, get_page, timeline, memory_write).
+ * Returns the current tool list from the registry.
  */
 function handleToolsList(
   _req: JsonRpcRequest,
@@ -124,13 +129,6 @@ function handleToolsList(
     tools: registry.listTools(),
   });
 }
-
-// ── tools/call params schema ────────────────────────────────────────────────
-
-const toolsCallParamsSchema = z.object({
-  name: z.string().min(1),
-  arguments: z.record(z.string(), z.unknown()).optional(),
-});
 
 // ── Dependencies ────────────────────────────────────────────────────────────
 
@@ -201,7 +199,7 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
     // AuthContext is available via getAuth(c) — scope.teamId / scope
     // (tagged union) are ready for downstream tools to use.
     // The scope derivation from the API key is complete at this point.
-    void getAuth(c);
+    const auth = getAuth(c);
 
     // At this point req.id is guaranteed non-undefined (notification path
     // returned early above). Narrow for the method handlers.
@@ -236,6 +234,7 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
             db: deps.db,
             queue: deps.queue,
             auth,
+            requestId,
           };
 
           try {
