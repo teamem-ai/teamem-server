@@ -20,7 +20,7 @@ import type { AppDb } from '../db/client.js';
 import type { CompileQueue } from '../queue/boss.js';
 import { requireAuth, getAuth } from '../http/auth.js';
 import { REQUEST_ID_KEY } from '../http/errors.js';
-import { ToolRegistry, type ToolExecutionContext } from './registry.js';
+import { ToolRegistry, type ToolExecutionContext, type ToolResult } from './registry.js';
 
 // ── MCP constants ───────────────────────────────────────────────────────────
 
@@ -106,6 +106,20 @@ function jsonRpcError(
     jsonrpc: '2.0' as const,
     id,
     error: { code, message, ...(data !== undefined ? { data } : {}) },
+  };
+}
+
+/**
+ * Build a tools/call error as a CallToolResult (isError: true) rather than
+ * a JSON-RPC protocol error. Per the MCP spec, errors that occur while
+ * dispatching a specific tool call (unknown tool name, bad call params)
+ * are reported to the client inside the result, not the JSON-RPC envelope,
+ * so a single tools/call failure doesn't look like a transport-level fault.
+ */
+function toolCallErrorResult(message: string): ToolResult {
+  return {
+    content: [{ type: 'text', text: message }],
+    isError: true,
   };
 }
 
@@ -238,10 +252,11 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
           const paramsParsed = toolsCallParamsSchema.safeParse(req.params ?? {});
           if (!paramsParsed.success) {
             return c.json(
-              jsonRpcError(
+              jsonRpcSuccess(
                 rpcId,
-                JSONRPC_INVALID_REQUEST,
-                'Invalid params: expected { name: string, arguments?: object }',
+                toolCallErrorResult(
+                  'Invalid params: expected { name: string, arguments?: object }',
+                ),
               ),
               200,
             );
@@ -265,10 +280,9 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
           } catch (err) {
             if (err instanceof Error && err.message.startsWith('Tool not found:')) {
               return c.json(
-                jsonRpcError(
+                jsonRpcSuccess(
                   rpcId,
-                  JSONRPC_METHOD_NOT_FOUND,
-                  `Tool not found: ${toolName}`,
+                  toolCallErrorResult(`Unknown tool: ${toolName}`),
                 ),
                 200,
               );
