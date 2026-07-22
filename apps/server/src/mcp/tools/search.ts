@@ -170,6 +170,19 @@ export const searchHandler: ToolHandler = async (
     const scopeProjectId = getProjectId(auth.scope);
     if (projectId !== scopeProjectId) {
       // Anti-enumeration: identical empty response as a project with no matching concepts.
+      // Write denied audit record (best-effort — do not block the response).
+      await writeAuditRecord(db, {
+        requestId,
+        principalId: auth.principal?.id ?? null,
+        credentialId: auth.credentialId,
+        action: 'mcp.search',
+        resourceType: 'concept',
+        resourceId: null,
+        teamId,
+        projectId,
+        outcome: 'denied',
+      }).catch(() => {});
+
       return {
         content: [
           {

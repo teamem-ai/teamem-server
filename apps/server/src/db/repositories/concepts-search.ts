@@ -14,15 +14,6 @@
  * empty results — never a distinguishable error (anti-enumeration).
  */
 import { and, eq, or, desc, sql } from 'drizzle-orm';
-import { z } from 'zod';
-import {
-  conceptType as conceptTypeSchema,
-  conceptStatus as conceptStatusSchema,
-  conceptPath as conceptPathSchema,
-  confidence as confidenceSchema,
-  conceptUuid,
-  isoDateTime,
-} from '@teamem/schema';
 import * as schema from '../schema.js';
 import type { AppDb } from '../client.js';
 
@@ -37,10 +28,10 @@ export interface SearchResultRow {
   readonly title: string;
   readonly tags: string[];
   readonly lastConfirmed: Date;
-  readonly /** Relevance score [0, 1] — higher is more relevant. */
-  relevance: number;
-  readonly /** True when this result was produced by FTS rather than semantic vector search. */
-  ftsFallback: boolean;
+  /** Relevance score [0, 1] — higher is more relevant. */
+  readonly relevance: number;
+  /** True when this result was produced by FTS rather than semantic vector search. */
+  readonly ftsFallback: boolean;
   /** First ~200 chars of body for the index-row summary (progressive disclosure L1). */
   readonly bodySnippet: string;
 }
@@ -62,8 +53,8 @@ export interface SearchConceptsParams {
 
 export interface SearchConceptsResult {
   readonly rows: SearchResultRow[];
-  readonly /** True when semantic search was unavailable and the entire query fell back to FTS. */
-  degraded: boolean;
+  /** True when semantic search was unavailable and the entire query fell back to FTS. */
+  readonly degraded: boolean;
   readonly hasMore: boolean;
 }
 
@@ -92,7 +83,7 @@ function sanitizeQuery(raw: string): string {
  */
 function extractBodySnippet(body: string): string {
   // Strip markdown formatting: headers, bold, italic, links, code
-  let cleaned = body
+  const cleaned = body
     .replace(/^#{1,6}\s+/gm, '')          // ATX headers
     .replace(/\*\*([^*]+)\*\*/g, '$1')    // bold
     .replace(/__([^_]+)__/g, '$1')        // bold (underscore)

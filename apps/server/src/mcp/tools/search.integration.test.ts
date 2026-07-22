@@ -419,6 +419,23 @@ describe.skipIf(!url)('MCP search tool (live Postgres)', () => {
       // Must return empty — indistinguishable from a project with no matching concepts
       expect(body.results).toEqual([]);
       expect(body.nextCursor).toBeNull();
+
+      // Audit: denied record must exist for the cross-project attempt
+      const auditRows = await db
+        .select()
+        .from(auditSchema.auditLog)
+        .where(
+          and(
+            eq(auditSchema.auditLog.action, 'mcp.search'),
+            eq(auditSchema.auditLog.outcome, 'denied'),
+            eq(auditSchema.auditLog.projectId, otherProjectId),
+          ),
+        )
+        .orderBy(desc(auditSchema.auditLog.createdAt))
+        .limit(1);
+
+      expect(auditRows).toHaveLength(1);
+      expect(auditRows[0]!.teamId).toBe(teamId);
     });
 
     it('returns empty results when searching our project with other-team key', async () => {
@@ -432,6 +449,23 @@ describe.skipIf(!url)('MCP search tool (live Postgres)', () => {
 
       // Must return empty — should not leak that "authentication" exists in our project
       expect(body.results).toEqual([]);
+
+      // Audit: denied record must exist for the cross-project attempt
+      const auditRows = await db
+        .select()
+        .from(auditSchema.auditLog)
+        .where(
+          and(
+            eq(auditSchema.auditLog.action, 'mcp.search'),
+            eq(auditSchema.auditLog.outcome, 'denied'),
+            eq(auditSchema.auditLog.projectId, projectId),
+            eq(auditSchema.auditLog.teamId, otherTeamId),
+          ),
+        )
+        .orderBy(desc(auditSchema.auditLog.createdAt))
+        .limit(1);
+
+      expect(auditRows).toHaveLength(1);
     });
 
     it('does not return cross-team concepts in a valid search', async () => {
@@ -526,20 +560,12 @@ describe.skipIf(!url)('MCP search tool (live Postgres)', () => {
 
   describe('search audit', () => {
     it('writes an audit record on successful search', async () => {
-      // Count audit records before
-      const before = await db.$count(auditSchema.auditLog);
-
       await makeToolsCall(apiKeyToken, 'search', {
         projectId,
-        query: 'audit test query',
+        query: 'audit success test query',
       });
 
-      // Count after
-      const after = await db.$count(auditSchema.auditLog);
-
-      expect(after).toBeGreaterThan(before);
-
-      // Verify the latest audit record
+      // Verify an audit record exists for this successful search
       const rows = await db
         .select()
         .from(auditSchema.auditLog)
@@ -548,6 +574,7 @@ describe.skipIf(!url)('MCP search tool (live Postgres)', () => {
             eq(auditSchema.auditLog.action, 'mcp.search'),
             eq(auditSchema.auditLog.outcome, 'success'),
             eq(auditSchema.auditLog.teamId, teamId),
+            eq(auditSchema.auditLog.projectId, projectId),
           ),
         )
         .orderBy(desc(auditSchema.auditLog.createdAt))
@@ -555,7 +582,6 @@ describe.skipIf(!url)('MCP search tool (live Postgres)', () => {
 
       expect(rows).toHaveLength(1);
       expect(rows[0]!.resourceType).toBe('concept');
-      expect(rows[0]!.projectId).toBe(projectId);
       // credentialId must be a key_... ID, never a token
       expect(rows[0]!.credentialId).toMatch(/^key_/);
     });
