@@ -120,8 +120,13 @@ export interface SignalReport {
   };
   details: EventDetail[];
   invariants: {
-    schemaFailuresAreFailures: boolean;
-    noFabricatedExtracts: boolean;
+    /** Schema failures have error info in details and no fabricated output. */
+    schemaFailuresNotDowngraded: boolean;
+    /** Extract details carry valid outputSummary with required fields. */
+    extractsHaveValidOutput: boolean;
+    /** Per-kind counts in details match the summary totals. */
+    detailCountsMatchSummary: boolean;
+    /** Every input fixture produced exactly one outcome. */
     allEventsProcessed: boolean;
   };
 }
@@ -748,16 +753,42 @@ export function buildReport(
     },
     details,
     invariants: {
-      schemaFailuresAreFailures:
-        schemaFailures.every((f) => f.kind === 'schema_failure'),
-      noFabricatedExtracts: outcomes.every(
-        (o) =>
-          o.kind === 'extract' ||
-          o.kind === 'prefilter_skip' ||
-          o.kind === 'llm_skip' ||
-          o.kind === 'schema_failure' ||
-          o.kind === 'provider_failure',
-      ),
+      // Schema failures must carry error info in details, never output data.
+      schemaFailuresNotDowngraded: details
+        .filter((d) => d.outcome === 'schema_failure')
+        .every(
+          (d) =>
+            d.errorCode !== null &&
+            d.errorMessage !== null &&
+            d.outputSummary === null,
+        ),
+      // Extract details must carry valid outputSummary with required fields.
+      extractsHaveValidOutput: details
+        .filter((d) => d.outcome === 'extract')
+        .every((d) => {
+          const s = d.outputSummary as Record<string, unknown> | null;
+          return (
+            s !== null &&
+            s['action'] === 'extract' &&
+            typeof s['type'] === 'string' &&
+            typeof s['title'] === 'string' &&
+            typeof s['path'] === 'string' &&
+            typeof s['confidence'] === 'string'
+          );
+        }),
+      // Per-kind counts in details must match the summary totals.
+      detailCountsMatchSummary:
+        details.filter((d) => d.outcome === 'extract').length ===
+          totalExtract &&
+        details.filter((d) => d.outcome === 'prefilter_skip').length ===
+          prefilterSkips.length &&
+        details.filter((d) => d.outcome === 'llm_skip').length ===
+          llmSkips.length &&
+        details.filter((d) => d.outcome === 'schema_failure').length ===
+          schemaFailures.length &&
+        details.filter((d) => d.outcome === 'provider_failure').length ===
+          providerFailures.length,
+      // Every input fixture produced exactly one outcome.
       allEventsProcessed: outcomes.length === fixtures.length,
     },
   };

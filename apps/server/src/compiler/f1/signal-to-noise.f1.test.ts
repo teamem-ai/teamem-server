@@ -227,8 +227,9 @@ describe('M1-F1-04 report building', () => {
     expect(report.latencyMs.avg).toBeGreaterThan(0);
 
     // Invariants.
-    expect(report.invariants.schemaFailuresAreFailures).toBe(true);
-    expect(report.invariants.noFabricatedExtracts).toBe(true);
+    expect(report.invariants.schemaFailuresNotDowngraded).toBe(true);
+    expect(report.invariants.extractsHaveValidOutput).toBe(true);
+    expect(report.invariants.detailCountsMatchSummary).toBe(true);
     expect(report.invariants.allEventsProcessed).toBe(true);
 
     // Details.
@@ -357,8 +358,9 @@ describe('M1-F1-04: F1 signal-to-noise metric', () => {
       }
 
       // ── Assert invariants ──────────────────────────────────────────
-      expect(report.invariants.schemaFailuresAreFailures).toBe(true);
-      expect(report.invariants.noFabricatedExtracts).toBe(true);
+      expect(report.invariants.schemaFailuresNotDowngraded).toBe(true);
+      expect(report.invariants.extractsHaveValidOutput).toBe(true);
+      expect(report.invariants.detailCountsMatchSummary).toBe(true);
       expect(report.invariants.allEventsProcessed).toBe(true);
 
       // ── Schema failures are NEVER counted as extracts or skips ─────
