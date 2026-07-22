@@ -144,8 +144,13 @@ async function handleMemoryWrite(
   const deliveryId = randomUUID();
 
   // ── Step 7: Build externalId — human-meaningful reference ─────────────
-  const externalId = input.title
-    ? `mcp:${input.title.slice(0, 100)}`
+  // SECURITY: Use the REDACTED title so that <private> tags in the title
+  // are stripped from externalId too (AGENTS.md §5.3).
+  const redactedTitle = typeof redactedPayload.title === 'string' && redactedPayload.title.length > 0
+    ? redactedPayload.title
+    : undefined;
+  const externalId = redactedTitle
+    ? `mcp:${redactedTitle.slice(0, 100)}`
     : `mcp:memory_write:${Date.now()}`;
 
   // ── Step 8: Idempotent event insert ───────────────────────────────────

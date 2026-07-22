@@ -313,6 +313,10 @@ describe('memory_write tool — private-tag redaction', () => {
     const payload = insertCall.payload as Record<string, unknown>;
     expect(payload.title).toBe('Public  End');
     expect(JSON.stringify(payload)).not.toContain('secret title');
+
+    // externalId must also be redacted — must not leak <private> content (AGENTS.md §5.3)
+    expect(insertCall.externalId).toBe('mcp:Public  End');
+    expect(insertCall.externalId).not.toContain('secret');
   });
 });
 
