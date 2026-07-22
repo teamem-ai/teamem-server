@@ -36,6 +36,7 @@ import { ToolRegistry } from './mcp/registry.js';
 import { registerMemoryWriteTool } from './mcp/tools/memory_write.js';
 import { getPageTool, getPageHandler } from './mcp/tools/get_page.js';
 import { timelineTool, timelineHandler } from './mcp/tools/timeline.js';
+import { searchTool, searchHandler } from './mcp/tools/search.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -129,6 +130,7 @@ export function buildApp(deps: AppDeps = {}) {
     const mcpRegistry = new ToolRegistry();
     // Register MCP tools — each tool wires its handler into the registry.
     registerMemoryWriteTool(mcpRegistry);
+    mcpRegistry.register(searchTool, searchHandler, ['read']);
     mcpRegistry.register(getPageTool, getPageHandler, ['read']);
     mcpRegistry.register(timelineTool, timelineHandler, ['read']);
     app.route(
