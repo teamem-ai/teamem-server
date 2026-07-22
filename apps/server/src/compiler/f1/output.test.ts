@@ -516,6 +516,21 @@ describe('buildF1Prompt', () => {
     expect(system).toContain('"action": "skip"');
   });
 
+  it('system message includes explicit skip criteria', () => {
+    const { system } = buildF1Prompt(promptContext);
+    expect(system).toContain('Skip Criteria');
+    expect(system).toContain('No decision, constraint, or operational knowledge');
+    expect(system).toContain('Automated dependency bumps with no decision context');
+    expect(system).toContain('Meaningless or placeholder messages');
+    expect(system).toContain('Auto-generated merge commits');
+    expect(system).toContain('When in doubt');
+  });
+
+  it('system message includes skip reason guidance', () => {
+    const { system } = buildF1Prompt(promptContext);
+    expect(system).toContain('your reason must be specific');
+  });
+
   it('user message includes event context', () => {
     const { user } = buildF1Prompt(promptContext);
     expect(user).toContain('github');
