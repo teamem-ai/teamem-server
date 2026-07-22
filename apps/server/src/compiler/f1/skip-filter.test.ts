@@ -500,6 +500,20 @@ describe('prefilterNoise — Zod compatibility', () => {
     const result = f1Output.safeParse(invalidSkip);
     expect(result.success).toBe(false);
   });
+
+  it('skip reasons never exceed 500 chars even with long commit messages', () => {
+    // The prefilter truncates interpolated message excerpts to 200 chars.
+    // The longest static prefix is ~60 chars, so total < 500.
+    const longMsg = 'Bump ' + 'x'.repeat(400);
+    const result = prefilterNoise('github', 'github_commit', {
+      message: longMsg,
+      sha: 'abc1234',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.reason.length).toBeLessThanOrEqual(500);
+    const parseResult = f1Output.safeParse(result);
+    expect(parseResult.success).toBe(true);
+  });
 });
 
 // ── Edge cases ─────────────────────────────────────────────────────────────
@@ -578,6 +592,68 @@ describe('prefilterNoise — edge cases', () => {
     // "fix test for payment edge case" does not match our exact pattern "fix test" or "fix tests".
     // Let's verify: we have /^fix tests$/i which requires exact match "fix tests".
     // "fix test for payment edge case" has more text after, so it won't match.
+    expect(result).toBeNull();
+  });
+
+  it('does NOT skip long message starting with vague prefix (has real rationale)', () => {
+    const result = prefilterNoise('github', 'github_commit', {
+      message: 'fix typo in the rate-limiter design after analyzing token-bucket trade-offs and deciding to use a sliding window instead',
+      sha: 'abc1234',
+    });
+    expect(result).toBeNull();
+  });
+
+  it('does NOT skip long message starting with "code review" (has real content)', () => {
+    const result = prefilterNoise('github', 'github_commit', {
+      message: 'code review: switching from Redis to Valkey for caching — see ADR-004 for full trade-off analysis',
+      sha: 'abc1234',
+    });
+    expect(result).toBeNull();
+  });
+
+  it('does NOT skip long message starting with "address comments"', () => {
+    const result = prefilterNoise('github', 'github_commit', {
+      message: 'address comments from PR review — refactored the auth middleware to use the strategy pattern for pluggable providers',
+      sha: 'abc1234',
+    });
+    expect(result).toBeNull();
+  });
+
+  it('still skips short message with vague prefix', () => {
+    // Short message with only the prefix — genuinely vague.
+    const result = prefilterNoise('github', 'github_commit', {
+      message: 'fix typo',
+      sha: 'abc1234',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.action).toBe('skip');
+  });
+
+  it('still skips short "code review" with no details', () => {
+    const result = prefilterNoise('github', 'github_commit', {
+      message: 'code review',
+      sha: 'abc1234',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.action).toBe('skip');
+  });
+
+  it('still skips exact-match vague message regardless of length', () => {
+    // Exact patterns (like /^update readme$/i) skip even if long — but
+    // they can't be long by definition (anchored with $).
+    const result = prefilterNoise('github', 'github_commit', {
+      message: 'update README',
+      sha: 'abc1234',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.action).toBe('skip');
+  });
+
+  it('does NOT skip long "fix typo" message with rationale', () => {
+    const result = prefilterNoise('github', 'github_commit', {
+      message: 'fix typo: s/hte/the in the architecture decision record for event sourcing',
+      sha: 'abc1234',
+    });
     expect(result).toBeNull();
   });
 });

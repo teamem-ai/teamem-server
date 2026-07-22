@@ -96,8 +96,12 @@ async function recordCompiled(
 }
 
 /**
- * Record a skipped event outcome: the LLM returned `skip` or the mapper
- * could not construct evidence.
+ * Record a skipped event outcome: the LLM returned `skip`, the prefilter
+ * caught noise, or the mapper could not construct evidence.
+ *
+ * The `reason` string is stored as-is in the job_event row. Callers
+ * should pass the specific human-readable reason from the LLM or prefilter
+ * rather than a generic enum value (N8: reason is an open text registry).
  */
 async function recordSkipped(
   db: AppDb,
@@ -105,7 +109,7 @@ async function recordSkipped(
   projectId: string,
   jobId: string,
   eventId: string,
-  reason: 'no_knowledge' | 'already_compiled',
+  reason: string,
 ): Promise<void> {
   await upsertJobEvent(db, {
     teamId,
@@ -234,14 +238,14 @@ export async function handleCompileJob(
       );
 
       if (prefilterResult) {
-        // Deterministic skip — record and continue.
+        // Deterministic skip — record with the specific reason.
         await recordSkipped(
           db,
           teamId,
           projectId,
           jobId,
           event.id,
-          'no_knowledge',
+          prefilterResult.reason,
         );
         skippedCount++;
         continue;
@@ -263,15 +267,16 @@ export async function handleCompileJob(
         requestId: `${jobId}:${event.id}`,
       });
 
-      // 3c. Check the LLM's decision: extract or skip.
+      // 3d. Check the LLM's decision: extract or skip.
       if (response.output.action === 'skip') {
+        // Pass the LLM's specific reason through to storage.
         await recordSkipped(
           db,
           teamId,
           projectId,
           jobId,
           event.id,
-          'no_knowledge',
+          response.output.reason,
         );
         skippedCount++;
         continue;

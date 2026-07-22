@@ -62,15 +62,23 @@ const MEANINGLESS_COMMIT_EXACT = new Set([
 /**
  * Commit messages that are too vague to contain reusable knowledge.
  *
- * These indicate a mechanical action but provide no rationale, trade-off,
- * or operational context.
+ * Split into two groups to avoid skipping substantive messages that
+ * merely *start* with a vague prefix:
+ *
+ *  1. EXACT patterns (anchored with `$`) — always skip. The entire
+ *     message is irredeemably vague regardless of length.
+ *  2. PREFIX patterns (no `$` anchor) — only skip when the message is
+ *     short (< 60 chars). A longer message with the same prefix may
+ *     contain real rationale (e.g., "fix typo in the rate-limiter
+ *     design after analyzing token-bucket trade-offs").
  */
-const VAGUE_COMMIT_PATTERNS = [
-  /^fix typo/i,
-  /^fix typo in /i,
+
+/** Max length for a prefix-matched vague message to be auto-skipped. */
+const VAGUE_PREFIX_MAX_LENGTH = 60;
+
+/** Exact-match vague patterns — always skip. */
+const VAGUE_COMMIT_EXACT = [
   /^typo$/i,
-  /^fix lint/i,
-  /^fix format/i,
   /^format$/i,
   /^lint$/i,
   /^cleanup$/i,
@@ -81,14 +89,25 @@ const VAGUE_COMMIT_PATTERNS = [
   /^update changelog$/i,
   /^update license$/i,
   /^update .gitignore$/i,
+  /^fix tests?$/i,
+  /^fix build$/i,
+  /^fix ci$/i,
+];
+
+/**
+ * Vague prefix patterns — only skip when message is < 60 chars.
+ * Longer messages with these prefixes may contain real rationale.
+ */
+const VAGUE_COMMIT_PREFIX = [
+  /^fix typo/i,
+  /^fix typo in /i,
+  /^fix lint/i,
+  /^fix format/i,
   /^code review/i,
   /^review feedback/i,
   /^pr feedback/i,
   /^address comments/i,
   /^address review/i,
-  /^fix tests?$/i,
-  /^fix build$/i,
-  /^fix ci$/i,
 ];
 
 /**
@@ -133,6 +152,17 @@ const MECHANICAL_PR_TITLE_PATTERNS = [
 // ── Detection helpers ──────────────────────────────────────────────────────
 
 /**
+ * Truncate and quote a string for use in a skip reason.
+ *
+ * Reasons must fit within the 500-char Zod bound on `F1SkipOutput.reason`.
+ * The longest static prefix is ~60 chars, so we cap the interpolated
+ * payload excerpt at 200 chars.
+ */
+function truncForReason(s: string): string {
+  return s.length > 200 ? s.slice(0, 197) + '...' : s;
+}
+
+/**
  * Check whether a commit message is noise.
  *
  * Returns a skip reason string if noise is detected, or `null` if the
@@ -150,45 +180,57 @@ function checkCommitMessage(message: unknown): string | null {
 
   // Single character or very short, meaningless.
   if (trimmed.length <= 2 && /^[^\w]+$/.test(trimmed)) {
-    return `Meaningless commit message: "${trimmed}"`;
+    return `Meaningless commit message: "${truncForReason(trimmed)}"`;
   }
 
   // Meaningless exact matches.
   if (MEANINGLESS_COMMIT_EXACT.has(trimmed.toLowerCase())) {
-    return `Meaningless commit message: "${trimmed}"`;
+    return `Meaningless commit message: "${truncForReason(trimmed)}"`;
   }
 
   // Meaningless patterns (emoji, dots, whitespace-only).
   for (const pattern of MEANINGLESS_COMMIT_PATTERNS) {
     if (pattern.test(trimmed)) {
-      return `Meaningless commit message: "${trimmed}"`;
+      return `Meaningless commit message: "${truncForReason(trimmed)}"`;
     }
   }
 
-  // Vague patterns.
-  for (const pattern of VAGUE_COMMIT_PATTERNS) {
+  // Vague exact patterns — always skip (entire message matches).
+  for (const pattern of VAGUE_COMMIT_EXACT) {
     if (pattern.test(trimmed)) {
-      return `Vague commit message with no extractable knowledge: "${trimmed}"`;
+      return `Vague commit message with no extractable knowledge: "${truncForReason(trimmed)}"`;
+    }
+  }
+
+  // Vague prefix patterns — only skip when message is short.
+  // Longer messages with these prefixes may contain real rationale
+  // (e.g., "fix typo in the rate-limiter design after analyzing
+  // token-bucket trade-offs"). Let the LLM evaluate those.
+  if (trimmed.length < VAGUE_PREFIX_MAX_LENGTH) {
+    for (const pattern of VAGUE_COMMIT_PREFIX) {
+      if (pattern.test(trimmed)) {
+        return `Vague commit message with no extractable knowledge: "${truncForReason(trimmed)}"`;
+      }
     }
   }
 
   // Dependency bumps.
   for (const pattern of DEPENDABOT_PATTERNS) {
     if (pattern.test(trimmed)) {
-      return `Automated dependency bump with no team decision: "${trimmed.slice(0, 200)}"`;
+      return `Automated dependency bump with no team decision: "${truncForReason(trimmed)}"`;
     }
   }
 
   // Merge commits.
   for (const pattern of MERGE_COMMIT_PATTERNS) {
     if (pattern.test(trimmed)) {
-      return `Auto-generated merge commit with no extractable knowledge`;
+      return 'Auto-generated merge commit with no extractable knowledge';
     }
   }
 
   // Version-only tags.
   if (VERSION_ONLY_PATTERN.test(trimmed)) {
-    return `Version-only tag with no release notes: "${trimmed}"`;
+    return `Version-only tag with no release notes: "${truncForReason(trimmed)}"`;
   }
 
   return null;
@@ -206,13 +248,13 @@ function checkPrIssue(
 
   // Dependabot/Renovate PR: title starts with "Bump " or contains "dependabot".
   if (DEPENDABOT_PATTERNS.some((p) => p.test(titleStr))) {
-    return `Automated dependency bump with no team decision: "${titleStr.slice(0, 200)}"`;
+    return `Automated dependency bump with no team decision: "${truncForReason(titleStr)}"`;
   }
 
   // Mechanical PR titles with no substantive body.
   if (MECHANICAL_PR_TITLE_PATTERNS.some((p) => p.test(titleStr))) {
     if (bodyStr.length < 100) {
-      return `Mechanical configuration change with no team discussion: "${titleStr.slice(0, 200)}"`;
+      return `Mechanical configuration change with no team discussion: "${truncForReason(titleStr)}"`;
     }
   }
 
@@ -222,7 +264,7 @@ function checkPrIssue(
       return null; // Could be a genuine question — let LLM decide.
     }
     if (titleStr.length < 20) {
-      return `Vague issue/PR with empty body and short title: "${titleStr}"`;
+      return `Vague issue/PR with empty body and short title: "${truncForReason(titleStr)}"`;
     }
   }
 
@@ -272,7 +314,7 @@ export function prefilterNoise(
       const title = typeof payload['title'] === 'string' ? payload['title'] : 'Untitled';
       return {
         action: 'skip',
-        reason: `Automated dependency bump (Dependabot/Renovate): "${title.slice(0, 200)}"`,
+        reason: `Automated dependency bump (Dependabot/Renovate): "${truncForReason(title)}"`,
       };
     }
   }
@@ -302,7 +344,7 @@ export function prefilterNoise(
       shortBody === 'thanks' ||
       shortBody === 'thank you'
     ) {
-      return { action: 'skip', reason: `Non-substantive PR comment: "${body}"` };
+      return { action: 'skip', reason: `Non-substantive PR comment: "${truncForReason(body)}"` };
     }
   }
 
