@@ -13,6 +13,7 @@ import type { ApiScope } from '@teamem/schema';
 import type { AppDb } from '../db/client.js';
 import type { CompileQueue } from '../queue/boss.js';
 import type { AuthContext } from '../db/repositories/api-keys.js';
+import type { EmbeddingClient } from '../llm/embedding/port.js';
 
 // ── Tool definition schema ──────────────────────────────────────────────────
 // Matches the MCP Tool type: name, optional description, and JSON Schema
@@ -40,6 +41,8 @@ export interface ToolExecutionContext {
   auth: AuthContext;
   /** Request ID for correlation in logs and audit records. */
   requestId: string;
+  /** Optional embedding client for hybrid (vector + FTS) search. */
+  embeddingClient?: EmbeddingClient | null;
 }
 
 /**

@@ -21,6 +21,7 @@ import type { CompileQueue } from '../queue/boss.js';
 import { requireAuth, getAuth } from '../http/auth.js';
 import { REQUEST_ID_KEY } from '../http/errors.js';
 import { ToolRegistry, type ToolExecutionContext, type ToolResult } from './registry.js';
+import type { EmbeddingClient } from '../llm/embedding/port.js';
 
 // ── MCP constants ───────────────────────────────────────────────────────────
 
@@ -174,6 +175,8 @@ export interface McpDeps {
   registry: ToolRegistry;
   /** Optional compile queue — passed through to tool handlers. */
   queue?: CompileQueue;
+  /** Optional embedding client for hybrid (vector + FTS) search. */
+  embeddingClient?: EmbeddingClient | null;
 }
 
 // ── Route builder ───────────────────────────────────────────────────────────
@@ -272,6 +275,7 @@ export function buildMcpRoutes(deps: McpDeps): Hono {
             queue: deps.queue,
             auth,
             requestId,
+            embeddingClient: deps.embeddingClient,
           };
 
           try {

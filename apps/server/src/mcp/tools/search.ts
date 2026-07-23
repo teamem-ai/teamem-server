@@ -30,8 +30,10 @@ import {
   getTeamId,
   getProjectId,
   isProjectScope,
+  projectScope,
 } from '../../auth/scope.js';
-import { searchConcepts } from '../../db/repositories/concepts-search.js';
+import { hybridSearch } from '../../compiler/search/hybrid.js';
+import { resolveSemanticCapability } from '../../llm/embedding/capability.js';
 import { writeAuditRecord } from '../../db/repositories/audit.js';
 import type { McpTool, ToolHandler, ToolResult } from '../registry.js';
 
@@ -164,6 +166,10 @@ export const searchHandler: ToolHandler = async (
   const { projectId, query, type, status, cursor, limit } = parsed.data;
   const teamId = getTeamId(auth.scope);
 
+  // ── Resolve capability early for consistent degraded flags ──────────
+  const capability = resolveSemanticCapability(ctx.embeddingClient ?? null);
+  const deniedDegraded = capability.mode === 'fts-only';
+
   // ── Scope enforcement ───────────────────────────────────────────────
   // Project-scoped keys: silently return empty if querying a different project.
   if (isProjectScope(auth.scope)) {
@@ -189,7 +195,7 @@ export const searchHandler: ToolHandler = async (
             type: 'text',
             text: JSON.stringify({
               results: [],
-              degraded: true,
+              degraded: deniedDegraded,
               nextCursor: null,
             }),
           },
@@ -197,9 +203,14 @@ export const searchHandler: ToolHandler = async (
       };
     }
   }
-  // allProjects keys: projectId is validated by the caller (the DB query is
-  // still scoped to teamId + projectId — if the project doesn't exist or
-  // belongs to another team, the DB returns 0 rows naturally).
+
+  // ── Narrow scope for hybridSearch ───────────────────────────────────
+  // hybridSearch requires a concrete project scope.  allProjects keys
+  // can search any project in their team; construct a projectScope from
+  // the already-resolved teamId + projectId.
+  const searchScope = isProjectScope(auth.scope)
+    ? auth.scope
+    : projectScope(teamId, projectId);
 
   // ── Decode & validate cursor ────────────────────────────────────────
   let cursorRelevance: number | undefined;
@@ -226,11 +237,8 @@ export const searchHandler: ToolHandler = async (
     cursorId = decoded.position.id;
   }
 
-  // ── Execute search ──────────────────────────────────────────────────
-  const result = await searchConcepts(db, {
-    teamId,
-    projectId,
-    query,
+  // ── Execute search (RET-02 hybrid) ──────────────────────────────────
+  const result = await hybridSearch(db, searchScope, query, capability, ctx.embeddingClient, {
     type,
     status,
     limit,

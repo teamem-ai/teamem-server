@@ -18,6 +18,7 @@
 import { Hono, type Context } from 'hono';
 import { searchRequest, searchResponse } from '@teamem/schema';
 import type { AppDb } from '../../db/client.js';
+import type { EmbeddingClient } from '../../llm/embedding/port.js';
 import { requireAuth, requireScope, getAuth } from '../auth.js';
 import {
   search,
@@ -35,6 +36,8 @@ import {
 
 export interface SearchRoutesDeps {
   db: AppDb;
+  /** Optional embedding client for hybrid (vector + FTS) search. */
+  embeddingClient?: EmbeddingClient | null;
 }
 
 // ── Handler: POST /v1/search ───────────────────────────────────────────────
@@ -90,7 +93,7 @@ export async function postSearchHandler(c: Context, deps: SearchRoutesDeps): Pro
   // ── Execute the use case ─────────────────────────────────────────────
   let response;
   try {
-    response = await search(db, auth.scope, request, searchContext);
+    response = await search(db, auth.scope, request, searchContext, deps.embeddingClient);
   } catch (err) {
     if (err instanceof SearchUseCaseError) {
       if (err.code === 'cursor_invalid') {
