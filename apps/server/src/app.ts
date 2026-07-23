@@ -37,6 +37,7 @@ import { registerMemoryWriteTool } from './mcp/tools/memory_write.js';
 import { getPageTool, getPageHandler } from './mcp/tools/get_page.js';
 import { timelineTool, timelineHandler } from './mcp/tools/timeline.js';
 import { searchTool, searchHandler } from './mcp/tools/search.js';
+import { buildSearchRoutes } from './http/routes/search.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -123,6 +124,12 @@ export function buildApp(deps: AppDeps = {}) {
       buildEventsReadRoutes({
         db: deps.db,
       }),
+    );
+
+    // Search routes — POST /v1/search (M1-SR-02).
+    app.route(
+      '/',
+      buildSearchRoutes({ db: deps.db }),
     );
 
     // MCP streamable HTTP endpoint (M1-MCP-01 scaffold, extended DUA-210).
