@@ -262,7 +262,6 @@ ingest_and_wait() {
     '{
       projectId: $projectId,
       source: {
-        channel: "cli",
         kind: "cli_init",
         externalId: $idemKey
       },
