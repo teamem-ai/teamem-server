@@ -24,10 +24,9 @@ import {
   type CursorPayload,
 } from '@teamem/schema';
 import type { AppDb } from '../db/client.js';
-import {
-  searchConcepts,
-  type SearchResultRow,
-} from '../db/repositories/concepts-search.js';
+import { hybridSearch, type HybridSearchRow } from '../compiler/search/hybrid.js';
+import { resolveSemanticCapability } from '../llm/embedding/capability.js';
+import type { EmbeddingClient } from '../llm/embedding/port.js';
 import { writeAuditRecord } from '../db/repositories/audit.js';
 import type { ScopeContext } from '../auth/scope.js';
 import {
@@ -85,8 +84,8 @@ function computeSearchFilterHash(params: {
 
 // ── DTO mapping ─────────────────────────────────────────────────────────────
 
-/** Map a repository SearchResultRow to the frozen SearchResult DTO. */
-function toSearchResult(row: SearchResultRow): SearchResult {
+/** Map a HybridSearchRow to the frozen SearchResult DTO. */
+function toSearchResult(row: HybridSearchRow): SearchResult {
   return {
     uuid: row.uuid,
     path: row.path,
@@ -124,6 +123,7 @@ function toSearchResult(row: SearchResultRow): SearchResult {
  * @param scope - The authenticated scope context (project or allProjects)
  * @param request - Validated search request from the HTTP body
  * @param context - Request metadata for audit/error envelopes
+ * @param embeddingClient - Optional embedding client for hybrid search
  * @returns The frozen SearchResponse DTO
  */
 export async function search(
@@ -131,6 +131,7 @@ export async function search(
   scope: ScopeContext,
   request: SearchRequest,
   context: SearchContext,
+  embeddingClient?: EmbeddingClient | null,
 ): Promise<SearchResponse> {
   const { projectId, query, type, status, cursor, limit } = request;
   const teamId = getTeamId(scope);
@@ -223,11 +224,9 @@ export async function search(
     cursorId = decoded.position.id;
   }
 
-  // ── Execute search (RET-02) ───────────────────────────────────────────
-  const result = await searchConcepts(db, {
-    teamId,
-    projectId,
-    query,
+  // ── Execute search (RET-02 hybrid) ────────────────────────────────────
+  const capability = resolveSemanticCapability(embeddingClient ?? null);
+  const result = await hybridSearch(db, scope, query, capability, embeddingClient, {
     type,
     status,
     limit,

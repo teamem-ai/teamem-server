@@ -37,7 +37,8 @@ import { registerMemoryWriteTool } from './mcp/tools/memory_write.js';
 import { getPageTool, getPageHandler } from './mcp/tools/get_page.js';
 import { timelineTool, timelineHandler } from './mcp/tools/timeline.js';
 import { searchTool, searchHandler } from './mcp/tools/search.js';
-import { buildSearchRoutes } from './http/routes/search.js';
+import { buildSearchRoutes, type SearchRoutesDeps } from './http/routes/search.js';
+import type { EmbeddingClient } from './llm/embedding/port.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -46,6 +47,8 @@ export interface AppDeps extends HealthDeps {
   queue?: EventsWriteDeps['queue'];
   /** Override the default 30 s wait timeout (for testing). */
   waitTimeoutMs?: number;
+  /** Optional embedding client for hybrid (vector + FTS) search. */
+  embeddingClient?: EmbeddingClient | null;
 }
 
 type AppEnv = { Variables: { healthDeps: HealthDeps } };
@@ -127,9 +130,13 @@ export function buildApp(deps: AppDeps = {}) {
     );
 
     // Search routes — POST /v1/search (M1-SR-02).
+    const searchDeps: SearchRoutesDeps = {
+      db: deps.db,
+      embeddingClient: deps.embeddingClient,
+    };
     app.route(
       '/',
-      buildSearchRoutes({ db: deps.db }),
+      buildSearchRoutes(searchDeps),
     );
 
     // MCP streamable HTTP endpoint (M1-MCP-01 scaffold, extended DUA-210).
@@ -142,7 +149,7 @@ export function buildApp(deps: AppDeps = {}) {
     mcpRegistry.register(timelineTool, timelineHandler, ['read']);
     app.route(
       '/',
-      buildMcpRoutes({ db: deps.db, registry: mcpRegistry, queue: deps.queue }),
+      buildMcpRoutes({ db: deps.db, registry: mcpRegistry, queue: deps.queue, embeddingClient: deps.embeddingClient }),
     );
   }
 

@@ -31,7 +31,8 @@ import {
   getProjectId,
   isProjectScope,
 } from '../../auth/scope.js';
-import { searchConcepts } from '../../db/repositories/concepts-search.js';
+import { hybridSearch } from '../../compiler/search/hybrid.js';
+import { resolveSemanticCapability } from '../../llm/embedding/capability.js';
 import { writeAuditRecord } from '../../db/repositories/audit.js';
 import type { McpTool, ToolHandler, ToolResult } from '../registry.js';
 
@@ -226,11 +227,9 @@ export const searchHandler: ToolHandler = async (
     cursorId = decoded.position.id;
   }
 
-  // ── Execute search ──────────────────────────────────────────────────
-  const result = await searchConcepts(db, {
-    teamId,
-    projectId,
-    query,
+  // ── Execute search (RET-02 hybrid) ──────────────────────────────────
+  const capability = resolveSemanticCapability(ctx.embeddingClient ?? null);
+  const result = await hybridSearch(db, auth.scope, query, capability, ctx.embeddingClient, {
     type,
     status,
     limit,
