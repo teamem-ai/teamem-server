@@ -212,7 +212,7 @@ export async function recallCandidates(
 ): Promise<CandidateRecallResult[]> {
   const { db, embeddingClient, capability } = deps;
   const { scope, newConcept } = params;
-  const limit = Math.min(params.limit ?? DEFAULT_LIMIT, MAX_LIMIT);
+  const limit = Math.max(1, Math.min(params.limit ?? DEFAULT_LIMIT, MAX_LIMIT));
 
   // Require concrete project scope — allProjects has no projectId and
   // therefore cannot produce meaningful vector-search or FTS results,
@@ -322,8 +322,9 @@ export async function recallCandidates(
     title: r.title,
     tags: r.tags,
     // Normalise ts_rank to a [0, 1] range for similarity-compatible display.
-    // ts_rank is unbounded but in practice stays within [0, ~1] for reasonable
-    // queries. We clamp to [0, 1] after division by a generous ceiling.
+    // ts_rank with default normalization mode (0) typically returns values
+    // in [0, 1] for most queries. We clamp to [0, 1] to guard against
+    // edge-case values outside this range.
     similarity: Math.min(
       1,
       Math.max(0, Number(((r.relevance as number) ?? 0).toFixed(6))),
