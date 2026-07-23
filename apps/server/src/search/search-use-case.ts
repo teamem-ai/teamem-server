@@ -33,6 +33,7 @@ import {
   isProjectScope,
   getTeamId,
   getProjectId,
+  projectScope,
 } from '../auth/scope.js';
 import { and, eq } from 'drizzle-orm';
 import * as schema from '../db/schema.js';
@@ -136,6 +137,10 @@ export async function search(
   const { projectId, query, type, status, cursor, limit } = request;
   const teamId = getTeamId(scope);
 
+  // ── Resolve capability early for consistent degraded flags ────────────
+  const capability = resolveSemanticCapability(embeddingClient ?? null);
+  const deniedDegraded = capability.mode === 'fts-only';
+
   // ── Scope enforcement ──────────────────────────────────────────────────
   // Project-scoped keys: silently return empty if querying a different project.
   if (isProjectScope(scope)) {
@@ -158,7 +163,7 @@ export async function search(
       return {
         requestId: context.requestId,
         results: [],
-        degraded: true,
+        degraded: deniedDegraded,
         nextCursor: null,
       };
     }
@@ -193,11 +198,19 @@ export async function search(
       return {
         requestId: context.requestId,
         results: [],
-        degraded: true,
+        degraded: deniedDegraded,
         nextCursor: null,
       };
     }
   }
+
+  // ── Narrow scope for hybridSearch ─────────────────────────────────────
+  // hybridSearch requires a concrete project scope.  allProjects keys have
+  // already been validated above, so we can safely construct a projectScope
+  // from the resolved teamId + projectId.
+  const searchScope = isProjectScope(scope)
+    ? scope
+    : projectScope(teamId, projectId);
 
   // ── Decode & validate cursor ──────────────────────────────────────────
   let cursorRelevance: number | undefined;
@@ -225,8 +238,7 @@ export async function search(
   }
 
   // ── Execute search (RET-02 hybrid) ────────────────────────────────────
-  const capability = resolveSemanticCapability(embeddingClient ?? null);
-  const result = await hybridSearch(db, scope, query, capability, embeddingClient, {
+  const result = await hybridSearch(db, searchScope, query, capability, embeddingClient, {
     type,
     status,
     limit,

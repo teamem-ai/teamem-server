@@ -47,6 +47,10 @@ function clampSimilarity(s: number): number {
   return Math.max(0, Math.min(1, s));
 }
 
+function clampRank(r: number): number {
+  return Math.max(0, Math.min(1, r));
+}
+
 const VECTOR_WEIGHT = 0.7;
 const FTS_WEIGHT = 0.3;
 
@@ -55,12 +59,12 @@ function combinedScore(
   ftsRank: number | undefined,
 ): number {
   if (vectorSimilarity !== undefined && ftsRank !== undefined) {
-    return VECTOR_WEIGHT * clampSimilarity(vectorSimilarity) + FTS_WEIGHT * ftsRank;
+    return VECTOR_WEIGHT * clampSimilarity(vectorSimilarity) + FTS_WEIGHT * clampRank(ftsRank);
   }
   if (vectorSimilarity !== undefined) {
     return VECTOR_WEIGHT * clampSimilarity(vectorSimilarity);
   }
-  return FTS_WEIGHT * (ftsRank ?? 0);
+  return FTS_WEIGHT * clampRank(ftsRank ?? 0);
 }
 
 interface TestRow {
@@ -121,6 +125,18 @@ describe('score fusion', () => {
     // 0.7 * 0.5 = 0.35 > 0.3 * 1.0 = 0.3
     expect(vectorScore).toBeCloseTo(0.35, 6);
     expect(ftsScore).toBeCloseTo(0.30, 6);
+  });
+
+  it('FTS rank above 1 is clamped to 1', () => {
+    // ts_rank can exceed 1 without normalization — combinedScore must clamp.
+    const score = combinedScore(undefined, 2.5);
+    expect(score).toBeCloseTo(FTS_WEIGHT * 1.0, 6);
+  });
+
+  it('combined score stays in [0, 1] even with inflated inputs', () => {
+    const score = combinedScore(1.5, 3.0);
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(score).toBeLessThanOrEqual(1);
   });
 });
 

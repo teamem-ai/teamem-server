@@ -107,24 +107,35 @@ function clampSimilarity(s: number): number {
   return Math.max(0, Math.min(1, s));
 }
 
+/** Clamp a ts_rank value to [0, 1].  PostgreSQL's ts_rank (without
+ *  normalization) can exceed 1 for documents with very frequent query
+ *  terms.  We clamp defensively so the combined score stays in [0, 1]
+ *  and cursor comparisons remain stable. */
+function clampRank(r: number): number {
+  return Math.max(0, Math.min(1, r));
+}
+
 /**
  * Compute combined relevance score:
  *   - In both sources: weighted average
  *   - Vector only:       scaled vector score
  *   - FTS only:          scaled FTS score
+ *
+ * Both vector similarity and FTS rank are clamped to [0, 1] before
+ * weighting so the combined score is guaranteed to stay in [0, 1].
  */
 function combinedScore(
   vectorSimilarity: number | undefined,
   ftsRank: number | undefined,
 ): number {
   if (vectorSimilarity !== undefined && ftsRank !== undefined) {
-    return VECTOR_WEIGHT * clampSimilarity(vectorSimilarity) + FTS_WEIGHT * ftsRank;
+    return VECTOR_WEIGHT * clampSimilarity(vectorSimilarity) + FTS_WEIGHT * clampRank(ftsRank);
   }
   if (vectorSimilarity !== undefined) {
     return VECTOR_WEIGHT * clampSimilarity(vectorSimilarity);
   }
   // ftsRank must be defined here
-  return FTS_WEIGHT * (ftsRank ?? 0);
+  return FTS_WEIGHT * clampRank(ftsRank ?? 0);
 }
 
 // ── Core hybrid search ─────────────────────────────────────────────────────

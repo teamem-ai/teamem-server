@@ -206,7 +206,11 @@ export async function ftsSearchConcepts(
     title: r.title,
     tags: r.tags,
     lastConfirmed: r.lastConfirmed,
-    relevance: typeof r.relevance === 'number' ? r.relevance : 0,
+    // Clamp ts_rank to [0, 1] — PostgreSQL's ts_rank without
+    // normalization can exceed 1 for very frequent terms.
+    relevance: typeof r.relevance === 'number'
+      ? Math.max(0, Math.min(1, r.relevance))
+      : 0,
     bodySnippet: extractBodySnippet(r.body),
   }));
 
