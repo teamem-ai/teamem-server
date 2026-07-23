@@ -339,7 +339,7 @@ async function executeMergeDecision(
   projectId: string,
   decision: F2Decision,
   conceptInput: CreateConceptInput,
-  newConceptUuid: string,
+  existingTags: string[],
   embedding: number[] | undefined | null,
 ): Promise<string> {
   if (decision.relationship === 'unrelated') {
@@ -362,7 +362,8 @@ async function executeMergeDecision(
     body: decision.mergedBody,
     status: decision.resultStatus,
     confidence: conceptInput.confidence,
-    tags: [...new Set([...(conceptInput.tags ?? []), ...(decision.mergedTitle ? [] : [])])],
+    // Union of existing tags + new tags from F1 extraction.
+    tags: [...new Set([...existingTags, ...(conceptInput.tags ?? [])])],
     lastConfirmed:
       decision.relationship === 'confirms' ? now : undefined,
     newEvidence: conceptInput.evidence,
@@ -539,6 +540,8 @@ export async function handleCompileJob(
       }
 
       // 3g. F2 candidate recall — find potential merge targets.
+      //     Pass the pre-computed embedding (from step 3f) to avoid a
+      //     duplicate embedding API call in vector mode.
       const scope = projectScope(teamId, projectId);
       const recallResult = await recallCandidates(
         {
@@ -553,6 +556,7 @@ export async function handleCompileJob(
             body: conceptResult.conceptInput.body,
           },
           limit: 5,
+          queryEmbedding: embedding,
         },
       );
 
@@ -600,13 +604,19 @@ export async function handleCompileJob(
         );
 
         // Execute the merge decision: update existing or create new.
+        // Resolve the target concept's existing tags for tag merging.
+        const existingTags =
+          decision.relationship !== 'unrelated'
+            ? enrichedCandidates.find((c) => c.uuid === decision.targetConceptId)?.tags ?? []
+            : [];
+
         conceptUuid = await executeMergeDecision(
           db,
           teamId,
           projectId,
           decision,
           conceptResult.conceptInput,
-          conceptResult.conceptUuid,
+          existingTags,
           embedding,
         );
       }

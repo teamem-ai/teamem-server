@@ -360,7 +360,7 @@ export async function updateConcept(
       updateValues['embedding'] = input.embedding ?? null;
     }
 
-    await tx
+    const [updated] = await tx
       .update(schema.concepts)
       .set(updateValues)
       .where(
@@ -369,7 +369,14 @@ export async function updateConcept(
           eq(schema.concepts.teamId, input.teamId),
           eq(schema.concepts.projectId, input.projectId),
         ),
+      )
+      .returning({ uuid: schema.concepts.uuid });
+
+    if (!updated) {
+      throw new Error(
+        `Concept not found for update: uuid=${input.conceptUuid} team=${input.teamId} project=${input.projectId}`,
       );
+    }
 
     // 2. Insert new evidence rows (append-only — never deletes existing).
     const evidenceIds: string[] = [];

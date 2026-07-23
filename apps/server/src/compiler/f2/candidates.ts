@@ -111,6 +111,15 @@ export interface RecallCandidatesParams {
   };
   /** Maximum candidates to return. Default 5, max 20 (hard-coded cap). */
   readonly limit?: number;
+  /**
+   * Optional pre-computed query embedding (1536-d). When provided in
+   * vector mode, the internal `embeddingClient.generate()` call is
+   * skipped — the caller is responsible for ensuring the embedding
+   * matches the `newConcept.title` + `newConcept.body` content.
+   *
+   * Ignored in fts-only mode.
+   */
+  readonly queryEmbedding?: number[];
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -223,40 +232,46 @@ export async function recallCandidates(
 
   // ── Vector mode ────────────────────────────────────────────────────────
   if (capability.mode === 'vector') {
-    if (!embeddingClient) {
-      // Defensive: capability says vector but no client is wired. This is a
-      // misconfiguration — the capability resolver should never produce
-      // `vector` when embeddingClient is null. Fail loudly.
-      throw new CandidateRecallError(
-        'Semantic capability is "vector" but no embedding client is available. ' +
-          'This is a server misconfiguration.',
-      );
-    }
-
-    // 1. Generate the query embedding from title + body.
-    const embeddingText = `${newConcept.title}\n\n${newConcept.body}`;
+    // 1. Obtain the query embedding: use caller-provided pre-computed
+    //    vector when available (avoids duplicate API call); otherwise
+    //    generate it from title + body.
     let queryEmbedding: number[];
-    try {
-      const vectors = await embeddingClient.generate([embeddingText]);
-      const first = vectors[0];
-      if (!first || first.length === 0) {
-        throw new Error('Embedding API returned an empty result');
-      }
-      // Guard against wrong-dimension output — a misconfigured provider
-      // returning e.g. 768‑d vectors must surface as CandidateRecallError,
-      // not escape as InvalidVectorSearchError from findSimilarConcepts.
-      if (first.length !== EMBEDDING_DIMENSION) {
-        throw new Error(
-          `Embedding API returned ${first.length}-dimensional vectors, expected ${EMBEDDING_DIMENSION}`,
+    if (params.queryEmbedding) {
+      // Validate dimension of caller-provided embedding.
+      if (params.queryEmbedding.length !== EMBEDDING_DIMENSION) {
+        throw new CandidateRecallError(
+          `Provided query embedding has ${params.queryEmbedding.length} dimensions, expected ${EMBEDDING_DIMENSION}`,
         );
       }
-      queryEmbedding = first;
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'Embedding generation failed';
-      throw new CandidateRecallError(
-        `Failed to generate query embedding for candidate recall: ${message}`,
-      );
+      queryEmbedding = params.queryEmbedding;
+    } else {
+      if (!embeddingClient) {
+        throw new CandidateRecallError(
+          'Semantic capability is "vector" but no embedding client is available. ' +
+            'This is a server misconfiguration.',
+        );
+      }
+
+      const embeddingText = `${newConcept.title}\n\n${newConcept.body}`;
+      try {
+        const vectors = await embeddingClient.generate([embeddingText]);
+        const first = vectors[0];
+        if (!first || first.length === 0) {
+          throw new Error('Embedding API returned an empty result');
+        }
+        if (first.length !== EMBEDDING_DIMENSION) {
+          throw new Error(
+            `Embedding API returned ${first.length}-dimensional vectors, expected ${EMBEDDING_DIMENSION}`,
+          );
+        }
+        queryEmbedding = first;
+      } catch (err: unknown) {
+        const message =
+          err instanceof Error ? err.message : 'Embedding generation failed';
+        throw new CandidateRecallError(
+          `Failed to generate query embedding for candidate recall: ${message}`,
+        );
+      }
     }
 
     // 2. Query pgvector via RET-01 shared repository.
