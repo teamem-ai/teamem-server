@@ -41,7 +41,7 @@
 import { and, eq } from 'drizzle-orm';
 import * as schema from '../schema.js';
 import type { AppDb } from '../client.js';
-import type { ConceptEvidenceInput, ConceptContributorInput } from './concepts-write.js';
+import { InvalidConceptError, type ConceptEvidenceInput, type ConceptContributorInput } from './concepts-write.js';
 
 // ── Error types ─────────────────────────────────────────────────────────────
 
@@ -191,11 +191,20 @@ export async function mergeIntoConcept(
       updatePayload['embedding'] = input.newEmbedding;
     }
 
-    // 5. Update the concept row.
+    // 5. Update the concept row — scope filter carries team_id + project_id
+    //    (red line §5.5: every write query must carry team_id; the SELECT
+    //    above does not hold a row lock, so the UPDATE re-verifies scope
+    //    at write time for defense in depth).
     await tx
       .update(schema.concepts)
       .set(updatePayload)
-      .where(eq(schema.concepts.uuid, input.targetId));
+      .where(
+        and(
+          eq(schema.concepts.teamId, input.teamId),
+          eq(schema.concepts.projectId, input.projectId),
+          eq(schema.concepts.uuid, input.targetId),
+        ),
+      );
 
     // 6. Append new evidence (with deduplication against existing rows).
     let newEvidenceCount = 0;
@@ -242,6 +251,18 @@ export async function mergeIntoConcept(
       });
 
       if (toInsert.length > 0) {
+        // Guard: repo_file evidence MUST carry immutable repo, commitSha, and
+        // path (§6.1 frozen contract). Validate before touching the database.
+        for (const ev of toInsert) {
+          if (ev.kind === 'repo_file') {
+            if (!ev.repo || !ev.commitSha || !ev.path) {
+              throw new InvalidConceptError(
+                'repo_file evidence requires repo, commitSha, and path',
+              );
+            }
+          }
+        }
+
         const inserted = await tx
           .insert(schema.conceptEvidence)
           .values(
@@ -324,12 +345,16 @@ function evidenceFingerprint(ev: {
     ? Math.floor(ev.at.getTime() / 1000)
     : Math.floor(new Date(ev.at).getTime() / 1000);
 
+  // Escape backslashes and the separator character so a pipe in a ref or
+  // path value cannot cause a false-positive deduplication collision.
+  const escape = (s: string) => s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+
   const parts = [
-    ev.kind,
-    ev.ref ?? '',
-    ev.repo ?? '',
-    ev.commitSha ?? '',
-    ev.path ?? '',
+    escape(ev.kind),
+    escape(ev.ref ?? ''),
+    escape(ev.repo ?? ''),
+    escape(ev.commitSha ?? ''),
+    escape(ev.path ?? ''),
     String(atSec),
   ];
   return parts.join('|');

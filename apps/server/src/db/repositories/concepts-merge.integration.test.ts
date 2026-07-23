@@ -543,6 +543,82 @@ describe.skipIf(!url)('ConceptMergeRepository (live Postgres)', () => {
     });
   });
 
+  // ── repo_file evidence required-field validation ──────────────────────
+
+  describe('repo_file evidence validation', () => {
+    it('rejects repo_file evidence without repo field', async () => {
+      const { uuid } = await createTestConcept();
+
+      await expect(
+        mergeIntoConcept(db, {
+          teamId: testTeam,
+          projectId: testProject,
+          targetId: uuid,
+          relationship: 'extends',
+          mergedTitle: 'X',
+          mergedBody: 'X.',
+          resultStatus: 'active',
+          newEvidence: [
+            {
+              kind: 'repo_file',
+              commitSha: 'abc1234',
+              path: 'src/index.ts',
+              at: new Date('2025-06-01T00:00:00.000Z'),
+            } as never,
+          ],
+        }),
+      ).rejects.toThrow(/repo_file/);
+    });
+
+    it('rejects repo_file evidence without commitSha', async () => {
+      const { uuid } = await createTestConcept();
+
+      await expect(
+        mergeIntoConcept(db, {
+          teamId: testTeam,
+          projectId: testProject,
+          targetId: uuid,
+          relationship: 'extends',
+          mergedTitle: 'X',
+          mergedBody: 'X.',
+          resultStatus: 'active',
+          newEvidence: [
+            {
+              kind: 'repo_file',
+              repo: 'teamem-ai/teamem',
+              path: 'src/index.ts',
+              at: new Date('2025-06-01T00:00:00.000Z'),
+            } as never,
+          ],
+        }),
+      ).rejects.toThrow(/repo_file/);
+    });
+
+    it('rejects repo_file evidence without path', async () => {
+      const { uuid } = await createTestConcept();
+
+      await expect(
+        mergeIntoConcept(db, {
+          teamId: testTeam,
+          projectId: testProject,
+          targetId: uuid,
+          relationship: 'extends',
+          mergedTitle: 'X',
+          mergedBody: 'X.',
+          resultStatus: 'active',
+          newEvidence: [
+            {
+              kind: 'repo_file',
+              repo: 'teamem-ai/teamem',
+              commitSha: 'abc1234',
+              at: new Date('2025-06-01T00:00:00.000Z'),
+            } as never,
+          ],
+        }),
+      ).rejects.toThrow(/repo_file/);
+    });
+  });
+
   // ── Contributor deduplication and trusted filter ───────────────────────
 
   describe('contributor handling', () => {
