@@ -39,7 +39,7 @@ export interface SearchRoutesDeps {
 
 // ── Handler: POST /v1/search ───────────────────────────────────────────────
 
-async function postSearchHandler(c: Context, deps: SearchRoutesDeps): Promise<Response> {
+export async function postSearchHandler(c: Context, deps: SearchRoutesDeps): Promise<Response> {
   const { db } = deps;
   const requestId = c.get(REQUEST_ID_KEY) as string;
 
@@ -51,7 +51,7 @@ async function postSearchHandler(c: Context, deps: SearchRoutesDeps): Promise<Re
   // Explicit limit check: the Zod schema enforces max 100, but we check
   // here first so the error response can include the max value in a
   // human-readable way (DUA-205 requirement: response must indicate max=100).
-  if (typeof rawBody.limit === 'number' && rawBody.limit > 100) {
+  if (typeof rawBody?.limit === 'number' && rawBody.limit > 100) {
     throw new InvalidRequestError('limit must not exceed 100', {
       field: 'limit',
       max: '100',

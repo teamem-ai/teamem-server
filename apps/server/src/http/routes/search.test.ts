@@ -4,204 +4,292 @@
  * Validates the HTTP contract of the search route:
  * - Explicit limit > 100 → 400 with max=100 indication
  * - Zod validation errors reach the client with formatted details
+ * - Null body → 400 (not 500)
  * - Error envelope shape matches the frozen contract
  *
- * These are focused unit tests for the route's unique validation behavior.
+ * Tests call the real exported postSearchHandler through a Hono app
+ * with a mock search use case, so the actual validation logic in
+ * search.ts is exercised — not a local replica.
+ *
  * Full end-to-end tests with real auth and DB are in:
  *   apps/server/src/search/search-use-case.integration.test.ts
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { Hono } from 'hono';
 import { searchRequest, searchResponse } from '@teamem/schema';
-import { InvalidRequestError } from '../errors.js';
+import type { ApiScope } from '@teamem/schema';
+import { requestContext } from '../request-context.js';
+import { globalErrorHandler, notFoundHandler } from '../errors.js';
+import { postSearchHandler, type SearchRoutesDeps } from './search.js';
+import type { AuthContext } from '../../db/repositories/api-keys.js';
+import { projectScope } from '../../auth/scope.js';
+import { AUTH_KEY } from '../auth.js';
+import type { AuthVariables } from '../auth.js';
 
-// ── Tests for explicit limit validation ─────────────────────────────────────
+// ── Mock search use case ────────────────────────────────────────────────────
 
-describe('POST /v1/search limit validation (DUA-205)', () => {
-  it('explicitly rejects limit > 100 with a message indicating max=100', () => {
-    // Test the explicit pre-Zod check: when rawBody.limit > 100,
-    // an InvalidRequestError is thrown with field=max=provided details.
-    // This is the DUA-205 requirement: "响应指明 max=100".
-
-    // We simulate the validation logic inline to test it directly.
-    const rawBody = { projectId: 'prj_test', query: 'test', limit: 101 };
-
-    // Replicate the explicit check from search.ts
-    const throwIfLimitExceeded = (body: Record<string, unknown>) => {
-      if (typeof body.limit === 'number' && body.limit > 100) {
-        throw new InvalidRequestError('limit must not exceed 100', {
-          field: 'limit',
-          max: '100',
-          provided: String(body.limit),
-        });
-      }
-    };
-
-    expect(() => throwIfLimitExceeded(rawBody)).toThrow(InvalidRequestError);
-    try {
-      throwIfLimitExceeded(rawBody);
-    } catch (err) {
-      expect(err).toBeInstanceOf(InvalidRequestError);
-      const ire = err as InvalidRequestError;
-      expect(ire.details).toBeDefined();
-      expect(ire.details!.field).toBe('limit');
-      expect(ire.details!.max).toBe('100');
-      expect(ire.details!.provided).toBe('101');
-    }
-  });
-
-  it('does not reject limit=100 (valid boundary)', () => {
-    const rawBody = { projectId: 'prj_test', query: 'test', limit: 100 };
-    const throwIfLimitExceeded = (body: Record<string, unknown>) => {
-      if (typeof body.limit === 'number' && body.limit > 100) {
-        throw new InvalidRequestError('limit must not exceed 100', {});
-      }
-    };
-    expect(() => throwIfLimitExceeded(rawBody)).not.toThrow();
-  });
-
-  it('does not reject limit=1 (minimum)', () => {
-    const rawBody = { projectId: 'prj_test', query: 'test', limit: 1 };
-    const throwIfLimitExceeded = (body: Record<string, unknown>) => {
-      if (typeof body.limit === 'number' && body.limit > 100) {
-        throw new InvalidRequestError('limit must not exceed 100', {});
-      }
-    };
-    expect(() => throwIfLimitExceeded(rawBody)).not.toThrow();
-  });
-
-  it('does not reject when limit is missing (Zod default applies)', () => {
-    const rawBody = { projectId: 'prj_test', query: 'test' };
-    const throwIfLimitExceeded = (body: Record<string, unknown>) => {
-      if (typeof body.limit === 'number' && body.limit > 100) {
-        throw new InvalidRequestError('limit must not exceed 100', {});
-      }
-    };
-    expect(() => throwIfLimitExceeded(rawBody)).not.toThrow();
-  });
+vi.mock('../../search/search-use-case.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../search/search-use-case.js')>();
+  return {
+    ...actual,
+    search: vi.fn(),
+  };
 });
 
-// ── Tests for Zod validation detail formatting ──────────────────────────────
+import { search as mockedSearch } from '../../search/search-use-case.js';
+const mockedSearchFn = vi.mocked(mockedSearch);
 
-describe('POST /v1/search Zod validation details (DUA-205)', () => {
-  it('formats Zod issues into string-valued details for safeDetails compatibility', () => {
-    const rawBody = { query: 'test' }; // missing projectId
-    const parsed = searchRequest.safeParse(rawBody);
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
-    expect(parsed.success).toBe(false);
-    if (!parsed.success) {
-      // Replicate the formatting logic from search.ts
-      const issues = parsed.error.issues;
-      const details: Record<string, string> = {};
-      if (issues.length > 0) {
-        const formatted = issues
-          .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
-          .join('; ');
-        details['validation'] = formatted;
-      }
+function mockAuthContext(overrides: Partial<AuthContext> = {}): AuthContext {
+  return {
+    credentialId: 'key_mock001',
+    keyName: 'Mock Test Key',
+    scopes: ['read', 'events:write'] as ApiScope[],
+    scope: projectScope('team_mock', 'prj_mock'),
+    principal: {
+      id: 'pri_mock001',
+      kind: 'service',
+      provider: 'external',
+      providerKind: 'teamem',
+      providerUserId: 'bootstrap:mock',
+      displayLogin: 'mock-service',
+    },
+    team: { id: 'team_mock', name: 'Mock Team' },
+    createdAt: new Date('2025-01-01T00:00:00.000Z'),
+    ...overrides,
+  };
+}
 
-      // Details must be populated with validation info
-      expect(details['validation']).toBeDefined();
-      expect(details['validation']).toContain('projectId');
-    }
+/**
+ * Build a test Hono app that wires the real postSearchHandler behind
+ * the requestContext middleware (provides requestId) and sets up a
+ * mock AuthContext via a small middleware so getAuth(c) works.
+ *
+ * This exercises the actual validation logic in search.ts rather than
+ * a local replica.
+ */
+function createTestApp(deps: SearchRoutesDeps) {
+  const app = new Hono<{ Variables: AuthVariables }>().basePath('/');
+  app.use('*', requestContext);
+  app.onError(globalErrorHandler);
+  app.notFound(notFoundHandler);
+
+  // Set mock auth context so getAuth(c) works inside the real handler.
+  app.use('/v1/search', async (c, next) => {
+    c.set(AUTH_KEY, mockAuthContext());
+    await next();
   });
 
-  it('includes empty string query validation message', () => {
-    const rawBody = { projectId: 'prj_test', query: '' };
-    const parsed = searchRequest.safeParse(rawBody);
+  app.post('/v1/search', async (c) => postSearchHandler(c, deps));
 
-    expect(parsed.success).toBe(false);
-    if (!parsed.success) {
-      const issues = parsed.error.issues;
-      const details: Record<string, string> = {};
-      if (issues.length > 0) {
-        const formatted = issues
-          .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
-          .join('; ');
-        details['validation'] = formatted;
-      }
-      expect(details['validation']).toBeDefined();
-      expect(typeof details['validation']).toBe('string');
-    }
+  return app;
+}
+
+function authHeaders() {
+  return { 'Content-Type': 'application/json' };
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+describe('POST /v1/search route (DUA-205 M1-SR-03)', () => {
+  let app: ReturnType<typeof createTestApp>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedSearchFn.mockResolvedValue({
+      requestId: 'req_test',
+      results: [],
+      degraded: true,
+      nextCursor: null,
+    });
+
+    app = createTestApp({ db: {} as never });
   });
 
-  it('includes query-too-long validation message', () => {
-    const rawBody = { projectId: 'prj_test', query: 'x'.repeat(501) };
-    const parsed = searchRequest.safeParse(rawBody);
+  // ── Success ──────────────────────────────────────────────────────────
 
-    expect(parsed.success).toBe(false);
-    if (!parsed.success) {
-      const issues = parsed.error.issues;
-      const details: Record<string, string> = {};
-      if (issues.length > 0) {
-        const formatted = issues
-          .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
-          .join('; ');
-        details['validation'] = formatted;
-      }
-      expect(details['validation']).toBeDefined();
-    }
+  it('returns 200 with search response for a valid request', async () => {
+    mockedSearchFn.mockResolvedValue({
+      requestId: 'req_test',
+      results: [{
+        uuid: '12345678-1234-4234-8234-123456789abc',
+        path: 'services/auth',
+        type: 'service',
+        status: 'active',
+        confidence: 'high',
+        title: 'Auth Service',
+        tags: ['auth'],
+        lastConfirmed: '2025-06-01T00:00:00.000Z',
+        relevance: 0.85,
+        ftsFallback: true,
+      }],
+      degraded: true,
+      nextCursor: null,
+    });
+
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        projectId: 'prj_mock',
+        query: 'test query',
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.requestId).toBeDefined();
+    expect(json.results).toBeInstanceOf(Array);
+    expect(json.results).toHaveLength(1);
+    expect(json.degraded).toBe(true);
   });
 
-  it('includes invalid type enum validation message', () => {
-    const rawBody = { projectId: 'prj_test', query: 'test', type: 'bogus' };
-    const parsed = searchRequest.safeParse(rawBody);
+  // ── limit > 100 → 400 with max=100 indication ───────────────────────
 
-    expect(parsed.success).toBe(false);
-    if (!parsed.success) {
-      const issues = parsed.error.issues;
-      const details: Record<string, string> = {};
-      if (issues.length > 0) {
-        const formatted = issues
-          .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
-          .join('; ');
-        details['validation'] = formatted;
-      }
-      expect(details['validation']).toBeDefined();
-      expect(details['validation']).toContain('type');
-    }
+  it('returns 400 with max=100 indication when limit exceeds 100', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        projectId: 'prj_mock',
+        query: 'test',
+        limit: 101,
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe('invalid_request');
+    // DUA-205: response must indicate max=100
+    expect(json.error.details).toBeDefined();
+    expect(json.error.details.field).toBe('limit');
+    expect(json.error.details.max).toBe('100');
+    expect(json.error.details.provided).toBe('101');
   });
 
-  it('includes invalid status enum validation message', () => {
-    const rawBody = { projectId: 'prj_test', query: 'test', status: 'bogus' };
-    const parsed = searchRequest.safeParse(rawBody);
+  it('accepts limit=100 exactly (boundary)', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        projectId: 'prj_mock',
+        query: 'test',
+        limit: 100,
+      }),
+    });
 
-    expect(parsed.success).toBe(false);
-    if (!parsed.success) {
-      const issues = parsed.error.issues;
-      const details: Record<string, string> = {};
-      if (issues.length > 0) {
-        const formatted = issues
-          .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
-          .join('; ');
-        details['validation'] = formatted;
-      }
-      expect(details['validation']).toBeDefined();
-      expect(details['validation']).toContain('status');
-    }
+    expect(res.status).toBe(200);
   });
 
-  it('includes invalid projectId format validation message', () => {
-    const rawBody = { projectId: 'not-a-valid-id', query: 'test' };
-    const parsed = searchRequest.safeParse(rawBody);
+  it('accepts limit=1 (minimum)', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        projectId: 'prj_mock',
+        query: 'test',
+        limit: 1,
+      }),
+    });
 
-    expect(parsed.success).toBe(false);
-    if (!parsed.success) {
-      const issues = parsed.error.issues;
-      const details: Record<string, string> = {};
-      if (issues.length > 0) {
-        const formatted = issues
-          .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
-          .join('; ');
-        details['validation'] = formatted;
-      }
-      expect(details['validation']).toBeDefined();
-    }
+    expect(res.status).toBe(200);
   });
-});
 
-// ── Tests for frozen contract compliance ────────────────────────────────────
+  // ── Null body → 400 (not 500) ───────────────────────────────────────
 
-describe('POST /v1/search frozen contract (DUA-205)', () => {
+  it('returns 400 for null JSON body (not 500)', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: 'null',
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe('invalid_request');
+  });
+
+  // ── Zod validation errors reach client ───────────────────────────────
+
+  it('returns 400 with validation details for missing projectId', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ query: 'test' }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe('invalid_request');
+    // Validation details must reach the client
+    expect(json.error.details).toBeDefined();
+    expect(json.error.details.validation).toBeDefined();
+    expect(json.error.details.validation).toContain('projectId');
+  });
+
+  it('returns 400 for invalid type filter', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        projectId: 'prj_mock',
+        query: 'test',
+        type: 'invalid-type',
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe('invalid_request');
+    expect(json.error.details).toBeDefined();
+    expect(json.error.details.validation).toBeDefined();
+  });
+
+  it('returns 400 for empty query string', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        projectId: 'prj_mock',
+        query: '',
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe('invalid_request');
+  });
+
+  it('returns 400 for query exceeding 500 characters', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        projectId: 'prj_mock',
+        query: 'x'.repeat(501),
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe('invalid_request');
+  });
+
+  it('returns 400 for a non-JSON body', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: 'not json at all',
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error.code).toBe('invalid_request');
+  });
+
+  // ── Frozen contract compliance ───────────────────────────────────────
+
   it('searchRequest schema rejects limit > 100', () => {
     const result = searchRequest.safeParse({
       projectId: 'prj_test123',
@@ -275,32 +363,32 @@ describe('POST /v1/search frozen contract (DUA-205)', () => {
     expect(result.success).toBe(false);
   });
 
-  it('searchResponse schema requires degraded flag', () => {
-    const response = {
-      requestId: 'req_test',
-      results: [],
-      nextCursor: null,
-      // degraded is missing
-    };
-    const result = searchResponse.safeParse(response);
-    expect(result.success).toBe(false);
-  });
+  // ── Error envelope shape ─────────────────────────────────────────────
 
-  it('error response from InvalidRequestError has frozen envelope shape', () => {
-    const err = new InvalidRequestError('limit must not exceed 100', {
-      field: 'limit',
-      max: '100',
-      provided: '101',
+  it('error responses conform to the frozen error envelope', async () => {
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        projectId: 'prj_mock',
+        query: 'test',
+        limit: 101,
+      }),
     });
 
-    // Error envelope: { requestId, error: { code, message, details? } }
-    expect(err.code).toBe('invalid_request');
-    expect(err.details).toBeDefined();
-    expect(err.details!.field).toBe('limit');
-    expect(err.details!.max).toBe('100');
+    expect(res.status).toBe(400);
+    const json = await res.json();
 
-    // Error message is the internal message, not exposed to client
-    // (the global error handler uses DEFAULT_MESSAGE for the response)
-    expect(err.message).toBe('limit must not exceed 100');
+    // Frozen envelope: { requestId, error: { code, message, details? } }
+    expect(json.requestId).toBeDefined();
+    expect(typeof json.requestId).toBe('string');
+    expect(json.error).toBeDefined();
+    expect(json.error.code).toBe('invalid_request');
+    expect(json.error.message).toBeDefined();
+    expect(typeof json.error.message).toBe('string');
+    // No sensitive keys leaked
+    expect(json.error.stack).toBeUndefined();
+    expect(json.error.cause).toBeUndefined();
+    expect(json.error.sql).toBeUndefined();
   });
 });
