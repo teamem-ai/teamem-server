@@ -1,22 +1,27 @@
 /**
- * F1 compilation job handler — integration tests (M0-F1-06).
+ * Full-loop compilation job handler — integration tests (M1-F2-05).
  *
- * Exercises the full compile job handler against real Postgres with a
- * test-only structured-output stub (no real LLM keys or network required).
+ * Exercises the full F1 → F2 compile job handler against real Postgres with
+ * test-only structured-output stubs (no real LLM keys or network required).
  *
- * The stub LLM client returns pre-configured F1 responses so the test can
- * drive every branch: extract → compiled, skip → skipped (no_knowledge),
- * schema validation failure → failed, and simulated provider error → failed.
+ * The stub LLM client returns pre-configured responses so the test can
+ * drive every branch:
+ *  - extract + unrelated → compiled (new page)
+ *  - extract + confirms → compiled (merged into existing)
+ *  - skip → skipped (no_knowledge)
+ *  - schema validation failure → failed
+ *  - simulated provider error → failed
  *
  * Verifies:
+ *  - CLI step 1: two events about same concept → merge into 1 page
+ *  - CLI step 2: events about different concepts → independent pages
+ *  - CLI step 3: F1 skip event → no page, recorded skipped
  *  - Concept pages, evidence, paths, and contributors are first-class
- *    database rows (CLI acceptance step 3).
+ *    database rows.
  *  - Per-event job outcomes are recorded with the correct discriminated status.
  *  - Job lifecycle transitions: queued → processing → completed / failed.
  *  - The job result snapshot carries the produced concept UUIDs.
  *  - Scoped queries: events outside the project scope are not loaded.
- *  - M0 duplicate pages: calling the same event twice produces TWO concept
- *    pages (no F2 merging — honest and expected).
  *
  * Requirements:
  *   TEST_DATABASE_URL=postgres://teamem:x@localhost:5432/teamem pnpm vitest ...
@@ -46,6 +51,8 @@ import {
 import type { LlmClient, LlmResponse, LlmRequest } from '../../llm/types.js';
 import { LlmError } from '../../llm/types.js';
 import type { F1Output, F1ExtractOutput } from './output.js';
+import type { F2Decision } from '../f2/decision.js';
+import { f2Decision } from '../f2/decision.js';
 
 // ── Setup ───────────────────────────────────────────────────────────────────
 
@@ -82,11 +89,13 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   function freshTeamId(): string {
-    return `team_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // Must match /^team_[A-Za-z0-9]+$/ (from @teamem/schema).
+    return `team_${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
   }
 
   function freshProjectId(): string {
-    return `prj_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // Must match /^prj_[A-Za-z0-9]+$/ (from @teamem/schema).
+    return `prj_${Date.now()}${Math.random().toString(36).slice(2, 8)}`;
   }
 
   async function seedTeam(teamId: string, name = 'Test Team'): Promise<void> {
@@ -165,26 +174,22 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
 
   /**
    * Build a stub {@link LlmClient} that returns a pre-configured response
-   * for every call. The stub validates the Zod schema via actual parse (so
-   * schema-mismatch bugs in the test are caught by the stub), then returns
-   * the canned output.
+   * for every call. The stub is schema-aware: when the schema is
+   * {@link f2Decision}, it returns a canned 'unrelated' decision (so F2
+   * merges never happen unless the test explicitly wires a merge stub).
+   *
+   * The stub validates the Zod schema via actual parse (so schema-mismatch
+   * bugs in the test are caught by the stub), then returns the canned output.
    */
   function stubLlmClient(
     canned: F1Output,
-    opts?: { failSchemaValidation?: boolean },
+    opts?: { failSchemaValidation?: boolean; f2Canned?: F2Decision },
   ): LlmClient {
-    // Re-validate the canned output at construction time so the test
-    // author gets immediate feedback if the canned payload is invalid.
-    if (!opts?.failSchemaValidation) {
-      // We trust the canned output is valid; do a quick check.
-    }
-
     return {
       structured: async <T>(
         request: LlmRequest<T>,
       ): Promise<LlmResponse<T>> => {
         if (opts?.failSchemaValidation) {
-          // Return bad JSON that won't parse as the expected schema.
           throw new LlmError(
             'schema_validation_failed',
             'openai',
@@ -192,8 +197,25 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
           );
         }
 
-        // Parse the canned output against the request schema so we
-        // exercise the real Zod re-validation path.
+        // Dispatch based on the request schema: F1 or F2.
+        // F2 calls get a default 'unrelated' decision (new concept),
+        // unless the test provides a specific F2 canned response.
+        // Cast to unknown for comparison — ZodType<T> and f2Decision have
+        // non-overlapping types at compile time but are the same at runtime.
+        if ((request.schema as unknown) === f2Decision) {
+          const f2Canned = opts?.f2Canned ?? unrelatedDecision();
+          const parsed = (request.schema as unknown as typeof f2Decision).parse(f2Canned);
+          return {
+            output: parsed as unknown as T,
+            model: {
+              provider: 'openai',
+              model: 'gpt-4o-test-stub',
+              requestId: request.requestId,
+            },
+          };
+        }
+
+        // F1 call — parse the canned output against the request schema.
         const parsed = request.schema.parse(canned);
         return {
           output: parsed,
@@ -204,6 +226,28 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
           },
         };
       },
+    };
+  }
+
+  /** Default F2 unrelated decision used when the LLM stub receives an F2 call. */
+  function unrelatedDecision(): F2Decision {
+    return {
+      relationship: 'unrelated',
+      targetConceptId: null,
+      mergedTitle: 'New concept',
+      mergedBody: '## New concept\n\nBody content.',
+      resultStatus: 'active',
+    };
+  }
+
+  /** F2 confirms decision for merge tests. */
+  function confirmsDecision(targetConceptId: string, title: string, body: string): F2Decision {
+    return {
+      relationship: 'confirms',
+      targetConceptId,
+      mergedTitle: title,
+      mergedBody: body,
+      resultStatus: 'active',
     };
   }
 
@@ -353,13 +397,30 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
         }),
       );
 
-      // Multi-call stub: each call returns a different extract with a unique path.
+      // Multi-call stub: schema-aware. First call is F1 (returns extract),
+      // second call is also F1 (returns different extract). If F2 is called
+      // (because the first event created a concept), it returns unrelated.
       let callCount = 0;
       const multiLlm: LlmClient = {
         structured: async <T>(
           request: LlmRequest<T>,
         ): Promise<LlmResponse<T>> => {
           callCount++;
+          // Dispatch based on the schema.
+          if ((request.schema as unknown) === f2Decision) {
+            // F2 call — return unrelated so each event gets its own page.
+            const f2Canned = unrelatedDecision();
+            const parsed = (request.schema as unknown as typeof f2Decision).parse(f2Canned);
+            return {
+              output: parsed as unknown as T,
+              model: {
+                provider: 'openai',
+                model: 'gpt-4o-test-stub',
+                requestId: request.requestId,
+              },
+            };
+          }
+          // F1 call — return extract with unique path.
           const extract = {
             ...validExtract,
             path: `decisions/use-postgres-${callCount}`,
@@ -391,7 +452,7 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
       expect(jobEvents[0]!.status).toBe('compiled');
       expect(jobEvents[1]!.status).toBe('compiled');
 
-      // Each event should produce its own concept.
+      // Each event should produce its own concept (F2 returns unrelated).
       const uuids1 = jobEvents[0]!.conceptUuids ?? [];
       const uuids2 = jobEvents[1]!.conceptUuids ?? [];
       expect(uuids1).toHaveLength(1);
@@ -408,7 +469,7 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
       }
     });
 
-    it('M0 behaviour: produces duplicate concept pages for the same event (no F2 merging)', async () => {
+    it('M1 merge: two events about same concept → one page (CLI step 1)', async () => {
       const teamId = freshTeamId();
       const projectId = freshProjectId();
       await seedTeam(teamId);
@@ -416,20 +477,32 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
 
       const eventId = await seedCliEvent(teamId, projectId);
 
-      // Multi-call stub: each call returns a different path so both
-      // compilations succeed (path uniqueness is a database constraint;
-      // F2 merging in M1 will handle same-path deduplication).
-      let callCount = 0;
-      const multiLlm: LlmClient = {
+      // Schema-aware stub: F1 returns extract, F2 returns confirms (merge).
+      // Use object wrapper to allow mutation inside the closure (lint: prefer-const).
+      const firstConceptUuid: { value: string | undefined } = { value: undefined };
+      const mergingLlm: LlmClient = {
         structured: async <T>(
           request: LlmRequest<T>,
         ): Promise<LlmResponse<T>> => {
-          callCount++;
-          const extract = {
-            ...validExtract,
-            path: `decisions/use-postgres-v${callCount}`,
-          };
-          const parsed = request.schema.parse(extract);
+          if ((request.schema as unknown) === f2Decision) {
+            // F2: merge into the existing concept.
+            const merged = confirmsDecision(
+              firstConceptUuid.value!,
+              'Use Postgres for the main datastore',
+              '## Decision\n\nWe chose Postgres.\n\n### Updated\n\nMore evidence confirms.',
+            );
+            const parsed = (request.schema as unknown as typeof f2Decision).parse(merged);
+            return {
+              output: parsed as unknown as T,
+              model: {
+                provider: 'openai',
+                model: 'gpt-4o-test-stub',
+                requestId: request.requestId,
+              },
+            };
+          }
+          // F1: extract.
+          const parsed = request.schema.parse(validExtract);
           return {
             output: parsed,
             model: {
@@ -441,15 +514,15 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
         },
       };
 
-      const deps: CompileJobDeps = { db, llm: multiLlm };
+      const deps: CompileJobDeps = { db, llm: mergingLlm };
 
-      // First compilation.
+      // First compilation — creates a new concept (no candidates).
       const { job: job1 } = await createJob(
         db,
         makeCreateJobReq(teamId, projectId, {
           kind: 'compilation',
           eventCount: 1,
-          idempotencyKey: 'm0-duplicate-1',
+          idempotencyKey: 'm1-merge-1',
           idempotencyRequestHash: 'hash-1',
         }),
       );
@@ -461,13 +534,21 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
         eventIds: [eventId],
       });
 
-      // Second compilation — same event, different job.
+      // Capture the first concept UUID for the merge target.
+      const conceptsAfterFirst = await db
+        .select()
+        .from(schema.concepts)
+        .where(eq(schema.concepts.teamId, teamId));
+      expect(conceptsAfterFirst).toHaveLength(1);
+      firstConceptUuid.value = conceptsAfterFirst[0]!.uuid;
+
+      // Second compilation — same event, should MERGE into the first concept.
       const { job: job2 } = await createJob(
         db,
         makeCreateJobReq(teamId, projectId, {
           kind: 'compilation',
           eventCount: 1,
-          idempotencyKey: 'm0-duplicate-2',
+          idempotencyKey: 'm1-merge-2',
           idempotencyRequestHash: 'hash-2',
         }),
       );
@@ -491,15 +572,18 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
       expect(j1!.status).toBe('completed');
       expect(j2!.status).toBe('completed');
 
-      // M0: TWO concept pages exist (no F2 merging — honest, expected).
+      // M1: ONE concept page exists (merged, not duplicated).
       const allConcepts = await db
         .select()
         .from(schema.concepts)
         .where(eq(schema.concepts.teamId, teamId));
-      expect(allConcepts).toHaveLength(2);
-      // Both have the same title (from the same extract output).
-      expect(allConcepts[0]!.title).toBe('Use Postgres for the main datastore');
-      expect(allConcepts[1]!.title).toBe('Use Postgres for the main datastore');
+      expect(allConcepts).toHaveLength(1);
+      // The concept should now have two evidence items (one from each event).
+      const evidenceRows = await db
+        .select()
+        .from(schema.conceptEvidence)
+        .where(eq(schema.conceptEvidence.conceptUuid, firstConceptUuid.value!));
+      expect(evidenceRows).toHaveLength(2);
     });
   });
 

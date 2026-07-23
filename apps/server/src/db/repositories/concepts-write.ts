@@ -21,6 +21,7 @@
  */
 import { conceptPath, evidence as evidenceSchema } from '@teamem/schema';
 import { ZodError } from 'zod';
+import { eq, and } from 'drizzle-orm';
 import * as schema from '../schema.js';
 import type { AppDb } from '../client.js';
 
@@ -54,6 +55,32 @@ export interface ConceptEvidenceInput {
 export interface ConceptContributorInput {
   readonly principalId: string;
   readonly provenance: 'webhook_verified' | 'credential_bound' | 'client_claimed' | 'unknown';
+}
+
+// ── Update types ────────────────────────────────────────────────────────────
+
+export interface UpdateConceptInput {
+  readonly teamId: string;
+  readonly projectId: string;
+  readonly conceptUuid: string;
+  /** New title (from F2 mergedTitle). */
+  readonly title: string;
+  /** New body (from F2 mergedBody). */
+  readonly body: string;
+  /** New status (from F2 resultStatus). */
+  readonly status: 'active' | 'superseded' | 'disputed' | 'needs-review';
+  /** New confidence (server-computed). */
+  readonly confidence: 'high' | 'medium' | 'low';
+  /** Merged tags (union of old + new). */
+  readonly tags?: string[];
+  /** Updated last_confirmed — only set for 'confirms' relationship. */
+  readonly lastConfirmed?: Date;
+  /** Evidence rows to add (never replaces existing evidence). */
+  readonly newEvidence: ConceptEvidenceInput[];
+  /** Contributors to add (never replaces existing; dedup on conflict). */
+  readonly newContributors?: ConceptContributorInput[];
+  /** Optional updated embedding from re-embedded merged body. */
+  readonly embedding?: number[] | null;
 }
 
 export interface CreateConceptInput {
@@ -256,6 +283,140 @@ export async function createConcept(
       pathId: pathRow.id,
       evidenceIds: evidenceRows.map((r) => r.id),
       contributorCount,
+    };
+  });
+}
+
+// ── Update repository ───────────────────────────────────────────────────────
+
+/**
+ * Update an existing concept page with F2 merge output inside a single
+ * database transaction.
+ *
+ * This is the merge counterpart to {@link createConcept}: it updates the
+ * concept row (title, body, status, confidence, tags, embedding, and
+ * optionally `last_confirmed`), appends new evidence rows (never deletes
+ * existing evidence), and appends new trusted contributors (with ON CONFLICT
+ * DO NOTHING to avoid duplicates across multiple merges).
+ *
+ * If new evidence is provided, every item must satisfy the frozen evidence
+ * discriminated union or an {@link InvalidConceptError} is thrown BEFORE any
+ * database work.
+ *
+ * The path is NOT changed by this function — F2 merge decisions do not
+ * include a path field (paths are server-owned). Path changes happen via a
+ * separate rename operation.
+ *
+ * Embedding column handling mirrors {@link createConcept}: when
+ * `embedding` is null/undefined the column is left unchanged (not set to
+ * NULL). Pass an explicit value to overwrite.
+ *
+ * @returns The updated concept UUID for downstream tracking.
+ * @throws InvalidConceptError when new evidence fails frozen-contract validation.
+ */
+export async function updateConcept(
+  db: AppDb,
+  input: UpdateConceptInput,
+): Promise<{ uuid: string }> {
+  // Validate new evidence against the frozen evidence schema.
+  if (input.newEvidence.length > 0) {
+    try {
+      evidenceSchema
+        .array()
+        .nonempty()
+        .parse(
+          input.newEvidence.map((ev) => ({
+            ...ev,
+            at: ev.at instanceof Date ? ev.at.toISOString() : ev.at,
+          })),
+        );
+    } catch (err) {
+      if (err instanceof ZodError) {
+        throw new InvalidConceptError(
+          `Invalid evidence in update: ${err.issues.map((e) => e.message).join('; ')}`,
+        );
+      }
+      throw err;
+    }
+  }
+
+  return db.transaction(async (tx) => {
+    // 1. Update the concept row.
+    const updateValues: Record<string, unknown> = {
+      title: input.title,
+      body: input.body,
+      status: input.status,
+      confidence: input.confidence,
+      tags: input.tags ?? [],
+      updatedAt: new Date(),
+    };
+
+    if (input.lastConfirmed) {
+      updateValues['lastConfirmed'] = input.lastConfirmed;
+    }
+
+    if (input.embedding !== undefined) {
+      // Explicit embedding value provided — update (may be null for fts-only).
+      updateValues['embedding'] = input.embedding ?? null;
+    }
+
+    await tx
+      .update(schema.concepts)
+      .set(updateValues)
+      .where(
+        and(
+          eq(schema.concepts.uuid, input.conceptUuid),
+          eq(schema.concepts.teamId, input.teamId),
+          eq(schema.concepts.projectId, input.projectId),
+        ),
+      );
+
+    // 2. Insert new evidence rows (append-only — never deletes existing).
+    const evidenceIds: string[] = [];
+    if (input.newEvidence.length > 0) {
+      const evidenceRows = await tx
+        .insert(schema.conceptEvidence)
+        .values(
+          input.newEvidence.map((ev) => ({
+            teamId: input.teamId,
+            projectId: input.projectId,
+            conceptUuid: input.conceptUuid,
+            kind: ev.kind,
+            ref: ev.ref ?? null,
+            repo: ev.repo ?? null,
+            commitSha: ev.commitSha ?? null,
+            path: ev.path ?? null,
+            at: ev.at,
+          })),
+        )
+        .returning({ id: schema.conceptEvidence.id });
+      evidenceIds.push(...evidenceRows.map((r) => r.id));
+    }
+
+    // 3. Insert new trusted contributors (append-only; dedup via PK).
+    const trustedContributors = (input.newContributors ?? []).filter(
+      (c) => TRUSTED_PROVENANCE.has(c.provenance),
+    );
+
+    if (trustedContributors.length > 0) {
+      // Use ON CONFLICT DO NOTHING — the PK is (conceptUuid, principalId),
+      // so if the same principal was already recorded from a previous merge,
+      // the duplicate row is silently skipped.
+      await tx
+        .insert(schema.conceptContributors)
+        .values(
+          trustedContributors.map((c) => ({
+            teamId: input.teamId,
+            projectId: input.projectId,
+            conceptUuid: input.conceptUuid,
+            principalId: c.principalId,
+          })),
+        )
+        .onConflictDoNothing();
+    }
+
+    return {
+      uuid: input.conceptUuid,
     };
   });
 }
