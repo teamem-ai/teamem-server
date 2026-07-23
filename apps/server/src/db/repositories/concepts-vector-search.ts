@@ -22,6 +22,7 @@ import {
   type ScopeContext,
   isProjectScope,
 } from '../../auth/scope.js';
+import { EMBEDDING_DIMENSION } from '../../llm/embedding/port.js';
 
 // ── Result shape ────────────────────────────────────────────────────────────
 
@@ -37,11 +38,13 @@ export interface SimilarConceptRow {
   readonly tags: string[];
   readonly lastConfirmed: Date;
   /**
-   * Cosine similarity [0, 1].
+   * Cosine similarity [-1, 1].
    *
-   * 1 = identical direction (perfect match), 0 = orthogonal (unrelated).
-   * Derived from `1 - (embedding <=> query)` where `<=>` is the pgvector
-   * cosine distance operator (range [0, 2]).
+   * 1 = identical direction (perfect match), 0 = orthogonal (unrelated),
+   * negative = opposing direction. Derived from `1 - (embedding <=> query)`
+   * where `<=>` is the pgvector cosine distance operator (range [0, 2]).
+   * Real-world embeddings (e.g. text-embedding-3-small) can have negative
+   * components, so negative similarity is expected, not an error.
    */
   readonly similarity: number;
   /** First ~200 chars of body for progressive-disclosure summary. */
@@ -70,7 +73,8 @@ export interface FindSimilarConceptsParams {
 
 // ── Error types ─────────────────────────────────────────────────────────────
 
-/** Thrown when limit exceeds the frozen-contract maximum (100).
+/** Thrown when limit exceeds the frozen-contract maximum (100), or when
+ *  `queryEmbedding` does not have the expected {@link EMBEDDING_DIMENSION}.
  *  Callers (API layer) must map this to HTTP 400 (§6.3). */
 export class InvalidVectorSearchError extends Error {
   readonly name = 'InvalidVectorSearchError';
@@ -136,6 +140,15 @@ export async function findSimilarConcepts(
   // therefore cannot produce meaningful vector-search results.
   if (!isProjectScope(scope)) {
     return [];
+  }
+
+  // Reject malformed embeddings at the boundary rather than letting them
+  // reach pgvector, which throws a terse dimension-mismatch error that would
+  // otherwise escape unhandled and expose internal DB details to the caller.
+  if (queryEmbedding.length !== EMBEDDING_DIMENSION) {
+    throw new InvalidVectorSearchError(
+      `queryEmbedding must have ${EMBEDDING_DIMENSION} dimensions, got ${queryEmbedding.length}`,
+    );
   }
 
   const { teamId, projectId } = scope;

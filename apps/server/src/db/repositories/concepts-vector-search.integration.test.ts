@@ -495,4 +495,24 @@ describe.skipIf(!url)('ConceptsVectorSearch (live Postgres + pgvector)', () => {
       ).rejects.toThrow(InvalidVectorSearchError);
     });
   });
+
+  describe('queryEmbedding dimension validation', () => {
+    it('rejects an empty embedding array', async () => {
+      await expect(
+        findSimilarConcepts(db, {
+          scope: projectScope(teamA, projectA),
+          queryEmbedding: [],
+        }),
+      ).rejects.toThrow(InvalidVectorSearchError);
+    });
+
+    it('rejects a wrong-dimension embedding (e.g. 768-d) with a clear message, never a raw DB error', async () => {
+      await expect(
+        findSimilarConcepts(db, {
+          scope: projectScope(teamA, projectA),
+          queryEmbedding: new Array(768).fill(0.1),
+        }),
+      ).rejects.toThrow('queryEmbedding must have 1536 dimensions, got 768');
+    });
+  });
 });
