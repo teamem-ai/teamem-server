@@ -1,13 +1,14 @@
 /**
- * POST /v1/search route handler (DUA-204 M1-SR-02).
+ * POST /v1/search route handler (DUA-205 M1-SR-03).
  *
  * HTTP route for the search endpoint:
- *   POST /v1/search  — scoped text/semantic search (M1-SR-02)
+ *   POST /v1/search  — scoped text/semantic search
  *
  * Requires Bearer token with `read` scope.  All responses conform to the
  * frozen `searchResponse` DTO from `@teamem/schema`.
  *
- * Scope enforcement (delegated entirely to the search use case):
+ * Scope enforcement (delegated entirely to the search use case, DUA-204
+ * M1-SR-02):
  * - Project-scoped key: projectId is validated against the key's scope.
  *   Cross-project access returns empty results (anti-enumeration) — never
  *   a distinguishing error, per AGENTS.md §5.5/§8.
@@ -46,15 +47,31 @@ async function postSearchHandler(c: Context, deps: SearchRoutesDeps): Promise<Re
 
   // ── Parse & validate request body against the frozen contract ─────────
   const rawBody = await c.req.json().catch(() => ({}));
+
+  // Explicit limit check: the Zod schema enforces max 100, but we check
+  // here first so the error response can include the max value in a
+  // human-readable way (DUA-205 requirement: response must indicate max=100).
+  if (typeof rawBody.limit === 'number' && rawBody.limit > 100) {
+    throw new InvalidRequestError('limit must not exceed 100', {
+      field: 'limit',
+      max: '100',
+      provided: String(rawBody.limit),
+    });
+  }
+
   const parsed = searchRequest.safeParse(rawBody);
 
   if (!parsed.success) {
-    throw new InvalidRequestError('Invalid search request body', {
-      issues: parsed.error.issues.map((i) => ({
-        path: i.path.join('.'),
-        message: i.message,
-      })),
-    } as unknown as Record<string, unknown>);
+    // Format Zod issues as string-valued details so they survive safeDetails.
+    const details: Record<string, string> = {};
+    const issues = parsed.error.issues;
+    if (issues.length > 0) {
+      const formatted = issues
+        .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+        .join('; ');
+      details['validation'] = formatted;
+    }
+    throw new InvalidRequestError('Invalid search request body', details);
   }
 
   const request = parsed.data;
