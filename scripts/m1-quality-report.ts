@@ -496,38 +496,46 @@ async function computePageCountGrowth(
 }
 
 /**
- * Detect duplicate concept pages using {@link recallCandidates}.
+ * Combined detection result from a single pass of {@link recallCandidates}
+ * over every concept. Two metrics are derived from the same recall results
+ * to avoid duplicate DB round-trips:
  *
- * For each concept, queries the real F2 candidate recall pipeline (vector or
- * FTS, depending on available capability) to find similar existing concepts.
- * Pairs whose actual similarity score meets the threshold are flagged as
- * high-similarity potential duplicates.
+ *   - **Duplicate-page rate**: how many concept pairs are so similar
+ *     (≥ threshold) that F2 may have created separate pages for the
+ *     same topic?
+ *   - **Misattribution candidates**: the same high-similarity pairs,
+ *     interpreted as candidates F2 SHOULD have merged but didn't —
+ *     a signal of wrong-assignment or split-page decisions.
  *
- * This replaces the previous weak implementation that counted every FTS
- * match as "high similarity" regardless of actual score (§5.5).
+ * Every pair carries a real `similarity` score from the underlying
+ * recall pipeline (cosine distance in vector mode, normalised ts_rank
+ * in fts mode). No static threshold trickery (§5.5).
  */
-async function detectDuplicatePages(
+async function detectF2QualityPairs(
   db: AppDb,
   concepts: ConceptRow[],
   teamId: string,
   projectId: string,
   threshold: number,
 ): Promise<{
+  /** All unique concept pairs discovered by recall (regardless of score). */
   potentialDuplicates: number;
-  highSimilarityPairs: number;
-  rate: number;
-  samples: MisattributionSample[];
+  /** Pairs with similarity ≥ threshold. */
+  highSimilarityCount: number;
+  /** highSimilarityCount / totalConcepts. */
+  duplicatePageRate: number;
+  /** Top‑20 high-similarity samples for manual review (duplicate lens). */
+  duplicateSamples: MisattributionSample[];
+  /** Top‑20 high-similarity samples for manual review (misattribution lens). */
+  misattributionSamples: MisattributionSample[];
 }> {
   const scope = projectScope(teamId, projectId);
-  // No embedding client → FTS-only via recallCandidates' own degradation path.
-  // This is honest: the recallMode in the report will show 'fts-only'.
   const embeddingClient = null;
   const capability = resolveSemanticCapability(embeddingClient);
 
   const checkedPairs = new Set<string>();
   const highSamples: MisattributionSample[] = [];
   let potentialDuplicates = 0;
-  let highSimilarityPairs = 0;
 
   for (const concept of concepts) {
     if (!concept.title || concept.title.trim().length === 0) continue;
@@ -538,10 +546,7 @@ async function detectDuplicatePages(
         { db, embeddingClient, capability },
         {
           scope,
-          newConcept: {
-            title: concept.title,
-            body: concept.body,
-          },
+          newConcept: { title: concept.title, body: concept.body },
           limit: 10,
         },
       );
@@ -561,11 +566,7 @@ async function detectDuplicatePages(
 
       potentialDuplicates++;
 
-      // Compare the actual similarity score returned by recallCandidates
-      // against the threshold. The score is real: cosine similarity in
-      // vector mode, normalised ts_rank in fts mode.
       if (result.similarity >= threshold) {
-        highSimilarityPairs++;
         highSamples.push({
           conceptA: {
             uuid: concept.uuid,
@@ -584,98 +585,23 @@ async function detectDuplicatePages(
     }
   }
 
-  // Sort by similarity descending; take top 20 for manual review.
+  // Sort once; slice two views.
   highSamples.sort((a, b) => b.similarity - a.similarity);
-  const topSamples = highSamples.slice(0, 20);
 
   return {
     potentialDuplicates,
-    highSimilarityPairs,
-    rate:
+    highSimilarityCount: highSamples.length,
+    duplicatePageRate:
       concepts.length > 0
-        ? Number((highSimilarityPairs / concepts.length).toFixed(4))
+        ? Number((highSamples.length / concepts.length).toFixed(4))
         : 0,
-    samples: topSamples,
-  };
-}
-
-/**
- * Detect potential misattributions: concept pairs that are highly similar
- * but exist as distinct pages. These are candidates that F2 SHOULD have
- * merged into a single page but didn't — a signal of wrong-assignment or
- * split-page decisions.
- *
- * Uses the same {@link recallCandidates} pipeline as duplicate detection,
- * so similarity scores are real (cosine or normalised ts_rank).
- */
-async function detectMisattributions(
-  db: AppDb,
-  concepts: ConceptRow[],
-  teamId: string,
-  projectId: string,
-  threshold: number,
-): Promise<{
-  candidateCount: number;
-  samples: MisattributionSample[];
-}> {
-  const scope = projectScope(teamId, projectId);
-  const embeddingClient = null;
-  const capability = resolveSemanticCapability(embeddingClient);
-
-  const checkedPairs = new Set<string>();
-  const samples: MisattributionSample[] = [];
-
-  for (const concept of concepts) {
-    if (!concept.title || concept.title.trim().length === 0) continue;
-
-    let results: CandidateRecallResult[];
-    try {
-      results = await recallCandidates(
-        { db, embeddingClient, capability },
-        {
-          scope,
-          newConcept: { title: concept.title, body: concept.body },
-          limit: 10,
-        },
-      );
-    } catch {
-      continue;
-    }
-
-    for (const result of results) {
-      if (result.uuid === concept.uuid) continue;
-
-      const pairKey = [concept.uuid, result.uuid].sort().join('|');
-      if (checkedPairs.has(pairKey)) continue;
-      checkedPairs.add(pairKey);
-
-      // A misattribution candidate is a pair of DISTINCT concept pages
-      // that are highly similar: F2 should have merged them but didn't.
-      if (result.similarity >= threshold) {
-        samples.push({
-          conceptA: {
-            uuid: concept.uuid,
-            title: concept.title,
-            path: concept.path,
-          },
-          conceptB: {
-            uuid: result.uuid,
-            title: result.title,
-            path: result.path,
-          },
-          similarity: result.similarity,
-          recallMode: result.mode,
-        });
-      }
-    }
-  }
-
-  // Sort by similarity descending; take top 20.
-  samples.sort((a, b) => b.similarity - a.similarity);
-
-  return {
-    candidateCount: samples.length,
-    samples: samples.slice(0, 20),
+    duplicateSamples: highSamples.slice(0, 20),
+    // Misattribution is the same set of high-similarity pairs interpreted
+    // through the "should F2 have merged these?" lens.  The top 20 are
+    // identical to the duplicate top 20 because both come from the same
+    // sorted array.  Separate slices let the report present each lens
+    // independently without duplicating the recall work.
+    misattributionSamples: highSamples.slice(0, 20),
   };
 }
 
@@ -732,11 +658,13 @@ async function runF2(
       config.projectId,
     );
 
-    // Detect duplicates via recallCandidates (real similarity scores).
+    // Detect high-similarity pairs via a single recallCandidates pass.
+    // Derives both duplicate-page rate and misattribution candidates
+    // from the same recall results — no duplicate DB round-trips.
     console.error(
-      '[m1-quality-report] [f2] Detecting duplicate pages via recallCandidates...',
+      '[m1-quality-report] [f2] Detecting F2 quality pairs via recallCandidates...',
     );
-    const duplicateMetrics = await detectDuplicatePages(
+    const qualityPairs = await detectF2QualityPairs(
       db,
       concepts,
       config.teamId,
@@ -744,24 +672,9 @@ async function runF2(
       config.duplicateSimilarityThreshold,
     );
     console.error(
-      `[m1-quality-report] [f2] Duplicates: ${duplicateMetrics.potentialDuplicates} potential, ` +
-        `${duplicateMetrics.highSimilarityPairs} high-similarity (≥${config.duplicateSimilarityThreshold}), ` +
-        `rate=${duplicateMetrics.rate}`,
-    );
-
-    // Detect misattributions: highly similar but distinct pages.
-    console.error(
-      '[m1-quality-report] [f2] Detecting misattributions via recallCandidates...',
-    );
-    const misattrMetrics = await detectMisattributions(
-      db,
-      concepts,
-      config.teamId,
-      config.projectId,
-      config.duplicateSimilarityThreshold,
-    );
-    console.error(
-      `[m1-quality-report] [f2] Misattribution candidates: ${misattrMetrics.candidateCount}`,
+      `[m1-quality-report] [f2] Pairs: ${qualityPairs.potentialDuplicates} potential, ` +
+        `${qualityPairs.highSimilarityCount} high-similarity (≥${config.duplicateSimilarityThreshold}), ` +
+        `duplicatePageRate=${qualityPairs.duplicatePageRate}`,
     );
 
     return {
@@ -781,14 +694,14 @@ async function runF2(
         byWeek: pageCountGrowth,
       },
       duplicatePageRate: {
-        potentialDuplicates: duplicateMetrics.potentialDuplicates,
-        highSimilarityPairs: duplicateMetrics.highSimilarityPairs,
-        rate: duplicateMetrics.rate,
-        samples: duplicateMetrics.samples,
+        potentialDuplicates: qualityPairs.potentialDuplicates,
+        highSimilarityPairs: qualityPairs.highSimilarityCount,
+        rate: qualityPairs.duplicatePageRate,
+        samples: qualityPairs.duplicateSamples,
       },
       misattribution: {
-        candidateCount: misattrMetrics.candidateCount,
-        samples: misattrMetrics.samples,
+        candidateCount: qualityPairs.highSimilarityCount,
+        samples: qualityPairs.misattributionSamples,
       },
     };
   } finally {
