@@ -24,7 +24,7 @@ import {
 import { runBootstrap } from '../commands/bootstrap.js';
 import { createConcept, type CreateConceptInput } from '../db/repositories/concepts-write.js';
 import * as auditSchema from '../db/schema.js';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql } from 'drizzle-orm';
 
 const url = process.env['TEST_DATABASE_URL'];
 
@@ -158,24 +158,24 @@ describe.skipIf(!url)('POST /v1/search (live Postgres)', () => {
     // Clean up in FK dependency order.
     const ids = [projectId, otherProjectId];
     for (const pid of ids) {
-      await db.execute(`DELETE FROM concept_contributors WHERE project_id = '${pid}'`);
-      await db.execute(`DELETE FROM concept_evidence      WHERE project_id = '${pid}'`);
-      await db.execute(`DELETE FROM concept_paths         WHERE project_id = '${pid}'`);
-      await db.execute(`DELETE FROM concepts              WHERE project_id = '${pid}'`);
-      await db.execute(`DELETE FROM job_events            WHERE project_id = '${pid}'`);
-      await db.execute(`DELETE FROM events                WHERE project_id = '${pid}'`);
-      await db.execute(`DELETE FROM jobs                  WHERE project_id = '${pid}'`);
-      await db.execute(`DELETE FROM api_keys              WHERE project_id = '${pid}'`);
-      await db.execute(`DELETE FROM projects              WHERE id = '${pid}'`);
+      await db.execute(sql`DELETE FROM concept_contributors WHERE project_id = ${pid}`);
+      await db.execute(sql`DELETE FROM concept_evidence      WHERE project_id = ${pid}`);
+      await db.execute(sql`DELETE FROM concept_paths         WHERE project_id = ${pid}`);
+      await db.execute(sql`DELETE FROM concepts              WHERE project_id = ${pid}`);
+      await db.execute(sql`DELETE FROM job_events            WHERE project_id = ${pid}`);
+      await db.execute(sql`DELETE FROM events                WHERE project_id = ${pid}`);
+      await db.execute(sql`DELETE FROM jobs                  WHERE project_id = ${pid}`);
+      await db.execute(sql`DELETE FROM api_keys              WHERE project_id = ${pid}`);
+      await db.execute(sql`DELETE FROM projects              WHERE id = ${pid}`);
     }
-    await db.execute(`DELETE FROM api_keys              WHERE team_id = '${teamId}' AND project_id IS NULL`);
-    await db.execute(`DELETE FROM principals            WHERE team_id = '${teamId}'`);
-    await db.execute(`DELETE FROM teams                 WHERE id = '${teamId}'`);
-    await db.execute(`DELETE FROM principals            WHERE team_id = '${otherTeamId}'`);
-    await db.execute(`DELETE FROM teams                 WHERE id = '${otherTeamId}'`);
+    await db.execute(sql`DELETE FROM api_keys   WHERE team_id = ${teamId} AND project_id IS NULL`);
+    await db.execute(sql`DELETE FROM principals WHERE team_id = ${teamId}`);
+    await db.execute(sql`DELETE FROM teams      WHERE id = ${teamId}`);
+    await db.execute(sql`DELETE FROM principals WHERE team_id = ${otherTeamId}`);
+    await db.execute(sql`DELETE FROM teams      WHERE id = ${otherTeamId}`);
 
     // Clean audit log
-    await db.execute(`DELETE FROM audit_log WHERE team_id IN ('${teamId}', '${otherTeamId}')`);
+    await db.execute(sql`DELETE FROM audit_log WHERE team_id IN (${teamId}, ${otherTeamId})`);
 
     await closeDatabase(pool);
   });
@@ -380,11 +380,12 @@ describe.skipIf(!url)('POST /v1/search (live Postgres)', () => {
         query: 'Other Team Resource',
       });
 
-      // For project-scoped keys, the HTTP layer returns 403 Forbidden
-      // before reaching the use case (clear scope mismatch).
-      expect(res.status).toBe(403);
+      // Cross-team access must be indistinguishable from a project with
+      // zero matches (AGENTS.md §5.5, §8) — never a distinguishing 403.
+      expect(res.status).toBe(200);
       const json = await res.json();
-      expect(json.error.code).toBe('forbidden');
+      expect(json.results).toEqual([]);
+      expect(json.degraded).toBe(true);
     });
 
     it('returns empty results when searching our project with other-team key', async () => {
@@ -393,10 +394,12 @@ describe.skipIf(!url)('POST /v1/search (live Postgres)', () => {
         query: 'authentication',
       });
 
-      // Other team's project-scoped key cannot access our project
-      expect(res.status).toBe(403);
+      // Other team's project-scoped key cannot access our project, and
+      // must see the same empty result as a genuinely empty project.
+      expect(res.status).toBe(200);
       const json = await res.json();
-      expect(json.error.code).toBe('forbidden');
+      expect(json.results).toEqual([]);
+      expect(json.degraded).toBe(true);
     });
 
     it('does not return cross-team concepts in a valid search', async () => {

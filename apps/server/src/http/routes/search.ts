@@ -7,17 +7,17 @@
  * Requires Bearer token with `read` scope.  All responses conform to the
  * frozen `searchResponse` DTO from `@teamem/schema`.
  *
- * Scope enforcement:
+ * Scope enforcement (delegated entirely to the search use case):
  * - Project-scoped key: projectId is validated against the key's scope.
- *   Cross-project access returns empty results (anti-enumeration).
+ *   Cross-project access returns empty results (anti-enumeration) — never
+ *   a distinguishing error, per AGENTS.md §5.5/§8.
  * - allProjects key: the projectId in the body must be a valid project
- *   belonging to the key's team.
+ *   belonging to the key's team; otherwise empty results are returned.
  */
 import { Hono, type Context } from 'hono';
 import { searchRequest, searchResponse } from '@teamem/schema';
 import type { AppDb } from '../../db/client.js';
 import { requireAuth, requireScope, getAuth } from '../auth.js';
-import { isProjectScope, getProjectId } from '../../auth/scope.js';
 import {
   search,
   SearchUseCaseError,
@@ -25,7 +25,6 @@ import {
 } from '../../search/search-use-case.js';
 import {
   InvalidRequestError,
-  ForbiddenError,
   CursorInvalidError,
   InternalError,
   REQUEST_ID_KEY,
@@ -60,20 +59,11 @@ async function postSearchHandler(c: Context, deps: SearchRoutesDeps): Promise<Re
 
   const request = parsed.data;
 
-  // ── Scope pre-check for better error messages ────────────────────────
-  // For project-scoped keys: validate the projectId is within scope.
-  // (The use case will silently return empty, but we want to surface a
-  // clear 403 for obvious scope mismatches at the HTTP layer.)
-  if (isProjectScope(auth.scope)) {
-    const scopeProjectId = getProjectId(auth.scope);
-    if (request.projectId !== scopeProjectId) {
-      throw new ForbiddenError(
-        `API key does not have access to project ${request.projectId}`,
-      );
-    }
-  }
-
   // ── Build context from auth ──────────────────────────────────────────
+  // No HTTP-layer scope pre-check: cross-project/cross-team access must be
+  // indistinguishable from a project with zero matches (AGENTS.md §5.5, §8).
+  // The use case enforces scope and returns an empty, degraded result for
+  // any scope mismatch — never a distinguishing error.
   const searchContext: SearchContext = {
     requestId,
     credentialId: auth.credentialId,
