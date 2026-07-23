@@ -30,7 +30,7 @@
 import { and, eq, desc, sql } from 'drizzle-orm';
 import * as schema from '../../db/schema.js';
 import type { AppDb } from '../../db/client.js';
-import type { EmbeddingClient } from '../../llm/embedding/port.js';
+import { EMBEDDING_DIMENSION, type EmbeddingClient } from '../../llm/embedding/port.js';
 import type { SemanticCapability } from '../../llm/embedding/capability.js';
 import {
   findSimilarConcepts,
@@ -241,6 +241,14 @@ export async function recallCandidates(
       const first = vectors[0];
       if (!first || first.length === 0) {
         throw new Error('Embedding API returned an empty result');
+      }
+      // Guard against wrong-dimension output — a misconfigured provider
+      // returning e.g. 768‑d vectors must surface as CandidateRecallError,
+      // not escape as InvalidVectorSearchError from findSimilarConcepts.
+      if (first.length !== EMBEDDING_DIMENSION) {
+        throw new Error(
+          `Embedding API returned ${first.length}-dimensional vectors, expected ${EMBEDDING_DIMENSION}`,
+        );
       }
       queryEmbedding = first;
     } catch (err: unknown) {

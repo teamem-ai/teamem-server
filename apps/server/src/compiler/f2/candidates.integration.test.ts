@@ -734,6 +734,30 @@ describe.skipIf(!url)('recallCandidates (live Postgres + pgvector)', () => {
         ),
       ).rejects.toThrow(CandidateRecallError);
     });
+
+    it('wrong-dimension embedding throws CandidateRecallError, not InvalidVectorSearchError', async () => {
+      const wrongDimClient: EmbeddingClient = {
+        generate: async () => {
+          // Return a 768-d vector — valid array but wrong dimension.
+          return [new Array(768).fill(0.1)];
+        },
+      };
+
+      await expect(
+        recallCandidates(
+          {
+            db,
+            embeddingClient: wrongDimClient,
+            capability: { mode: 'vector' },
+          },
+          {
+            scope: projectScope(teamA, projectA),
+            newConcept: newConcept(),
+            limit: 5,
+          },
+        ),
+      ).rejects.toThrow(CandidateRecallError);
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════
