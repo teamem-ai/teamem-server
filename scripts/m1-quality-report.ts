@@ -50,6 +50,12 @@ import { createDb, closeDb, type AppDb } from '../apps/server/src/db/client.js';
 import { parseServerEnv } from '../apps/server/src/config/env.js';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import * as schema from '../apps/server/src/db/schema.js';
+import {
+  recallCandidates,
+  type CandidateRecallResult,
+} from '../apps/server/src/compiler/f2/candidates.js';
+import { projectScope } from '../apps/server/src/auth/scope.js';
+import { resolveSemanticCapability } from '../apps/server/src/llm/embedding/capability.js';
 
 // ── Configuration ───────────────────────────────────────────────────────────
 
@@ -177,6 +183,14 @@ export interface TokenCostTier {
   details?: string;
 }
 
+/** A single misattribution candidate flagged for manual review. */
+export interface MisattributionSample {
+  conceptA: { uuid: string; title: string; path: string };
+  conceptB: { uuid: string; title: string; path: string };
+  similarity: number;
+  recallMode: 'vector' | 'fts';
+}
+
 /** F2 merge-quality section. */
 export interface F2Section {
   status: 'ok' | 'skipped';
@@ -199,9 +213,15 @@ export interface F2Section {
     potentialDuplicates: number;
     highSimilarityPairs: number;
     rate: number;
-    sampleCount: number;
+    /** Top-N high-similarity samples for manual review. */
+    samples: MisattributionSample[];
   };
-  misattributionSamples?: number;
+  misattribution?: {
+    /** Number of potential misattribution pairs found. */
+    candidateCount: number;
+    /** Top-N samples for manual review. */
+    samples: MisattributionSample[];
+  };
 }
 
 /** The full M1 quality report. */
@@ -298,6 +318,7 @@ async function runF1(): Promise<F1Section> {
 interface ConceptRow {
   uuid: string;
   title: string;
+  body: string;
   type: string;
   status: string;
   path: string;
@@ -314,6 +335,7 @@ async function loadConcepts(
     .select({
       uuid: schema.concepts.uuid,
       title: schema.concepts.title,
+      body: schema.concepts.body,
       type: schema.concepts.type,
       status: schema.concepts.status,
       createdAt: schema.concepts.createdAt,
@@ -339,6 +361,7 @@ async function loadConcepts(
   return rows.map((r) => ({
     uuid: r.uuid,
     title: r.title,
+    body: r.body,
     type: r.type,
     status: r.status,
     path: r.path ?? '',
@@ -473,11 +496,17 @@ async function computePageCountGrowth(
 }
 
 /**
- * Detect potential duplicate concept pages via FTS similarity.
- * When an embedding client is unavailable this degrades to FTS, which
- * is an honest degradation — flagged in the report's recallMode.
+ * Detect duplicate concept pages using {@link recallCandidates}.
+ *
+ * For each concept, queries the real F2 candidate recall pipeline (vector or
+ * FTS, depending on available capability) to find similar existing concepts.
+ * Pairs whose actual similarity score meets the threshold are flagged as
+ * high-similarity potential duplicates.
+ *
+ * This replaces the previous weak implementation that counted every FTS
+ * match as "high similarity" regardless of actual score (§5.5).
  */
-async function detectDuplicatePagesFts(
+async function detectDuplicatePages(
   db: AppDb,
   concepts: ConceptRow[],
   teamId: string,
@@ -487,48 +516,77 @@ async function detectDuplicatePagesFts(
   potentialDuplicates: number;
   highSimilarityPairs: number;
   rate: number;
-  sampleCount: number;
+  samples: MisattributionSample[];
 }> {
+  const scope = projectScope(teamId, projectId);
+  // No embedding client → FTS-only via recallCandidates' own degradation path.
+  // This is honest: the recallMode in the report will show 'fts-only'.
+  const embeddingClient = null;
+  const capability = resolveSemanticCapability(embeddingClient);
+
+  const checkedPairs = new Set<string>();
+  const highSamples: MisattributionSample[] = [];
   let potentialDuplicates = 0;
   let highSimilarityPairs = 0;
-  const checkedPairs = new Set<string>();
 
   for (const concept of concepts) {
     if (!concept.title || concept.title.trim().length === 0) continue;
 
-    // Use PostgreSQL FTS for similarity: ts_rank on plainto_tsquery.
-    const similar = await db
-      .select({
-        uuid: schema.concepts.uuid,
-        title: schema.concepts.title,
-      })
-      .from(schema.concepts)
-      .where(
-        and(
-          eq(schema.concepts.teamId, teamId),
-          eq(schema.concepts.projectId, projectId),
-          sql`${schema.concepts.uuid} <> ${concept.uuid}::uuid`,
-          sql`to_tsvector('english', ${schema.concepts.title}) @@ plainto_tsquery('english', ${concept.title})`,
-        ),
-      )
-      .limit(5);
+    let results: CandidateRecallResult[];
+    try {
+      results = await recallCandidates(
+        { db, embeddingClient, capability },
+        {
+          scope,
+          newConcept: {
+            title: concept.title,
+            body: concept.body,
+          },
+          limit: 10,
+        },
+      );
+    } catch {
+      // Skip concepts where recall fails (e.g., empty query after sanitization).
+      continue;
+    }
 
-    for (const result of similar) {
+    for (const result of results) {
+      // Exclude self-matches — recallCandidates may return the query concept
+      // itself when it matches via FTS.
+      if (result.uuid === concept.uuid) continue;
+
       const pairKey = [concept.uuid, result.uuid].sort().join('|');
       if (checkedPairs.has(pairKey)) continue;
       checkedPairs.add(pairKey);
+
       potentialDuplicates++;
 
-      // FTS doesn't produce a [0,1] similarity; we estimate based on
-      // the match existing at all. For a more precise measurement, an
-      // embedding client would be required.
-      // For now, any FTS match is a candidate.
-      // We use a lenient threshold since we have no embedding scores.
-      if (threshold <= 0.95) {
+      // Compare the actual similarity score returned by recallCandidates
+      // against the threshold. The score is real: cosine similarity in
+      // vector mode, normalised ts_rank in fts mode.
+      if (result.similarity >= threshold) {
         highSimilarityPairs++;
+        highSamples.push({
+          conceptA: {
+            uuid: concept.uuid,
+            title: concept.title,
+            path: concept.path,
+          },
+          conceptB: {
+            uuid: result.uuid,
+            title: result.title,
+            path: result.path,
+          },
+          similarity: result.similarity,
+          recallMode: result.mode,
+        });
       }
     }
   }
+
+  // Sort by similarity descending; take top 20 for manual review.
+  highSamples.sort((a, b) => b.similarity - a.similarity);
+  const topSamples = highSamples.slice(0, 20);
 
   return {
     potentialDuplicates,
@@ -537,7 +595,87 @@ async function detectDuplicatePagesFts(
       concepts.length > 0
         ? Number((highSimilarityPairs / concepts.length).toFixed(4))
         : 0,
-    sampleCount: Math.min(highSimilarityPairs, 20),
+    samples: topSamples,
+  };
+}
+
+/**
+ * Detect potential misattributions: concept pairs that are highly similar
+ * but exist as distinct pages. These are candidates that F2 SHOULD have
+ * merged into a single page but didn't — a signal of wrong-assignment or
+ * split-page decisions.
+ *
+ * Uses the same {@link recallCandidates} pipeline as duplicate detection,
+ * so similarity scores are real (cosine or normalised ts_rank).
+ */
+async function detectMisattributions(
+  db: AppDb,
+  concepts: ConceptRow[],
+  teamId: string,
+  projectId: string,
+  threshold: number,
+): Promise<{
+  candidateCount: number;
+  samples: MisattributionSample[];
+}> {
+  const scope = projectScope(teamId, projectId);
+  const embeddingClient = null;
+  const capability = resolveSemanticCapability(embeddingClient);
+
+  const checkedPairs = new Set<string>();
+  const samples: MisattributionSample[] = [];
+
+  for (const concept of concepts) {
+    if (!concept.title || concept.title.trim().length === 0) continue;
+
+    let results: CandidateRecallResult[];
+    try {
+      results = await recallCandidates(
+        { db, embeddingClient, capability },
+        {
+          scope,
+          newConcept: { title: concept.title, body: concept.body },
+          limit: 10,
+        },
+      );
+    } catch {
+      continue;
+    }
+
+    for (const result of results) {
+      if (result.uuid === concept.uuid) continue;
+
+      const pairKey = [concept.uuid, result.uuid].sort().join('|');
+      if (checkedPairs.has(pairKey)) continue;
+      checkedPairs.add(pairKey);
+
+      // A misattribution candidate is a pair of DISTINCT concept pages
+      // that are highly similar: F2 should have merged them but didn't.
+      if (result.similarity >= threshold) {
+        samples.push({
+          conceptA: {
+            uuid: concept.uuid,
+            title: concept.title,
+            path: concept.path,
+          },
+          conceptB: {
+            uuid: result.uuid,
+            title: result.title,
+            path: result.path,
+          },
+          similarity: result.similarity,
+          recallMode: result.mode,
+        });
+      }
+    }
+  }
+
+  // Sort by similarity descending; take top 20.
+  samples.sort((a, b) => b.similarity - a.similarity);
+
+  return {
+    candidateCount: samples.length,
+    samples: samples.slice(0, 20),
   };
 }
 
@@ -594,10 +732,11 @@ async function runF2(
       config.projectId,
     );
 
+    // Detect duplicates via recallCandidates (real similarity scores).
     console.error(
-      '[m1-quality-report] [f2] Detecting duplicate pages (FTS)...',
+      '[m1-quality-report] [f2] Detecting duplicate pages via recallCandidates...',
     );
-    const duplicateMetrics = await detectDuplicatePagesFts(
+    const duplicateMetrics = await detectDuplicatePages(
       db,
       concepts,
       config.teamId,
@@ -606,14 +745,29 @@ async function runF2(
     );
     console.error(
       `[m1-quality-report] [f2] Duplicates: ${duplicateMetrics.potentialDuplicates} potential, ` +
-        `${duplicateMetrics.highSimilarityPairs} high-similarity, ` +
+        `${duplicateMetrics.highSimilarityPairs} high-similarity (≥${config.duplicateSimilarityThreshold}), ` +
         `rate=${duplicateMetrics.rate}`,
+    );
+
+    // Detect misattributions: highly similar but distinct pages.
+    console.error(
+      '[m1-quality-report] [f2] Detecting misattributions via recallCandidates...',
+    );
+    const misattrMetrics = await detectMisattributions(
+      db,
+      concepts,
+      config.teamId,
+      config.projectId,
+      config.duplicateSimilarityThreshold,
+    );
+    console.error(
+      `[m1-quality-report] [f2] Misattribution candidates: ${misattrMetrics.candidateCount}`,
     );
 
     return {
       status: 'ok',
       timestamp: new Date().toISOString(),
-      recallMode: 'fts-only',
+      recallMode: 'fts-only', // No embedding client wired; honest degradation.
       counts: {
         totalConcepts: concepts.length,
         totalEvents: eventStats.totalEvents,
@@ -630,9 +784,12 @@ async function runF2(
         potentialDuplicates: duplicateMetrics.potentialDuplicates,
         highSimilarityPairs: duplicateMetrics.highSimilarityPairs,
         rate: duplicateMetrics.rate,
-        sampleCount: duplicateMetrics.sampleCount,
+        samples: duplicateMetrics.samples,
       },
-      misattributionSamples: 0,
+      misattribution: {
+        candidateCount: misattrMetrics.candidateCount,
+        samples: misattrMetrics.samples,
+      },
     };
   } finally {
     await closeDb(db);

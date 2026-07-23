@@ -123,20 +123,29 @@ report will show `{"status":"skipped","reason":"No BYO LLM provider..."}`.*
 
 ### 3.1 Measurement Method
 
-The F2 quality script (`scripts/m1-f2-quality.ts`) queries the database for:
+The F2 quality script (`scripts/m1-f2-quality.ts`) and the aggregation script
+(`scripts/m1-quality-report.ts`) query the database for:
 
 1. **Concept counts**: total concepts, events, compiled/skipped/failed events,
    concepts created vs merged.
 2. **Page-count growth curve**: concept pages created per ISO week.
-3. **Duplicate-page detection**: for each concept, candidate search via FTS
-   (or vector if embedding is available) to find similar existing concepts.
-   Pairs above the similarity threshold are flagged.
-4. **Misattribution sampling**: highly similar but distinct concept pairs are
-   flagged for manual review.
+3. **Duplicate-page detection**: for each concept, the real F2 candidate recall
+   pipeline (`recallCandidates` from `candidates.ts`) is invoked. In vector mode
+   this uses pgvector cosine similarity; in fts-only mode it uses PostgreSQL
+   `websearch_to_tsquery` with normalised `ts_rank` scores. Pairs whose actual
+   similarity score meets the threshold (default 0.85) are flagged as
+   "high-similarity". Each result carries a real `similarity` value — no
+   threshold trickery or static comparison.
+4. **Misattribution detection**: the same `recallCandidates` pipeline identifies
+   highly similar but distinct concept pages. These are pairs that F2 SHOULD
+   have merged into a single page but didn't — a signal of wrong-assignment or
+   split-page decisions. Every flag is backed by a real similarity score.
 
-When an LLM provider is available, the F2 merge-decider re-evaluates the top
-duplicate pair candidates. Without a provider, the script degrades to
-similarity-only heuristics and honestly reports degradation.
+The duplicate and misattribution detection reuses the same candidate recall
+infrastructure as the production F2 merge-decider, so the measurements reflect
+what F2 actually observes, not a separate weaker heuristic. When no embedding
+client is available, `recallCandidates` degrades to FTS with real `ts_rank`
+scores — an honest degradation (§5.5).
 
 ### 3.2 How to Run
 

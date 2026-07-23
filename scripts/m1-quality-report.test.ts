@@ -221,9 +221,12 @@ describe('F2 section', () => {
         potentialDuplicates: 8,
         highSimilarityPairs: 3,
         rate: 0.0714,
-        sampleCount: 3,
+        samples: [],
       },
-      misattributionSamples: 0,
+      misattribution: {
+        candidateCount: 0,
+        samples: [],
+      },
     };
 
     expect(f2.status).toBe('ok');
@@ -267,9 +270,12 @@ describe('F2 section', () => {
         potentialDuplicates: 0,
         highSimilarityPairs: 0,
         rate: 0,
-        sampleCount: 0,
+        samples: [],
       },
-      misattributionSamples: 0,
+      misattribution: {
+        candidateCount: 0,
+        samples: [],
+      },
     };
 
     expect(f2.counts!.totalConcepts).toBe(0);
@@ -476,9 +482,12 @@ describe('M1QualityReport full assembly', () => {
           potentialDuplicates: 8,
           highSimilarityPairs: 3,
           rate: 0.0714,
-          sampleCount: 3,
+          samples: [],
         },
-        misattributionSamples: 0,
+        misattribution: {
+          candidateCount: 0,
+          samples: [],
+        },
       },
       tokenCosts: {
         tiers: [
@@ -624,9 +633,12 @@ describe('M1 quality report boundary cases', () => {
         potentialDuplicates: 0,
         highSimilarityPairs: 0,
         rate: 0,
-        sampleCount: 0,
+        samples: [],
       },
-      misattributionSamples: 0,
+      misattribution: {
+        candidateCount: 0,
+        samples: [],
+      },
     };
 
     expect(f2.duplicatePageRate!.rate).toBe(0);
@@ -652,9 +664,12 @@ describe('M1 quality report boundary cases', () => {
         potentialDuplicates: 500,
         highSimilarityPairs: 50,
         rate: 0.005,
-        sampleCount: 50,
+        samples: [],
       },
-      misattributionSamples: 5,
+      misattribution: {
+        candidateCount: 5,
+        samples: [],
+      },
     };
 
     expect(f2.counts!.totalConcepts).toBe(largeCount);
