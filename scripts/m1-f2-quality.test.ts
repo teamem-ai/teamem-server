@@ -127,7 +127,7 @@ describe('m1-f2-quality report structure', () => {
     // Verify counts section uses real numbers (not hardcoded).
     expect(typeof report.counts).toBe('object');
     const counts = report.counts as Record<string, number>;
-    for (const [k, v] of Object.entries(counts)) {
+    for (const v of Object.values(counts)) {
       expect(typeof v).toBe('number');
       // Allow zero but verify it's a real number property.
       expect(Number.isFinite(v)).toBe(true);
