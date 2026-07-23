@@ -216,15 +216,19 @@ api_post() {
 # ── Detect embedding capability ─────────────────────────────────────────────
 # Uses POST /v1/search with a simple query. The `degraded` field tells us
 # whether semantic (vector) search is available.
+#
+# IMPORTANT: This function is captured via $() — ONLY the final capability
+# string ("vector" or "fts-only") may appear on stdout. All diagnostic
+# output (header, info, warn) MUST go to stderr (>&2).
 detect_semantic_capability() {
-  header "2. Detecting Semantic (Embedding) Capability"
+  header "2. Detecting Semantic (Embedding) Capability" >&2
 
   local search_body search_resp degraded
   search_body="{\"projectId\":\"$E2E_PROJECT_ID\",\"query\":\"rate limiting token bucket\"}"
   search_resp="$(api_post "/v1/search" "$search_body" 2>/dev/null || echo '{}')"
 
   if ! echo "$search_resp" | jq empty >/dev/null 2>&1; then
-    warn "Search response was not valid JSON — assuming fts-only"
+    warn "Search response was not valid JSON — assuming fts-only" >&2
     echo "fts-only"
     return
   fi
@@ -232,13 +236,12 @@ detect_semantic_capability() {
   degraded="$(echo "$search_resp" | jq -r '.degraded // true')"
 
   if [[ "$degraded" == "true" ]]; then
-    info "Semantic capability: fts-only (vector embedding NOT available)"
+    info "Semantic capability: fts-only (vector embedding NOT available)" >&2
     echo "fts-only"
   else
-    info "Semantic capability: vector (embedding provider IS available)"
+    info "Semantic capability: vector (embedding provider IS available)" >&2
     echo "vector"
   fi
-  echo ""
 }
 
 # ── Ingest an event and wait for compilation ────────────────────────────────
@@ -326,7 +329,7 @@ ingest_and_wait() {
       esac
       poll=$((poll + 1))
       if [[ $((poll % 5)) -eq 0 ]]; then
-        info "    ... still waiting (${poll}s, status=$job_status)"
+        info "    ... still waiting ($((poll * 2))s elapsed, status=$job_status)"
       fi
     done
     if [[ "$job_status" != "completed" ]]; then
@@ -339,6 +342,11 @@ ingest_and_wait() {
 }
 
 # ── Count concept pages in the project ──────────────────────────────────────
+# NOTE: Uses limit=100 (the frozen-contract max). For a freshly bootstrapped
+# project this is more than sufficient. If the project already contains >100
+# concepts the count will be capped — the caller must ensure the project is
+# empty or small before relying on this for the page-count-did-not-increase
+# assertion. Since we bootstrap a fresh project for each run, this is safe.
 count_concepts() {
   local resp
   resp="$(api_get "/v1/concepts?projectId=$E2E_PROJECT_ID&limit=100" || echo '{}')"
@@ -347,7 +355,13 @@ count_concepts() {
     return
   fi
   # The concept list response is { requestId, data: [...], nextCursor }
-  echo "$resp" | jq -r '.data | length // 0'
+  local count next_cursor
+  count="$(echo "$resp" | jq -r '.data | length // 0')"
+  next_cursor="$(echo "$resp" | jq -r '.nextCursor // empty')"
+  if [[ -n "$next_cursor" ]]; then
+    warn "count_concepts: result set exceeds page limit (100) — count may be under-reported" >&2
+  fi
+  echo "$count"
 }
 
 # ── Get all concept UUIDs ──────────────────────────────────────────────────
@@ -579,10 +593,11 @@ main() {
   if [[ "$capability" == "vector" ]]; then
     run_semantic_recall_test
   else
+    # FTS-only: truly skip the semantic test. The differentiator (vector-based
+    # cross-language recall) cannot be demonstrated without an embedding
+    # provider — running the test would produce expected-but-confusing
+    # failures. Just report the honest limitation.
     run_fts_baseline_info
-    # Still run the test to show the honest degradation behavior
-    info "Running the test anyway to demonstrate FTS-only behavior..."
-    run_semantic_recall_test || true
   fi
 
   cleanup_test_data
