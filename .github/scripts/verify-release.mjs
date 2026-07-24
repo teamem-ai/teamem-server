@@ -9,11 +9,12 @@ if (!match) {
 }
 
 const version = tag.slice(1);
+// @teamem/schema has an independent public-package release train using
+// schema-vX.Y.Z tags; the server container version must not force its version.
 const packageFiles = [
   'package.json',
   'apps/server/package.json',
   'apps/web/package.json',
-  'packages/schema/package.json',
 ];
 
 for (const file of packageFiles) {
@@ -45,4 +46,3 @@ if (objectType !== 'tag') {
 execFileSync('git', ['merge-base', '--is-ancestor', 'HEAD', 'origin/main']);
 
 process.stdout.write(`Release ${tag} is consistent and points to main.\n`);
-

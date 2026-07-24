@@ -15,8 +15,8 @@ export default defineConfig({
   dts: false,
   // pg and pgvector are native Node addons that must stay external.
   external: ['pg', 'pgvector'],
-  // tsup auto-externalises packages listed in dependencies. Force-bundle
-  // @teamem/schema so the production runtime never loads raw TypeScript
-  // files (the schema package has no build step and exports .ts source).
+  // Force-bundle the workspace source so the server artifact remains
+  // self-contained. External consumers receive @teamem/schema's built npm
+  // artifact instead.
   noExternal: ['@teamem/schema'],
 });
