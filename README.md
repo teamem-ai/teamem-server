@@ -6,9 +6,16 @@ issues), continuously compiles them with LLMs into a structured, interlinked
 knowledge base (open markdown format, fully exportable), and serves it to
 every team member's code agent over MCP with progressive disclosure.
 
-> **Status: pre-M0 skeleton.** This repository was just initialized — no
-> functionality has landed yet. Per project rule, nothing here will ever
-> pretend to work: features appear when they are real, end to end.
+> **Status: M0 complete (infrastructure).** The ingestion → redaction →
+> persistence → queue → minimal-F1 → concept-page loop, tenant-scoped read
+> APIs, GitHub webhook connector, and both Compose topologies are implemented
+> and verified against real Postgres. See the acceptance report in
+> [docs/m0-acceptance.md](./docs/m0-acceptance.md). Producing the first concept
+> page and the real GitHub webhook path require a BYO LLM key and a GitHub App
+> respectively — the code paths exist; end-to-end runs need those credentials.
+> Not yet built (by design, later milestones): Web UI, MCP tools, standalone
+> CLI, F2 semantic merge, real vector retrieval. Per project rule, nothing here
+> pretends to work: features appear when they are real, end to end.
 
 ## Monorepo layout & licensing
 
@@ -65,11 +72,11 @@ TEAMEM_ALL_IN_ONE=true docker compose up -d postgres server
 docker compose up -d --scale worker=3
 ```
 
-**Current status:** only the `postgres` service (with pgvector enabled) is
-functional today — verified: container healthy, `vector` extension active,
-cosine-distance queries working. The `server`/`worker` services are the
-wiring target for M0; their Dockerfile and entrypoints land with the first
-real implementation.
+**Current status:** all three services (`postgres` with pgvector, `server`,
+`worker`) build and run; both the standard 3-container and the all-in-one
+2-container topologies pass their Compose smoke tests. Configure at least one
+LLM provider key (see `.env.example`) for the compile worker to turn events
+into concept pages.
 
 ## Tech stack (decided)
 
