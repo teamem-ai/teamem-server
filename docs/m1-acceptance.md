@@ -1,10 +1,17 @@
-# M1 Final Acceptance Report
+# M1 Server Track Final Acceptance Report
 
 **Task**: DUA-220 — M1-QA-05 — Run and Record Final M1 Acceptance
 **Date**: 2026-07-23T05:45:00Z
 **Commit SHA**: `8ce72e11543d7b47776059de123a618c82c94420`
 **Tester**: Independent acceptance agent (read-only)
 **Branch**: `feature/dua-220-m1-qa-05-run-and-record-final-m1-acceptance`
+
+> **Scope correction (2026-07-24):** This is the final acceptance report for
+> the M1 **server track**, not for overall M1. It remains a point-in-time record
+> of the tests run at the commit above. Since then, CLI-01 has completed and
+> `@teamem/schema@0.1.0` has been published, but CLI-02 through CLI-04 remain
+> pending. Overall M1 therefore remains open. Real-provider checks described
+> below also remain conditional on external credentials.
 
 ---
 
@@ -27,14 +34,15 @@
 
 ---
 
-## M1 Exit Checklist — Synthesized from MVP Scheme §6 (M1 Scope)
+## M1 Server Track Exit Checklist — Synthesized from MVP Scheme §6 (M1 Scope)
 
 The M1 exit criteria below are derived from the M1 scope defined in the
 MVP scheme (`M1（W3-5）编译闭环 —— "知识长得成，agent 拿得到"`) and cross-
 referenced with the dependency tasks (M1-F2-05, M1-SR-03, M1-MCP-02,
-M1-MCP-03, M1-MCP-05, M1-CLI-04, M1-QA-02). Each item is verified against
-the actual repository code, real PostgreSQL/pgvector, and the integration
-test suite.
+M1-MCP-03, M1-MCP-05, M1-CLI-04, M1-QA-02). Server-track items are verified
+against the actual repository code, real PostgreSQL/pgvector, and the
+integration test suite. The external CLI work is reported separately and is
+not covered by the server test results.
 
 ---
 
@@ -183,8 +191,9 @@ docker exec teamem-postgres-1 psql -U teamem -d teamem \
 | Check | Result | Details |
 |---|---|---|
 | CLI in teamem-server monorepo | **N/A** | Per AGENTS.md §3: CLI belongs in separate MIT repo `teamem-ai/cli`, npm package `teamem`. Not in this monorepo. |
-| `@teamem/schema` dependency | **N/A** | CLI depends on the MIT schema package from this monorepo |
-| Verification | **NOT VERIFIED** | External repo not cloned/inspected. Acceptance assumes the CLI repo exists and meets its own task criteria (M1-CLI-04). |
+| CLI-01 repository skeleton | **PASS (post-report update)** | `teamem-ai/cli` PR #1 merged on 2026-07-24; DUA-212 is Done. |
+| Public contract package | **PASS (post-report update)** | `@teamem/schema@0.1.0` is published to npm for independent semver consumption. |
+| CLI-02 through CLI-04 | **PENDING** | Scanner/event generation, network ingestion/polling, and cold-start E2E remain separate CLI tasks. |
 
 ### 4.5 MCP Endpoints — `search`, `get_page`, `timeline`
 
@@ -408,10 +417,10 @@ the recommended path (documented in `docs/m1-quality-report.md` §4.3).
 ### 8.2 `teamem` CLI — External Repository
 
 The `teamem init` CLI lives in the separate `teamem-ai/cli` repository
-(MIT-licensed, npm package `teamem`). This acceptance report cannot verify
-the CLI implementation end-to-end without cloning that repository. The
-dependency `@teamem/schema` from this monorepo provides the contract
-between the CLI and server.
+(MIT-licensed, npm package `teamem`). CLI-01 is now complete and
+`@teamem/schema@0.1.0` is publicly available. The `teamem init` implementation
+and its cold-start end-to-end validation remain pending in CLI-02 through
+CLI-04, so they are outside this server-track acceptance result.
 
 ### 8.3 Integration Test Database Contamination
 
@@ -433,7 +442,7 @@ This is a test infrastructure issue, not a product defect.
 | 3 | Cross-language semantic recall differentiator | Requires embedding provider (vector mode) |
 | 4 | "Why moment" end-to-end demo | Requires LLM provider for compilation |
 | 5 | GitHub webhook signature verification E2E | No GitHub App credentials |
-| 6 | `teamem init` CLI (external repo) | `teamem-ai/cli` repo not cloned |
+| 6 | `teamem init` CLI (external repo) | CLI-01 is complete; CLI-02 through CLI-04 are still pending |
 | 7 | Token cost tier measurements | `LlmClient`/`EmbeddingClient` instrumentation not implemented |
 | 8 | All-in-one mode under sustained load | Smoke test verifies topology only |
 
@@ -444,8 +453,8 @@ This is a test infrastructure issue, not a product defect.
 | Risk | Severity | Mitigation |
 |---|---|---|
 | No LLM provider configured for M1 validation | **Medium** | All code paths are tested at the unit/integration level with real Postgres. Real LLM-dependent assertions (F1 extraction, F2 merge, semantic recall differentiator) require a BYO API key. The infrastructure reports honest skips, never fabricates results. |
-| Token cost instrumentation missing | **Low** | Not a blocking gap for M1 exit — the quality report honestly marks all three tiers `未测`. Adding `usage` to `LlmResponse` is a backward-compatible additive change. |
-| `teamem` CLI not verified | **Low** | The CLI is in a separate repo per agreed architecture (AGENTS.md §3). Server-side ingestion API + `@teamem/schema` contract are verified. |
+| Token cost instrumentation missing | **Low** | Not a blocking gap for the M1 server-track exit — the quality report honestly marks all three tiers `未测`. Adding `usage` to `LlmResponse` is a backward-compatible additive change. |
+| Overall M1 CLI exit is incomplete | **Medium** | CLI-01 and the public schema package are complete; finish CLI-02 through CLI-04 and run the real cold-start E2E before closing overall M1. |
 | GitHub integration not E2E verified | **Low** | Webhook signature verification and event normalization are unit-tested. End-to-end requires GitHub App credentials pointing at a real repo. |
 | Integration test contamination | **Low** | Does not affect production. Isolated integration config works correctly. |
 
@@ -453,7 +462,7 @@ This is a test infrastructure issue, not a product defect.
 
 ## 11. Final Determination
 
-### Conclusion: M1 PASSES — CONDITIONAL ON LLM PROVIDER AVAILABILITY
+### Conclusion: M1 SERVER TRACK PASSES CONDITIONALLY; OVERALL M1 REMAINS OPEN
 
 The M1 compilation loop is fully implemented and verified against real
 PostgreSQL/pgvector at every level that does not require external API keys:
@@ -484,4 +493,6 @@ itself verified.
 
 **The M1 "compilation loop" — knowledge that grows through compilation
 and is accessible to agents via MCP — is architecturally complete and
-verified against real infrastructure.**
+verified against real infrastructure on the server track. Overall M1 must
+remain open until CLI-02 through CLI-04 are complete and the standalone CLI
+passes its cold-start end-to-end acceptance.**

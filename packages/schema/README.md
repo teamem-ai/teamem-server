@@ -10,13 +10,21 @@ import it freely, without copyleft obligations.
 
 ## Status
 
-**Contract v0.2 — FROZEN (2026-07-17, after five review rounds).**
-The Zod schemas in `src/` ARE the contract text ("the appendix is the code"):
+**Contract status: `v0.3-additive`, based on the frozen v0.2 contract.**
+The v0.2 baseline was frozen on 2026-07-17 after five review rounds. The Zod
+schemas in `src/` ARE the contract text ("the appendix is the code"):
 error envelope, cursor, auth vocabulary, ingestion request/response, batch,
-compilations, concept/evidence, event, job, and audit DTOs — each annotated
-with the decision (Q/N) it implements. `src/contract.test.ts` pins the
-frozen decisions as executable checks. Changes from here bump the contract
-version (v0.3); no casual edits.
+compilations, concept/evidence, event, job, audit, and search DTOs.
+
+`src/index.ts` exports the executable `CONTRACT_STATUS` and
+`CONTRACT_ADDITIVE_CHANGES`. The currently enumerated amendments are:
+
+- DUA-129: the generic connector persistence seam;
+- DUA-203: search request and response DTOs.
+
+`src/contract.test.ts` pins both the frozen decisions and the additive
+changelog. Contract changes must remain explicit, versioned, impact-assessed,
+and tested; casual edits are not allowed.
 
 ## Install
 

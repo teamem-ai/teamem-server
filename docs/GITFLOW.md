@@ -154,7 +154,9 @@ Before 1.0:
 - patch releases remain backward-compatible fixes;
 - breaking changes still require explicit migration notes and a `!` PR title.
 
-The root, server, web, and schema package versions move in lockstep for product releases. This keeps one product tag understandable while the project is young. Reconsider independent package versioning only when `@teamem/schema` has a real external release cadence.
+Product releases keep the root, server, and web package versions in lockstep
+and use `vX.Y.Z` tags. `@teamem/schema` is a public npm package with its own
+version and `schema-vX.Y.Z` tag stream; product releases do not bump it.
 
 ## Release Process
 
@@ -165,8 +167,8 @@ Releases are deliberate, not created on every merge.
 3. Update the version in:
    - `package.json`;
    - `apps/server/package.json`;
-   - `apps/web/package.json`;
-   - `packages/schema/package.json`.
+   - `apps/web/package.json`.
+   Do not change `packages/schema/package.json` in a product release PR.
 4. Move relevant entries from `CHANGELOG.md` under `## [X.Y.Z] - YYYY-MM-DD`.
 5. Open PR `chore(release): vX.Y.Z` with `semver:none`.
 6. Run all required checks and obtain the normal review.
@@ -184,6 +186,26 @@ Releases are deliberate, not created on every merge.
 10. Smoke-test the published image as a user would. This is release verification, not deployment.
 
 Release tags are immutable. Never move or reuse a version tag. If a release is bad, fix forward and publish the next patch.
+
+### Independent schema releases
+
+`@teamem/schema` uses a separate release train:
+
+1. Update only `packages/schema/package.json` to the intended semver version in
+   a schema release PR.
+2. Build, test, pack, and smoke-test the package in an isolated consumer, then
+   merge the PR into `main`.
+3. Create an annotated `schema-vX.Y.Z` tag on that exact `main` commit. The tag
+   version must match the schema manifest.
+4. Let `publish-schema.yml` publish through npm Trusted Publisher/OIDC. Do not
+   store a long-lived npm write token.
+5. Verify the public version with
+   `npm view @teamem/schema@X.Y.Z version`.
+
+See [`packages/schema/README.md`](../packages/schema/README.md) for the
+bootstrap history, Trusted Publisher settings, exact tag commands, and
+failure checks. Product `vX.Y.Z` tags and schema `schema-vX.Y.Z` tags are
+independent and must never be moved or reused.
 
 ## Hotfixes
 
