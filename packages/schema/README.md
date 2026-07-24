@@ -37,22 +37,88 @@ published CLI dependency graph.
 
 ## Release
 
-The first public version is `0.1.0`. Because npm trusted publishing is
-configured from an existing package's settings page, the first release is a
-one-time authenticated bootstrap:
+### Initial bootstrap
+
+The first public version, `0.1.0`, was published manually because npm trusted
+publishing can only be configured from an existing package's settings page.
+The one-time bootstrap procedure was:
 
 ```bash
+mkdir -p /tmp/teamem-schema-release
 pnpm --filter @teamem/schema pack --pack-destination /tmp/teamem-schema-release
 npm publish /tmp/teamem-schema-release/teamem-schema-0.1.0.tgz --access public
+npm view @teamem/schema@0.1.0 version
 ```
 
-After the first release:
+Do not run this procedure again for `0.1.0`, and do not push a
+`schema-v0.1.0` tag after the manual publication: npm package versions are
+immutable, so the automated workflow would attempt to publish a version that
+already exists.
 
-1. Configure the package's npm trusted publisher for
-   `teamem-ai/teamem-server` and workflow `publish-schema.yml`.
-2. Create an annotated tag `schema-vX.Y.Z` whose version matches this
-   package's `package.json`.
-3. Push the tag. The workflow verifies, packs, smoke-tests, and publishes the
-   exact tarball using short-lived OIDC credentials.
+### Configure npm trusted publishing
 
-Never add an npm write token to repository secrets for routine releases.
+Configure this once after the initial package publication:
+
+1. Sign in to npm and open the `@teamem/schema` package.
+2. Open **Settings**, find **Trusted Publisher**, and select
+   **GitHub Actions**.
+3. Enter the following values exactly:
+
+   | Field | Value |
+   | --- | --- |
+   | Organization or user | `teamem-ai` |
+   | Repository | `teamem-server` |
+   | Workflow filename | `publish-schema.yml` |
+   | Environment name | Leave blank |
+   | Allowed actions | `npm publish` |
+
+   The workflow field accepts the filename only, not
+   `.github/workflows/publish-schema.yml`. The environment must remain blank
+   because the publish job does not declare a GitHub environment.
+4. Save the trusted publisher.
+
+npm does not validate these values when they are saved. Field values are
+case-sensitive, and a mismatch is only reported when a workflow attempts to
+publish.
+
+The workflow uses a GitHub-hosted runner, Node 24, npm 11.5.1, and
+`id-token: write`, which satisfy npm's OIDC requirements. It does not require
+an `NPM_TOKEN`; npm exchanges the GitHub OIDC identity for a short-lived
+publishing credential and automatically records package provenance.
+
+### Publish a subsequent version
+
+All releases after `0.1.0` use the
+`.github/workflows/publish-schema.yml` trusted-publishing workflow:
+
+1. Update `packages/schema/package.json` to the intended semver version.
+2. Build, test, pack, and smoke-test the package in the release pull request.
+3. Merge the pull request into `main`.
+4. From the updated `main`, create and push an annotated tag whose version
+   exactly matches the package manifest:
+
+   ```bash
+   git switch main
+   git pull --ff-only
+   git tag -a schema-v0.1.1 -m "Release @teamem/schema 0.1.1"
+   git push origin schema-v0.1.1
+   ```
+
+5. Watch the **Publish schema package** GitHub Actions run. The workflow:
+   verifies that the tag is annotated, matches the manifest version, and
+   points to `main`; runs repository validation; creates the release tarball;
+   installs it in an isolated consumer project; and publishes that exact
+   tarball to npm through OIDC.
+6. Verify the public release:
+
+   ```bash
+   npm view @teamem/schema@0.1.1 version
+   ```
+
+Replace `0.1.1` in the example with the intended release version. Never reuse
+or move an existing release tag, and never add a long-lived npm write token to
+repository secrets.
+
+If publishing fails with `ENEEDAUTH`, first confirm that the npm trusted
+publisher fields match the repository and workflow filename exactly and that
+the workflow still has `id-token: write`.
