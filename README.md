@@ -6,16 +6,16 @@ issues), continuously compiles them with LLMs into a structured, interlinked
 knowledge base (open markdown format, fully exportable), and serves it to
 every team member's code agent over MCP with progressive disclosure.
 
-> **Status: M0 complete (infrastructure).** The ingestion → redaction →
-> persistence → queue → minimal-F1 → concept-page loop, tenant-scoped read
-> APIs, GitHub webhook connector, and both Compose topologies are implemented
-> and verified against real Postgres. See the acceptance report in
-> [docs/m0-acceptance.md](./docs/m0-acceptance.md). Producing the first concept
-> page and the real GitHub webhook path require a BYO LLM key and a GitHub App
-> respectively — the code paths exist; end-to-end runs need those credentials.
-> Not yet built (by design, later milestones): Web UI, MCP tools, standalone
-> CLI, F2 semantic merge, real vector retrieval. Per project rule, nothing here
-> pretends to work: features appear when they are real, end to end.
+> **Status: M1 server track complete; standalone CLI work continues.** The
+> server now implements ingestion, F1 extraction, F2 semantic merge, hybrid
+> vector/FTS retrieval, MCP tools, redaction, persistence, and queue processing,
+> with real PostgreSQL/pgvector integration coverage. Checks that require a
+> live LLM/embedding provider or GitHub App remain conditional until those
+> credentials are supplied. See the scope-corrected
+> [M1 acceptance report](./docs/m1-acceptance.md). The standalone MIT CLI lives
+> in [`teamem-ai/cli`](https://github.com/teamem-ai/cli); its repository
+> skeleton is complete, while `teamem init` is still pending. The
+> Web UI remains a later milestone.
 
 ## Monorepo layout & licensing
 
@@ -54,7 +54,7 @@ Releases are versioned Git tags plus GitHub Releases and GHCR images. This
 repository publishes distributable artifacts; it does not deploy a hosted
 environment.
 
-## Self-hosted deployment (topology draft)
+## Self-hosted deployment
 
 Three containers, no Redis — the compile queue is [pg-boss](https://github.com/timgit/pg-boss),
 which lives inside Postgres:
