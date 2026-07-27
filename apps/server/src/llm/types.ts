@@ -33,7 +33,7 @@ export type LlmProviderKind = 'claude' | 'openai' | 'openrouter' | 'custom';
  * Provider-neutral description of the model that produced a response.
  *
  * `model` is the provider-reported model identifier (e.g. `gpt-4o-2024-08-06`
- * or `claude-3-5-sonnet-20241022`). `provider` is the configured kind, and
+ * or `claude-sonnet-4-5-20250929`). `provider` is the configured kind, and
  * `requestId` is the caller-provided id echoed back so a compile job can
  * trace its single LLM call end to end.
  */
@@ -64,12 +64,30 @@ export interface LlmRequest<T> {
   requestId: string;
 }
 
+/**
+ * Token counts reported by the provider for a single call.
+ *
+ * Every supported provider returns these in its response envelope (Anthropic
+ * as `usage.input_tokens`/`output_tokens`, the OpenAI family as
+ * `usage.prompt_tokens`/`completion_tokens`/`total_tokens`); the adapters
+ * normalize them into this one shape so cost reporting does not branch on
+ * provider. It is optional on {@link LlmResponse} because a provider may omit
+ * the envelope — an absent `usage` means "not reported", never zero.
+ */
+export interface LlmUsage {
+  readonly promptTokens: number;
+  readonly completionTokens: number;
+  readonly totalTokens: number;
+}
+
 /** A successfully completed structured-output call. */
 export interface LlmResponse<T> {
   /** The provider output after Zod re-validation against `schema`. */
   output: T;
   /** Provenance of the response: which provider/model produced it. */
   model: ModelMetadata;
+  /** Provider-reported token counts, when the response envelope carried them. */
+  usage?: LlmUsage;
 }
 
 /**

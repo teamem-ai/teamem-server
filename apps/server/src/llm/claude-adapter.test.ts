@@ -198,6 +198,50 @@ describe('parseClaudeResponse — success paths', () => {
     expect(result.providerModel).toBe('my-fallback-model');
   });
 
+  it('normalizes the usage envelope and derives the total Anthropic omits', () => {
+    const raw = JSON.stringify({
+      model: CLAUDE_DEFAULT_MODEL,
+      content: [{ type: 'tool_use', name: CLAUDE_TOOL_NAME, input: validInput }],
+      usage: {
+        input_tokens: 1020,
+        output_tokens: 174,
+        // Cache-tier counters are billing detail, not the prompt/completion
+        // split — they must not be folded into the normalized numbers.
+        cache_creation_input_tokens: 500,
+        cache_read_input_tokens: 60,
+      },
+    });
+    const result = parseClaudeResponse(raw, 'req-usage', CLAUDE_DEFAULT_MODEL);
+    expect(result.usage).toEqual({
+      promptTokens: 1020,
+      completionTokens: 174,
+      totalTokens: 1194,
+    });
+  });
+
+  it('reports no usage rather than zeros when the envelope is absent or malformed', () => {
+    const absent = parseClaudeResponse(
+      JSON.stringify({
+        model: CLAUDE_DEFAULT_MODEL,
+        content: [{ type: 'tool_use', name: CLAUDE_TOOL_NAME, input: validInput }],
+      }),
+      'req-no-usage',
+      CLAUDE_DEFAULT_MODEL,
+    );
+    expect(absent.usage).toBeUndefined();
+
+    const malformed = parseClaudeResponse(
+      JSON.stringify({
+        model: CLAUDE_DEFAULT_MODEL,
+        content: [{ type: 'tool_use', name: CLAUDE_TOOL_NAME, input: validInput }],
+        usage: { input_tokens: 'many' },
+      }),
+      'req-bad-usage',
+      CLAUDE_DEFAULT_MODEL,
+    );
+    expect(malformed.usage).toBeUndefined();
+  });
+
   it('finds tool_use block when mixed with text blocks', () => {
     // If Claude somehow returns a mix (shouldn't with forced tool_use, but
     // we must handle it correctly — find the tool_use, ignore the text).

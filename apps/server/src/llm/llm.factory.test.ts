@@ -14,7 +14,7 @@ import { z } from 'zod';
 
 import { f1Output } from '../compiler/f1/output.js';
 import { llmProviderConfig } from '../config/llm.js';
-import { createLlmClient, DEFAULT_MODELS } from './factory.js';
+import { createLlmClient, DEFAULT_MODELS, SCHEMA_ENVELOPE_PROPERTY } from './factory.js';
 import { LlmError, type FetchLike, type LlmProviderKind } from './types.js';
 
 /* ── Fixtures ──────────────────────────────────────────────────────────────── */
@@ -69,21 +69,27 @@ function makeRecorder(
   };
 }
 
-function okClaude(value: unknown, model = 'claude-3-5-sonnet-20241022'): Response {
+function okClaude(
+  value: unknown,
+  model = 'claude-sonnet-4-5-20250929',
+  usage?: unknown,
+): Response {
   return new Response(
     JSON.stringify({
       model,
       content: [{ type: 'tool_use', name: 'record_structured_output', input: value }],
+      ...(usage === undefined ? {} : { usage }),
     }),
     { status: 200, headers: { 'content-type': 'application/json' } },
   );
 }
 
-function okOpenAi(value: unknown, model = 'gpt-4o-2024-08-06'): Response {
+function okOpenAi(value: unknown, model = 'gpt-4o-2024-08-06', usage?: unknown): Response {
   return new Response(
     JSON.stringify({
       model,
       choices: [{ message: { content: JSON.stringify(value) } }],
+      ...(usage === undefined ? {} : { usage }),
     }),
     { status: 200, headers: { 'content-type': 'application/json' } },
   );
@@ -104,7 +110,7 @@ describe('createLlmClient — instantiates all four BYO configurations', () => {
   });
 
   it('uses DEFAULT_MODELS for the three first-party providers', () => {
-    expect(DEFAULT_MODELS.claude).toBe('claude-3-5-sonnet-20241022');
+    expect(DEFAULT_MODELS.claude).toBe('claude-sonnet-4-5-20250929');
     expect(DEFAULT_MODELS.openai).toBe('gpt-4o-2024-08-06');
     expect(DEFAULT_MODELS.openrouter).toBe('openai/gpt-4o-2024-08-06');
     expect(DEFAULT_MODELS.custom).toBe('');
@@ -155,7 +161,7 @@ describe('structured — success path for each BYO provider', () => {
     expect(res.output).toEqual(validValue);
     expect(res.model).toEqual({
       provider: 'claude',
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-sonnet-4-5-20250929',
       requestId: 'req-1',
     });
 
@@ -341,7 +347,7 @@ describe('structured — failure paths', () => {
     const fetch = makeRecorder(
       () =>
         new Response(
-          JSON.stringify({ model: 'claude-3-5-sonnet-20241022', content: [{ type: 'text', text: 'no' }] }),
+          JSON.stringify({ model: 'claude-sonnet-4-5-20250929', content: [{ type: 'text', text: 'no' }] }),
           { status: 200 },
         ),
       [],
@@ -484,13 +490,38 @@ describe('structured — error redaction (§5.3)', () => {
   });
 });
 
-/* ── Real F1 schema is wired provider-native (discriminated union → oneOf) ─── */
+/* ── Real F1 schema: the root of a provider schema must be a plain object ─── */
 
-describe('structured — uses the real F1 schema with provider-native oneOf', () => {
-  it('claude input_schema is a oneOf of the F1 extract/skip branches', async () => {
+/**
+ * Regression tests for the root-union defect.
+ *
+ * `f1Output` (and `f2Decision`) are `z.discriminatedUnion`s, which
+ * `z.toJSONSchema` renders as a bare root `oneOf` with no `type`. Sending that
+ * shape made every real F1/F2 call fail on every provider:
+ *
+ *   - Anthropic → 400 `tools.0.custom.input_schema.type: Field required`
+ *   - Anthropic with `type` added next to the `oneOf` → 400 `input_schema does
+ *     not support oneOf, allOf, or anyOf at the top level`
+ *   - OpenAI    → 400 `Invalid schema for response_format ...: schema must be a
+ *     JSON Schema of 'type: "object"', got 'type: "None"'`
+ *
+ * The OpenAI rejection above was produced with `strict` absent, so these tests
+ * also pin down that omitting `strict` does not make a root union acceptable.
+ */
+describe('structured — normalizes a root union into a provider-legal object', () => {
+  /** The single rule both provider families enforce at the schema root. */
+  function expectRootObjectShape(schema: Record<string, unknown>): void {
+    expect(schema['type']).toBe('object');
+    expect(schema['oneOf']).toBeUndefined();
+    expect(schema['anyOf']).toBeUndefined();
+    expect(schema['allOf']).toBeUndefined();
+    expect(schema['$schema']).toBeUndefined();
+  }
+
+  it('claude: wraps the F1 union in a required "result" property', async () => {
     const calls: Captured[] = [];
     const fetch = makeRecorder(
-      () => okClaude({ action: 'skip', reason: 'no knowledge' }),
+      () => okClaude({ result: { action: 'skip', reason: 'no knowledge' } }),
       calls,
     );
     const client = createLlmClient(byoConfigs[0], { fetch });
@@ -502,23 +533,30 @@ describe('structured — uses the real F1 schema with provider-native oneOf', ()
       requestId: 'req-f1',
     });
 
+    // The caller still receives the union value, not the envelope.
     expect(res.output).toEqual({ action: 'skip', reason: 'no knowledge' });
-    const inputSchema = (calls[0]!.body as { tools: [{ input_schema: { oneOf: unknown[] } }] }).tools[0].input_schema;
-    expect(Array.isArray(inputSchema.oneOf)).toBe(true);
-    expect(inputSchema.oneOf.length).toBe(2);
-    expect((inputSchema as Record<string, unknown>).$schema).toBeUndefined();
+
+    const inputSchema = (
+      calls[0]!.body as { tools: [{ input_schema: Record<string, unknown> }] }
+    ).tools[0].input_schema;
+    expectRootObjectShape(inputSchema);
+    expect(inputSchema['required']).toEqual([SCHEMA_ENVELOPE_PROPERTY]);
+    // The union itself survives one level down — the branches are still
+    // provider-native structured output, not flattened into a loose object.
+    const inner = (inputSchema['properties'] as Record<string, { oneOf?: unknown[] }>)[
+      SCHEMA_ENVELOPE_PROPERTY
+    ]!;
+    expect(inner.oneOf).toHaveLength(2);
   });
 
-  it('openai response_format schema is the F1 oneOf payload and is sent STRICT-LESS (root oneOf is not strict-compatible)', async () => {
+  it('openai: wraps the F1 union and still omits strict (nested oneOf)', async () => {
     const calls: Captured[] = [];
     const fetch = makeRecorder(
-      () => okOpenAi({ action: 'skip', reason: 'nope' }),
+      () => okOpenAi({ result: { action: 'skip', reason: 'nope' } }),
       calls,
     );
     const client = createLlmClient(byoConfigs[1], { fetch });
 
-    // The request must actually complete (i.e. be a runnable OpenAI call for
-    // the real F1 schema), not a shape OpenAI would 400 under strict:true.
     const res = await client.structured({
       schema: f1Output,
       systemPrompt: 'sys',
@@ -527,30 +565,199 @@ describe('structured — uses the real F1 schema with provider-native oneOf', ()
     });
     expect(res.output).toEqual({ action: 'skip', reason: 'nope' });
 
-    const envelope = (calls[0]!.body as { response_format: { json_schema: { schema: { oneOf: unknown[] }; strict?: boolean } } })
-      .response_format.json_schema;
-    const schema = envelope.schema;
-    expect(Array.isArray(schema.oneOf)).toBe(true);
-    expect(schema.oneOf.length).toBe(2);
-    expect((schema as Record<string, unknown>).$schema).toBeUndefined();
-    // Root-level oneOf is NOT OpenAI strict-compatible -> strict must be absent
-    // (sending strict:true here would be the unrunnable implementation).
+    const envelope = (
+      calls[0]!.body as {
+        response_format: {
+          json_schema: { schema: Record<string, unknown>; strict?: boolean };
+        };
+      }
+    ).response_format.json_schema;
+    expectRootObjectShape(envelope.schema);
+    expect(envelope.schema['required']).toEqual([SCHEMA_ENVELOPE_PROPERTY]);
+    // Wrapping fixes the root, but the nested oneOf is still not strict-
+    // compatible, so strict must stay absent.
     expect(envelope.strict).toBeUndefined();
   });
 
-  it('an object-root schema IS sent with strict:true on the OpenAI family', async () => {
+  it('parses an envelope Anthropic filled with a serialized JSON string', async () => {
+    // Observed against the live API: the model may put the serialized object
+    // in the envelope property instead of the object itself.
+    const calls: Captured[] = [];
+    const fetch = makeRecorder(
+      () => okClaude({ result: JSON.stringify({ action: 'skip', reason: 'stringified' }) }),
+      calls,
+    );
+    const client = createLlmClient(byoConfigs[0], { fetch });
+
+    const res = await client.structured({
+      schema: f1Output,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-f1-str',
+    });
+    expect(res.output).toEqual({ action: 'skip', reason: 'stringified' });
+  });
+
+  it('rejects an envelope whose payload does not satisfy the union', async () => {
+    // Unwrapping must not become a way to smuggle unvalidated output through:
+    // Zod remains the authority (§5.2).
+    const calls: Captured[] = [];
+    const fetch = makeRecorder(
+      () => okClaude({ result: { action: 'skip' } }), // `reason` missing
+      calls,
+    );
+    const client = createLlmClient(byoConfigs[0], { fetch });
+
+    await expect(
+      client.structured({
+        schema: f1Output,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-f1-bad',
+      }),
+    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+  });
+
+  it('rejects a bare union payload sent without the envelope', async () => {
+    const calls: Captured[] = [];
+    const fetch = makeRecorder(() => okClaude({ action: 'skip', reason: 'unwrapped' }), calls);
+    const client = createLlmClient(byoConfigs[0], { fetch });
+
+    await expect(
+      client.structured({
+        schema: f1Output,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-f1-bare',
+      }),
+    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+  });
+
+  it('leaves an object-root schema unwrapped and sends it with strict:true', async () => {
     const calls: Captured[] = [];
     const fetch = makeRecorder(() => okOpenAi(validValue), calls);
     const client = createLlmClient(byoConfigs[1], { fetch });
-    await client.structured({
+    const res = await client.structured({
       schema: answerSchema,
       systemPrompt: 'sys',
       userPrompt: 'usr',
       requestId: 'req-strict',
     });
-    const envelope = (calls[0]!.body as { response_format: { json_schema: { strict?: boolean } } })
-      .response_format.json_schema;
+    expect(res.output).toEqual(validValue);
+
+    const envelope = (
+      calls[0]!.body as {
+        response_format: {
+          json_schema: { schema: Record<string, unknown>; strict?: boolean };
+        };
+      }
+    ).response_format.json_schema;
     expect(envelope.strict).toBe(true);
+    // No envelope: the caller's own properties are at the root.
+    expect(Object.keys(envelope.schema['properties'] as object)).toEqual(['answer', 'count']);
+  });
+
+  it('claude: an object-root schema is sent unwrapped too', async () => {
+    const calls: Captured[] = [];
+    const fetch = makeRecorder(() => okClaude(validValue), calls);
+    const client = createLlmClient(byoConfigs[0], { fetch });
+    const res = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-plain-claude',
+    });
+    expect(res.output).toEqual(validValue);
+
+    const inputSchema = (
+      calls[0]!.body as { tools: [{ input_schema: Record<string, unknown> }] }
+    ).tools[0].input_schema;
+    expect(Object.keys(inputSchema['properties'] as object)).toEqual(['answer', 'count']);
+  });
+});
+
+/* ── Token usage is captured from both provider envelopes ─────────────────── */
+
+describe('structured — reports provider token usage', () => {
+  it('normalizes the Anthropic usage envelope', async () => {
+    const calls: Captured[] = [];
+    const fetch = makeRecorder(
+      () =>
+        okClaude(validValue, 'claude-sonnet-4-5-20250929', {
+          input_tokens: 1020,
+          output_tokens: 174,
+          cache_read_input_tokens: 0,
+        }),
+      calls,
+    );
+    const client = createLlmClient(byoConfigs[0], { fetch });
+    const res = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-usage-claude',
+    });
+    // Anthropic reports no total; it is derived.
+    expect(res.usage).toEqual({
+      promptTokens: 1020,
+      completionTokens: 174,
+      totalTokens: 1194,
+    });
+  });
+
+  it('normalizes the OpenAI-family usage envelope and honors total_tokens', async () => {
+    const calls: Captured[] = [];
+    const fetch = makeRecorder(
+      () =>
+        okOpenAi(validValue, 'gpt-4o-2024-08-06', {
+          prompt_tokens: 229,
+          completion_tokens: 128,
+          total_tokens: 357,
+        }),
+      calls,
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+    const res = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-usage-openai',
+    });
+    expect(res.usage).toEqual({
+      promptTokens: 229,
+      completionTokens: 128,
+      totalTokens: 357,
+    });
+  });
+
+  it('leaves usage undefined when the provider does not report it', async () => {
+    // "Not reported" must never be recorded as zero cost.
+    const calls: Captured[] = [];
+    const fetch = makeRecorder(() => okOpenAi(validValue), calls);
+    const client = createLlmClient(byoConfigs[1], { fetch });
+    const res = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-usage-absent',
+    });
+    expect(res.usage).toBeUndefined();
+  });
+
+  it('ignores a malformed usage envelope rather than reporting zeros', async () => {
+    const calls: Captured[] = [];
+    const fetch = makeRecorder(
+      () => okOpenAi(validValue, 'gpt-4o-2024-08-06', { prompt_tokens: 'lots' }),
+      calls,
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+    const res = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-usage-bad',
+    });
+    expect(res.usage).toBeUndefined();
   });
 });
 

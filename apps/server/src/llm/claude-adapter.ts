@@ -21,14 +21,21 @@
  * authority on correctness.
  */
 import type { ResolvedLlmConfig } from '../config/llm.js';
-import { LlmError } from './types.js';
+import { LlmError, type LlmUsage } from './types.js';
 
 /** Anthropic API host. */
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
 export const ANTHROPIC_API_VERSION = '2023-06-01';
 
-/** Default model for Claude. */
-export const CLAUDE_DEFAULT_MODEL = 'claude-3-5-sonnet-20241022';
+/**
+ * Default model for Claude.
+ *
+ * Anthropic retires dated model ids, and a retired id fails the whole call
+ * with a 404 `not_found_error` — a default that silently rots is a default
+ * that makes the provider unusable. Keep this pinned to a dated id that is
+ * currently listed by `GET /v1/models` for a normal API account.
+ */
+export const CLAUDE_DEFAULT_MODEL = 'claude-sonnet-4-5-20250929';
 
 /** The tool name used in the forced-tool-use request and response parsing. */
 export const CLAUDE_TOOL_NAME = 'record_structured_output';
@@ -39,6 +46,13 @@ export const CLAUDE_TOOL_NAME = 'record_structured_output';
  * The request forces the model to call {@link CLAUDE_TOOL_NAME} with the
  * provided JSON Schema as the tool's `input_schema`. The model cannot respond
  * with free text — if it does, the response parser rejects it.
+ *
+ * `jsonSchema` must already be root-object shaped. Anthropic validates
+ * `input_schema` before it looks at anything else and rejects both a missing
+ * root `type` (`input_schema.type: Field required`) and a root combinator
+ * (`input_schema does not support oneOf, allOf, or anyOf at the top level`).
+ * The factory owns that normalization (`toProviderSchema`) because the OpenAI
+ * family enforces the same root-object rule.
  */
 export function buildClaudeRequest(
   config: ResolvedLlmConfig & { kind: 'claude' },
@@ -86,6 +100,8 @@ export interface ClaudeExtracted {
   value: unknown;
   /** The provider-reported model identifier, or a fallback. */
   providerModel: string;
+  /** Token counts from `usage`, when the envelope carried them. */
+  usage?: LlmUsage;
 }
 
 /**
@@ -116,6 +132,7 @@ export function parseClaudeResponse(
 
   const providerModel =
     typeof envelope.model === 'string' ? envelope.model : fallbackModel;
+  const usage = parseClaudeUsage(envelope.usage);
 
   const content = envelope.content;
   if (!Array.isArray(content)) {
@@ -128,7 +145,9 @@ export function parseClaudeResponse(
       block.type === 'tool_use' &&
       block.name === CLAUDE_TOOL_NAME
     ) {
-      return { value: block.input, providerModel };
+      return usage
+        ? { value: block.input, providerModel, usage }
+        : { value: block.input, providerModel };
     }
   }
 
@@ -139,6 +158,29 @@ export function parseClaudeResponse(
 }
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
+
+/**
+ * Normalize Anthropic's `usage` envelope into {@link LlmUsage}.
+ *
+ * Anthropic reports `input_tokens`/`output_tokens` and no total, so the total
+ * is derived. Cache-tier counters (`cache_creation_input_tokens` and friends)
+ * are deliberately ignored: they are billing detail, not the prompt/completion
+ * split the quality report needs. Anything unparseable yields `undefined` —
+ * "not reported" must not be recorded as zero.
+ */
+function parseClaudeUsage(raw: unknown): LlmUsage | undefined {
+  if (!isObject(raw)) return undefined;
+  const promptTokens = raw['input_tokens'];
+  const completionTokens = raw['output_tokens'];
+  if (typeof promptTokens !== 'number' || typeof completionTokens !== 'number') {
+    return undefined;
+  }
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: promptTokens + completionTokens,
+  };
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
