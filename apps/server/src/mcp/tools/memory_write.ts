@@ -24,7 +24,7 @@ import type { ToolRegistry, ToolExecutionContext, ToolResult } from '../registry
 import { stripPrivateTags } from '../../security/private-tags.js';
 import { payloadHash, payloadByteLength } from '../../security/payload-hash.js';
 import { insertEvent, IdempotencyConflictError as RepoIdempotencyConflictError } from '../../db/repositories/events.js';
-import { createJob } from '../../db/repositories/jobs.js';
+import { createJob, upsertJobEvent } from '../../db/repositories/jobs.js';
 import { isProjectScope, getTeamId, getProjectId } from '../../auth/scope.js';
 import { and, eq } from 'drizzle-orm';
 import * as dbSchema from '../../db/schema.js';
@@ -215,10 +215,26 @@ async function handleMemoryWrite(
       });
       jobId = jobResult.job.id;
 
+      // Link the event to the job. The worker resolves what to compile
+      // through job_events, so a job without this row claims successfully
+      // and then fails with `no_events_found`.
+      await upsertJobEvent(db, {
+        teamId,
+        projectId,
+        jobId,
+        eventId,
+        status: 'pending',
+      });
+
       // Enqueue in pg-boss when queue is available and job was newly created.
       if (queue && jobResult.created) {
         try {
-          await queue.send({ jobId, eventId });
+          await queue.send({
+            jobId,
+            teamId,
+            projectId,
+            kind: 'ingest_event',
+          });
         } catch (err) {
           console.error(
             JSON.stringify({

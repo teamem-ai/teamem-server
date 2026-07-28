@@ -14,7 +14,10 @@ import { parseServerEnv } from './config/env.js';
 import { startRuntime, type Runtime, type RuntimeStartup } from './composition-root.js';
 import { createDbHandle } from './db/client.js';
 import { createCompileQueue } from './queue/boss.js';
-import { startEmbeddedWorker } from './worker/embedded.js';
+import {
+  createNoProviderHandler,
+  startEmbeddedWorker,
+} from './worker/embedded.js';
 import { createCompileJobHandler } from './queue/worker.js';
 import { createLlmClient } from './llm/factory.js';
 import { createEmbeddingClient } from './llm/embedding/factory.js';
@@ -52,7 +55,16 @@ export function createRuntimeStartup(config: {
       return { stop: () => queue.stop() };
     },
     async startHttpServer() {
-      const server = startServer(undefined, { db: dbHandle.db, queue });
+      // The embedding client must reach the HTTP surface too, not just the
+      // compile worker: POST /v1/search and every MCP tool resolve semantic
+      // capability from it. Omitting it left the read path permanently in
+      // fts-only mode — embeddings were written during compilation and then
+      // never used — no matter how the deployment was configured.
+      const server = startServer(undefined, {
+        db: dbHandle.db,
+        queue,
+        embeddingClient,
+      });
       // `serve()` from @hono/node-server starts listening asynchronously.
       // Wait for the server to be ready so an EADDRINUSE failure surfaces
       // during startup and not as an uncatchable background crash.
@@ -79,12 +91,13 @@ export function createRuntimeStartup(config: {
           'TEAMEM_OPENAI_API_KEY, or equivalent.',
         );
       }
-      // Use the real handler when an LLM is configured; fall back to the
-      // no-op placeholder otherwise so the queue is still consumed and
-      // acknowledged (prevents unbounded retry loops).
+      // Use the real handler when an LLM is configured. Without one, the
+      // no-provider handler still claims each job and moves it to a terminal
+      // `failed` state, so the row does not sit in `queued` forever with no
+      // consumer that will ever return to it.
       const handler = llm
         ? createCompileJobHandler({ db: dbHandle.db, llm, embeddingClient })
-        : undefined;
+        : createNoProviderHandler(dbHandle.db);
       return startEmbeddedWorker(queue, handler);
     },
   };

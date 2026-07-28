@@ -46,16 +46,12 @@
  * Stderr: progress and diagnostic messages.
  */
 
-import { createDb, closeDb, type AppDb } from '../apps/server/src/db/client.js';
 import { parseServerEnv } from '../apps/server/src/config/env.js';
-import { eq, and, desc, sql } from 'drizzle-orm';
-import * as schema from '../apps/server/src/db/schema.js';
 import {
-  recallCandidates,
-  type CandidateRecallResult,
-} from '../apps/server/src/compiler/f2/candidates.js';
-import { projectScope } from '../apps/server/src/auth/scope.js';
-import { resolveSemanticCapability } from '../apps/server/src/llm/embedding/capability.js';
+  runF2Analysis,
+  type MisattributionMetrics,
+  type TierUsage,
+} from './m1-f2-quality.js';
 
 // ── Configuration ───────────────────────────────────────────────────────────
 
@@ -74,6 +70,8 @@ interface QualityConfig {
   maxConcepts: number;
   /** Similarity threshold for duplicate detection (0–1). */
   duplicateSimilarityThreshold: number;
+  /** Cap on how many merge decisions the wrong-attribution replay may run. */
+  maxMisattributionReplays: number;
 }
 
 function parseQualityConfig(): QualityConfig {
@@ -90,6 +88,9 @@ function parseQualityConfig(): QualityConfig {
     maxConcepts: Number(process.env['TEAMEM_QUALITY_MAX_CONCEPTS'] || '500'),
     duplicateSimilarityThreshold: Number(
       process.env['TEAMEM_QUALITY_DUPLICATE_THRESHOLD'] || '0.85',
+    ),
+    maxMisattributionReplays: Number(
+      process.env['TEAMEM_QUALITY_MAX_REPLAYS'] || '50',
     ),
   };
 
@@ -161,6 +162,8 @@ export interface F1Section {
     p50: number;
     p95: number;
   };
+  /** Provider-reported token usage summed over this run's F1 calls. */
+  tokenUsage?: TierUsage;
 }
 
 /** Token cost tier. */
@@ -183,8 +186,8 @@ export interface TokenCostTier {
   details?: string;
 }
 
-/** A single misattribution candidate flagged for manual review. */
-export interface MisattributionSample {
+/** A high-similarity pair of distinct pages, flagged as a possible duplicate. */
+export interface DuplicatePairSample {
   conceptA: { uuid: string; title: string; path: string };
   conceptB: { uuid: string; title: string; path: string };
   similarity: number;
@@ -214,13 +217,20 @@ export interface F2Section {
     highSimilarityPairs: number;
     rate: number;
     /** Top-N high-similarity samples for manual review. */
-    samples: MisattributionSample[];
+    samples: DuplicatePairSample[];
   };
-  misattribution?: {
-    /** Number of potential misattribution pairs found. */
-    candidateCount: number;
-    /** Top-N samples for manual review. */
-    samples: MisattributionSample[];
+  /**
+   * Wrong-attribution rate, measured by replaying each recorded merge
+   * decision. Distinct from duplicatePageRate: that one asks "should these two
+   * pages have been one?", this one asks "did this event go to the right
+   * page?".
+   */
+  misattribution?: MisattributionMetrics;
+  /** Provider-reported token usage per cost tier, observed during the run. */
+  tokenUsage?: {
+    f1Extract: TierUsage;
+    f2Merge: TierUsage;
+    embedding: TierUsage;
   };
 }
 
@@ -239,6 +249,8 @@ export interface M1QualityReport {
     note: string;
   };
 }
+
+// ── F1: Signal-to-noise ─────────────────────────────────────────────────────
 
 // ── F1: Signal-to-noise ─────────────────────────────────────────────────────
 
@@ -302,6 +314,13 @@ async function runF1(): Promise<F1Section> {
         p50: report.latencyMs.p50,
         p95: report.latencyMs.p95,
       },
+      tokenUsage: {
+        measured: report.tokenUsage.measured,
+        calls: report.tokenUsage.callsWithUsage,
+        promptTokens: report.tokenUsage.promptTokens,
+        completionTokens: report.tokenUsage.completionTokens,
+        totalTokens: report.tokenUsage.totalTokens,
+      },
     };
   } catch (err: unknown) {
     const message =
@@ -315,299 +334,18 @@ async function runF1(): Promise<F1Section> {
 
 // ── F2: Merge quality ───────────────────────────────────────────────────────
 
-interface ConceptRow {
-  uuid: string;
-  title: string;
-  body: string;
-  type: string;
-  status: string;
-  path: string;
-  createdAt: Date;
-}
-
-async function loadConcepts(
-  db: AppDb,
-  teamId: string,
-  projectId: string,
-  limit: number,
-): Promise<ConceptRow[]> {
-  const rows = await db
-    .select({
-      uuid: schema.concepts.uuid,
-      title: schema.concepts.title,
-      body: schema.concepts.body,
-      type: schema.concepts.type,
-      status: schema.concepts.status,
-      createdAt: schema.concepts.createdAt,
-      path: schema.conceptPaths.path,
-    })
-    .from(schema.concepts)
-    .leftJoin(
-      schema.conceptPaths,
-      and(
-        eq(schema.conceptPaths.conceptUuid, schema.concepts.uuid),
-        eq(schema.conceptPaths.isCurrent, true),
-      ),
-    )
-    .where(
-      and(
-        eq(schema.concepts.teamId, teamId),
-        eq(schema.concepts.projectId, projectId),
-      ),
-    )
-    .orderBy(desc(schema.concepts.createdAt))
-    .limit(limit);
-
-  return rows.map((r) => ({
-    uuid: r.uuid,
-    title: r.title,
-    body: r.body,
-    type: r.type,
-    status: r.status,
-    path: r.path ?? '',
-    createdAt: r.createdAt,
-  }));
-}
-
-async function loadEventStats(
-  db: AppDb,
-  teamId: string,
-  projectId: string,
-): Promise<{
-  totalEvents: number;
-  compiledEvents: number;
-  skippedEvents: number;
-  failedEvents: number;
-}> {
-  const eventCount = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.events)
-    .where(
-      and(
-        eq(schema.events.teamId, teamId),
-        eq(schema.events.projectId, projectId),
-      ),
-    );
-  const totalEvents = eventCount[0]?.count ?? 0;
-
-  const jobEventStats = await db
-    .select({
-      status: schema.jobEvents.status,
-      count: sql<number>`count(*)::int`,
-    })
-    .from(schema.jobEvents)
-    .where(
-      and(
-        eq(schema.jobEvents.teamId, teamId),
-        eq(schema.jobEvents.projectId, projectId),
-      ),
-    )
-    .groupBy(schema.jobEvents.status);
-
-  let compiledEvents = 0;
-  let skippedEvents = 0;
-  let failedEvents = 0;
-  for (const row of jobEventStats) {
-    if (row.status === 'compiled') compiledEvents = row.count;
-    else if (row.status === 'skipped') skippedEvents = row.count;
-    else if (row.status === 'failed') failedEvents = row.count;
-  }
-
-  return { totalEvents, compiledEvents, skippedEvents, failedEvents };
-}
-
-async function loadConceptsCreatedAndMerged(
-  db: AppDb,
-  teamId: string,
-  projectId: string,
-): Promise<{ conceptsCreated: number; conceptsMerged: number }> {
-  const totalConcepts = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(schema.concepts)
-    .where(
-      and(
-        eq(schema.concepts.teamId, teamId),
-        eq(schema.concepts.projectId, projectId),
-      ),
-    );
-
-  const compiled = await db
-    .select({
-      conceptUuids: schema.jobEvents.conceptUuids,
-    })
-    .from(schema.jobEvents)
-    .where(
-      and(
-        eq(schema.jobEvents.teamId, teamId),
-        eq(schema.jobEvents.projectId, projectId),
-        eq(schema.jobEvents.status, 'compiled'),
-      ),
-    );
-
-  const conceptsCreated = totalConcepts[0]?.count ?? 0;
-  let conceptsMerged = 0;
-  for (const row of compiled) {
-    if (row.conceptUuids && row.conceptUuids.length > 0) {
-      conceptsMerged += row.conceptUuids.length;
-    }
-  }
-  return { conceptsCreated, conceptsMerged };
-}
-
-async function computePageCountGrowth(
-  db: AppDb,
-  teamId: string,
-  projectId: string,
-): Promise<{ week: string; newPages: number; cumulativePages: number }[]> {
-  const rows = await db
-    .select({
-      createdAt: schema.concepts.createdAt,
-    })
-    .from(schema.concepts)
-    .where(
-      and(
-        eq(schema.concepts.teamId, teamId),
-        eq(schema.concepts.projectId, projectId),
-      ),
-    )
-    .orderBy(sql`${schema.concepts.createdAt} ASC`);
-
-  const weekMap = new Map<string, number>();
-  for (const row of rows) {
-    const d = row.createdAt;
-    const year = d.getUTCFullYear();
-    const jan1 = new Date(Date.UTC(year, 0, 1));
-    const dayOfYear =
-      Math.floor((d.getTime() - jan1.getTime()) / 86_400_000);
-    const weekNum = Math.ceil((dayOfYear + jan1.getUTCDay() + 1) / 7);
-    const key = `${year}-W${String(weekNum).padStart(2, '0')}`;
-    weekMap.set(key, (weekMap.get(key) ?? 0) + 1);
-  }
-
-  let cumulative = 0;
-  const result: { week: string; newPages: number; cumulativePages: number }[] =
-    [];
-  for (const [week, count] of [...weekMap.entries()].sort()) {
-    cumulative += count;
-    result.push({ week, newPages: count, cumulativePages: cumulative });
-  }
-
-  return result;
-}
-
 /**
- * Combined detection result from a single pass of {@link recallCandidates}
- * over every concept. Two metrics are derived from the same recall results
- * to avoid duplicate DB round-trips:
+ * Produce the F2 section by delegating to the F2 merge-quality analysis.
  *
- *   - **Duplicate-page rate**: how many concept pairs are so similar
- *     (≥ threshold) that F2 may have created separate pages for the
- *     same topic?
- *   - **Misattribution candidates**: the same high-similarity pairs,
- *     interpreted as candidates F2 SHOULD have merged but didn't —
- *     a signal of wrong-assignment or split-page decisions.
- *
- * Every pair carries a real `similarity` score from the underlying
- * recall pipeline (cosine distance in vector mode, normalised ts_rank
- * in fts mode). No static threshold trickery (§5.5).
+ * This used to be a second copy of that analysis living in this file, and the
+ * two had drifted: the copy here still hardcoded `embeddingClient = null`, so
+ * `recallMode` could never be `vector`, and it still derived "misattribution"
+ * from pairs of similar DISTINCT concepts — a heuristic that cannot see a
+ * wrong merge, because a wrong merge produces one page rather than two similar
+ * ones. Report v1 is the artifact the milestone is judged on, so it must read
+ * the same measurement the F2 script produces, not a stale fork of it.
  */
-async function detectF2QualityPairs(
-  db: AppDb,
-  concepts: ConceptRow[],
-  teamId: string,
-  projectId: string,
-  threshold: number,
-): Promise<{
-  /** All unique concept pairs discovered by recall (regardless of score). */
-  potentialDuplicates: number;
-  /** Pairs with similarity ≥ threshold. */
-  highSimilarityCount: number;
-  /** highSimilarityCount / totalConcepts. */
-  duplicatePageRate: number;
-  /** Top‑20 high-similarity samples for manual review (duplicate lens). */
-  duplicateSamples: MisattributionSample[];
-  /** Top‑20 high-similarity samples for manual review (misattribution lens). */
-  misattributionSamples: MisattributionSample[];
-}> {
-  const scope = projectScope(teamId, projectId);
-  const embeddingClient = null;
-  const capability = resolveSemanticCapability(embeddingClient);
-
-  const checkedPairs = new Set<string>();
-  const highSamples: MisattributionSample[] = [];
-  let potentialDuplicates = 0;
-
-  for (const concept of concepts) {
-    if (!concept.title || concept.title.trim().length === 0) continue;
-
-    let results: CandidateRecallResult[];
-    try {
-      results = await recallCandidates(
-        { db, embeddingClient, capability },
-        {
-          scope,
-          newConcept: { title: concept.title, body: concept.body },
-          limit: 10,
-        },
-      );
-    } catch {
-      // Skip concepts where recall fails (e.g., empty query after sanitization).
-      continue;
-    }
-
-    for (const result of results) {
-      // Exclude self-matches — recallCandidates may return the query concept
-      // itself when it matches via FTS.
-      if (result.uuid === concept.uuid) continue;
-
-      const pairKey = [concept.uuid, result.uuid].sort().join('|');
-      if (checkedPairs.has(pairKey)) continue;
-      checkedPairs.add(pairKey);
-
-      potentialDuplicates++;
-
-      if (result.similarity >= threshold) {
-        highSamples.push({
-          conceptA: {
-            uuid: concept.uuid,
-            title: concept.title,
-            path: concept.path,
-          },
-          conceptB: {
-            uuid: result.uuid,
-            title: result.title,
-            path: result.path,
-          },
-          similarity: result.similarity,
-          recallMode: result.mode,
-        });
-      }
-    }
-  }
-
-  // Sort once; slice two views.
-  highSamples.sort((a, b) => b.similarity - a.similarity);
-
-  return {
-    potentialDuplicates,
-    highSimilarityCount: highSamples.length,
-    duplicatePageRate:
-      concepts.length > 0
-        ? Number((highSamples.length / concepts.length).toFixed(4))
-        : 0,
-    duplicateSamples: highSamples.slice(0, 20),
-    // Misattribution is the same set of high-similarity pairs interpreted
-    // through the "should F2 have merged these?" lens.  The top 20 are
-    // identical to the duplicate top 20 because both come from the same
-    // sorted array.  Separate slices let the report present each lens
-    // independently without duplicating the recall work.
-    misattributionSamples: highSamples.slice(0, 20),
-  };
-}
-
-async function runF2(
-  config: QualityConfig,
-): Promise<F2Section> {
+async function runF2(config: QualityConfig): Promise<F2Section> {
   if (!config.databaseUrl || !config.teamId || !config.projectId) {
     return {
       status: 'skipped',
@@ -616,213 +354,137 @@ async function runF2(
     };
   }
 
-  const db = createDb(config.databaseUrl, {
-    connectionTimeoutMillis: 10_000,
+  const report = await runF2Analysis({
+    databaseUrl: config.databaseUrl,
+    teamId: config.teamId,
+    projectId: config.projectId,
+    maxConcepts: config.maxConcepts,
+    duplicateSimilarityThreshold: config.duplicateSimilarityThreshold,
+    maxMisattributionReplays: config.maxMisattributionReplays,
   });
 
-  try {
-    console.error('[m1-quality-report] [f2] Loading concepts...');
-    const concepts = await loadConcepts(
-      db,
-      config.teamId,
-      config.projectId,
-      config.maxConcepts,
-    );
-    console.error(
-      `[m1-quality-report] [f2] Loaded ${concepts.length} concepts`,
-    );
-
-    console.error('[m1-quality-report] [f2] Loading event stats...');
-    const eventStats = await loadEventStats(
-      db,
-      config.teamId,
-      config.projectId,
-    );
-
-    console.error(
-      '[m1-quality-report] [f2] Loading concept creation/merge stats...',
-    );
-    const { conceptsCreated, conceptsMerged } =
-      await loadConceptsCreatedAndMerged(
-        db,
-        config.teamId,
-        config.projectId,
-      );
-
-    console.error(
-      '[m1-quality-report] [f2] Computing page count growth...',
-    );
-    const pageCountGrowth = await computePageCountGrowth(
-      db,
-      config.teamId,
-      config.projectId,
-    );
-
-    // Detect high-similarity pairs via a single recallCandidates pass.
-    // Derives both duplicate-page rate and misattribution candidates
-    // from the same recall results — no duplicate DB round-trips.
-    console.error(
-      '[m1-quality-report] [f2] Detecting F2 quality pairs via recallCandidates...',
-    );
-    const qualityPairs = await detectF2QualityPairs(
-      db,
-      concepts,
-      config.teamId,
-      config.projectId,
-      config.duplicateSimilarityThreshold,
-    );
-    console.error(
-      `[m1-quality-report] [f2] Pairs: ${qualityPairs.potentialDuplicates} potential, ` +
-        `${qualityPairs.highSimilarityCount} high-similarity (≥${config.duplicateSimilarityThreshold}), ` +
-        `duplicatePageRate=${qualityPairs.duplicatePageRate}`,
-    );
-
-    return {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      recallMode: 'fts-only', // No embedding client wired; honest degradation.
-      counts: {
-        totalConcepts: concepts.length,
-        totalEvents: eventStats.totalEvents,
-        compiledEvents: eventStats.compiledEvents,
-        skippedEvents: eventStats.skippedEvents,
-        failedEvents: eventStats.failedEvents,
-        conceptsCreated,
-        conceptsMerged,
-      },
-      pageCountGrowth: {
-        byWeek: pageCountGrowth,
-      },
-      duplicatePageRate: {
-        potentialDuplicates: qualityPairs.potentialDuplicates,
-        highSimilarityPairs: qualityPairs.highSimilarityCount,
-        rate: qualityPairs.duplicatePageRate,
-        samples: qualityPairs.duplicateSamples,
-      },
-      misattribution: {
-        candidateCount: qualityPairs.highSimilarityCount,
-        samples: qualityPairs.misattributionSamples,
-      },
-    };
-  } finally {
-    await closeDb(db);
-  }
+  return {
+    status: 'ok',
+    timestamp: report.meta.generatedAt,
+    recallMode: report.meta.recallMode,
+    counts: report.counts,
+    pageCountGrowth: report.pageCountGrowth,
+    duplicatePageRate: {
+      potentialDuplicates: report.duplicatePageRate.potentialDuplicates,
+      highSimilarityPairs: report.duplicatePageRate.highSimilarityPairs,
+      rate: report.duplicatePageRate.rate,
+      samples: report.duplicatePageRate.samples,
+    },
+    misattribution: report.misattributionRate,
+    tokenUsage: report.tokenUsage,
+  };
 }
 
 // ── Token cost estimation ───────────────────────────────────────────────────
 
-// Note: Model pricing reference data is documented in docs/m1-quality-report.md
-// (section 4.4), not hard-coded here. This avoids unused-constant warnings and
-// ensures the single source of truth is the report document.
-
 /**
- * Build token cost tiers.
+ * Build the per-tier token cost section from measured provider usage.
  *
- * Currently the LLM client does NOT track prompt/completion token counts
- * from provider responses. So every tier is marked "未测" with a reason
- * explaining what would need to be instrumented.
+ * Every tier used to be hardcoded to `measured: false` with a note saying the
+ * LLM client did not capture token counts. It does now: `LlmResponse.usage` is
+ * normalized from both provider envelopes, the merge-decider and the embedding
+ * client expose a metering seam, and the F1 signal run and the F2 analysis
+ * both aggregate what they observed.
+ *
+ * A tier is still reported unmeasured when nothing in it reported usage —
+ * absent usage is never presented as zero cost. `estimatedCostUsd` stays null
+ * because no price table is configured; token counts are measured facts,
+ * a dollar figure derived from a guessed rate would not be (§5.5).
  */
 function buildTokenCosts(
   f1Section: F1Section,
-  _f2Section: F2Section,
+  f2Section: F2Section,
 ): { tiers: TokenCostTier[]; note: string } {
   const tiers: TokenCostTier[] = [];
 
-  // ── F1 cheap extraction layer ────────────────────────────────────────
-  if (f1Section.status === 'ok') {
-    const totalCalls =
-      (f1Section.summary?.extract ?? 0) +
-      (f1Section.summary?.llmSkip ?? 0) +
-      (f1Section.summary?.schemaFailure ?? 0) +
-      (f1Section.summary?.providerFailure ?? 0);
-
-    tiers.push({
-      tier: 'f1-extract',
-      measured: false,
-      reason:
-        'LLM client does not capture prompt/completion token counts ' +
-        'from provider responses. Token usage data is not available. ' +
-        'Instrumentation of LlmClient.structured() response parsing ' +
-        'is required to extract usage fields from provider envelopes.',
-      provider: f1Section.provider,
-      model: f1Section.model,
-      totalCalls,
+  const tierFrom = (
+    tier: string,
+    usage: TierUsage | undefined,
+    provider: string | undefined,
+    model: string | undefined,
+    unmeasuredReason: string,
+  ): TokenCostTier => {
+    if (!usage || !usage.measured) {
+      return {
+        tier,
+        measured: false,
+        reason: unmeasuredReason,
+        ...(provider ? { provider } : {}),
+        ...(model ? { model } : {}),
+        totalCalls: usage?.calls ?? 0,
+        estimatedCostUsd: null,
+      };
+    }
+    return {
+      tier,
+      measured: true,
+      ...(provider ? { provider } : {}),
+      ...(model ? { model } : {}),
+      totalCalls: usage.calls,
+      // No price table is configured, so a USD figure would be invented.
       estimatedCostUsd: null,
       details:
-        `${totalCalls} LLM calls to ${f1Section.provider ?? 'unknown'}` +
-        ` (${f1Section.model ?? 'unknown model'}). ` +
-        'Average latency: ' +
-        `${f1Section.latencyMs?.avg ?? '?'}ms. ` +
-        'Cost estimation requires per-call token counts.',
-    });
-  } else {
-    tiers.push({
-      tier: 'f1-extract',
-      measured: false,
-      reason:
-        'F1 signal-to-noise analysis was skipped — ' +
-        (f1Section.skipReason ?? 'no LLM provider configured'),
-      estimatedCostUsd: null,
-    });
-  }
+        `${usage.calls} calls, ${usage.promptTokens} prompt + ` +
+        `${usage.completionTokens} completion = ${usage.totalTokens} tokens ` +
+        `(${Math.round(usage.totalTokens / Math.max(1, usage.calls))} per call). ` +
+        'Provider-reported; USD cost requires a configured price table.',
+    };
+  };
 
-  // ── F2 strong merge layer ────────────────────────────────────────────
-  if (_f2Section.status === 'ok') {
-    tiers.push({
-      tier: 'f2-merge',
-      measured: false,
-      reason:
-        'F2 merge-decider LLM calls are not yet instrumented for token ' +
-        'counting. The same limitation applies as F1: the LlmClient port ' +
-        'does not expose usage metadata from provider responses.',
-      totalCalls: undefined,
-      estimatedCostUsd: null,
-      details:
-        'F2 merge decisions use the same LlmClient interface as F1. ' +
-        'Token cost tracking requires a backward-compatible extension ' +
-        'to the LlmResponse type to carry optional usage data.',
-    });
-  } else {
-    tiers.push({
-      tier: 'f2-merge',
-      measured: false,
-      reason:
-        'F2 merge-quality analysis was skipped — ' +
-        (_f2Section.skipReason ?? 'no database available'),
-      estimatedCostUsd: null,
-    });
-  }
+  tiers.push(
+    tierFrom(
+      'f1-extract',
+      f1Section.tokenUsage,
+      f1Section.provider,
+      f1Section.model,
+      f1Section.status === 'ok'
+        ? 'F1 ran but no call reported token usage; the provider omitted the usage envelope.'
+        : (f1Section.skipReason ?? 'F1 analysis did not run.'),
+    ),
+  );
 
-  // ── Embedding layer ──────────────────────────────────────────────────
-  tiers.push({
-    tier: 'embedding',
-    measured: false,
-    reason:
-      'The EmbeddingClient port does not track token count or ' +
-      'input-character count per embedding call. Embedding cost at ' +
-      'OpenAI is $0.02/1M tokens (~$0.0008 per page at ~3K chars). ' +
-      'Per-call measurement requires augmenting the embedding ' +
-      'factory to log input sizes or read response usage fields.',
-    estimatedCostUsd: null,
-    details:
-      'Embedding model defaults to text-embedding-3-small (1536d). ' +
-      'Without per-call input-size tracking, costs can only be ' +
-      'estimated from total pages embedded × average page length.',
-  });
+  tiers.push(
+    tierFrom(
+      'f2-merge',
+      f2Section.tokenUsage?.f2Merge,
+      undefined,
+      undefined,
+      f2Section.status === 'ok'
+        ? 'No merge decision was replayed, so no F2 call was issued. This is ' +
+          'expected on a project with no merges yet.'
+        : (f2Section.skipReason ?? 'F2 analysis did not run.'),
+    ),
+  );
 
+  tiers.push(
+    tierFrom(
+      'embedding',
+      f2Section.tokenUsage?.embedding,
+      undefined,
+      undefined,
+      f2Section.status === 'ok'
+        ? 'Retrieval ran in fts-only mode, so no embedding call was issued. ' +
+          'Configure a provider with an embedding API to measure this tier.'
+        : (f2Section.skipReason ?? 'F2 analysis did not run.'),
+    ),
+  );
+
+  const measured = tiers.filter((t) => t.measured).length;
   const note =
-    'All token cost tiers are marked "未测" because the current ' +
-    'LlmClient and EmbeddingClient ports do not capture usage metadata ' +
-    '(prompt_tokens, completion_tokens, total_tokens) from provider ' +
-    'responses. Adding this instrumentation is a forward-compatible ' +
-    'extension: the LlmResponse type can gain an optional `usage` field ' +
-    'without breaking existing callers. Until that is implemented, any ' +
-    'cost number would be a fabricated estimate and is forbidden by §5.5.';
+    measured === tiers.length
+      ? 'All tiers measured from provider-reported token usage during this run. ' +
+        'estimatedCostUsd is null because no model price table is configured; ' +
+        'multiply the reported tokens by your provider rates.'
+      : `${measured} of ${tiers.length} tiers measured. Unmeasured tiers carry ` +
+        'a reason and are never reported as zero cost.';
 
   return { tiers, note };
 }
-
-// ── Main ────────────────────────────────────────────────────────────────────
 
 /**
  * Run the full M1 quality report aggregation.

@@ -233,7 +233,10 @@ detect_semantic_capability() {
     return
   fi
 
-  degraded="$(echo "$search_resp" | jq -r '.degraded // true')"
+  # NOT `.degraded // true`: jq's `//` takes the alternative when the left side
+  # is null OR false, so a successful `"degraded": false` response would read
+  # back as true and this script could never detect vector mode.
+  degraded="$(echo "$search_resp" | jq -r 'if .degraded == null then true else .degraded end')"
 
   if [[ "$degraded" == "true" ]]; then
     info "Semantic capability: fts-only (vector embedding NOT available)" >&2
@@ -266,7 +269,10 @@ ingest_and_wait() {
         externalId: $idemKey
       },
       payload: {
-        schemaVersion: "0.2.0",
+        # cliInitPayload.schemaVersion is z.literal(1) — a NUMBER. Sending the
+        # string "0.2.0" (the concept-schema version) made every ingest here
+        # fail Zod validation with a bare 400.
+        schemaVersion: 1,
         repo: $repo,
         commitSha: $commitSha,
         path: $path,
@@ -276,7 +282,10 @@ ingest_and_wait() {
       options: { compile: true, wait: true }
     }')"
 
-  info "Ingesting event: $external_id"
+  # This function's stdout is captured by the caller, so progress output
+  # must go to stderr — otherwise it is concatenated with the JSON result
+  # and the caller's jq fails on the leading "→".
+  info "Ingesting event: $external_id" >&2
   local resp
   resp="$(api_post "/v1/events" "$ingest_body" 2>/dev/null || echo '{}')"
 
@@ -303,12 +312,15 @@ ingest_and_wait() {
 
   # Poll for job completion if no conceptIds and wait=true didn't complete
   local concept_ids job_id event_id
-  concept_ids="$(echo "$resp" | jq -r '.conceptIds // empty')"
+  # `jq -r '.conceptIds'` pretty-prints an ARRAY across several lines, which
+  # then broke the single-line JSON this function echoes. Join to a scalar,
+  # matching what the polling branch below already does.
+  concept_ids="$(echo "$resp" | jq -r '.conceptIds // [] | join(",")')"
   job_id="$(echo "$resp" | jq -r '.jobId // empty')"
   event_id="$(echo "$resp" | jq -r '.eventId // empty')"
 
   if [[ -z "$concept_ids" && -n "$job_id" ]]; then
-    info "  Waiting for job $job_id to complete..."
+    info "  Waiting for job $job_id to complete..." >&2
     local max_polls=30 poll=0 job_status="unknown"
     while [[ $poll -lt $max_polls ]]; do
       sleep 2
@@ -328,7 +340,7 @@ ingest_and_wait() {
       esac
       poll=$((poll + 1))
       if [[ $((poll % 5)) -eq 0 ]]; then
-        info "    ... still waiting ($((poll * 2))s elapsed, status=$job_status)"
+        info "    ... still waiting ($((poll * 2))s elapsed, status=$job_status)" >&2
       fi
     done
     if [[ "$job_status" != "completed" ]]; then

@@ -88,6 +88,7 @@ export function createEmbeddingClient(
         timeoutMs,
         fetchFn,
         inputs,
+        ...(deps.onUsage ? { onUsage: deps.onUsage } : {}),
       }),
   };
 }

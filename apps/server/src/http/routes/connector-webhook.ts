@@ -32,7 +32,7 @@ import {
   InvalidNormalizedEventError,
   type ConnectorScope,
 } from '../../connectors/connector-storage.js';
-import { createJob, IdempotencyConflictError as JobIdempotencyConflictError } from '../../db/repositories/jobs.js';
+import { createJob, upsertJobEvent, IdempotencyConflictError as JobIdempotencyConflictError } from '../../db/repositories/jobs.js';
 import { stripPrivateTags } from '../../security/private-tags.js';
 import { payloadHash } from '../../security/payload-hash.js';
 import {
@@ -225,12 +225,25 @@ export async function postWebhookHandler(
             eventCount: 1,
           });
 
-          // 7e. Enqueue in pg-boss if a queue is available
+          // 7e. Link the event to the job. The worker resolves what to
+          //     compile through job_events, so a job without this row claims
+          //     successfully and then fails with `no_events_found`.
+          await upsertJobEvent(db, {
+            teamId: scope.teamId,
+            projectId: scope.projectId,
+            jobId: jobResult.job.id,
+            eventId: persisted.eventId,
+            status: 'pending',
+          });
+
+          // 7f. Enqueue in pg-boss if a queue is available
           if (queue && jobResult.created) {
             try {
               await queue.send({
                 jobId: jobResult.job.id,
-                eventId: persisted.eventId,
+                teamId: scope.teamId,
+                projectId: scope.projectId,
+                kind: 'ingest_event',
               });
             } catch (err) {
               // Enqueue failure does not roll back the event or job.

@@ -39,8 +39,10 @@ import * as schema from '../../db/schema.js';
 import {
   createJob,
   getJobEvents,
+  upsertJobEvent,
   type CreateJobRequest,
 } from '../../db/repositories/jobs.js';
+import { createNoProviderHandler } from '../../worker/embedded.js';
 import { insertEvent, type EventInsertRequest } from '../../db/repositories/events.js';
 import { payloadHash } from '../../security/payload-hash.js';
 import {
@@ -578,12 +580,17 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
         .from(schema.concepts)
         .where(eq(schema.concepts.teamId, teamId));
       expect(allConcepts).toHaveLength(1);
-      // The concept should now have two evidence items (one from each event).
+      // Both compilations ran over the SAME event, so both produced the same
+      // repo_file evidence. M1-F2-04 specifies that a merge appends evidence
+      // "保留原有、去重" — deduplicated — so the page keeps one row, not two
+      // identical ones. This assertion previously expected 2, pinning the
+      // behaviour of a second merge implementation that did not dedup and
+      // that the compile job should never have been calling.
       const evidenceRows = await db
         .select()
         .from(schema.conceptEvidence)
         .where(eq(schema.conceptEvidence.conceptUuid, firstConceptUuid.value!));
-      expect(evidenceRows).toHaveLength(2);
+      expect(evidenceRows).toHaveLength(1);
     });
   });
 
@@ -635,9 +642,15 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
       const jobEvents = await getJobEvents(db, teamId, projectId, job.id);
       expect(jobEvents).toHaveLength(1);
       expect(jobEvents[0]!.status).toBe('skipped');
-      // The LLM's specific skip reason is now preserved (not replaced with
-      // a generic enum). The fixture's reason is the canned skip output.
-      expect(jobEvents[0]!.reason).toBe('Event contains no extractable team knowledge');
+      // `reason` is a CONTRACT field: jobEventResult types a skipped result's
+      // reason as z.enum(['no_knowledge', 'already_compiled']). This assertion
+      // previously pinned the opposite — the LLM's free-text explanation — and
+      // those rows made GET /v1/jobs/:id fail its own response DTO, so the
+      // endpoint answered 500 for any job containing an LLM skip and
+      // `teamem init` could not poll to completion. The model's wording is
+      // kept in the structured log instead; there is nowhere in the frozen
+      // strictObject to persist it (AGENTS.md §6.2).
+      expect(jobEvents[0]!.reason).toBe('no_knowledge');
 
       // No concept pages created.
       const concepts = await db
@@ -701,6 +714,66 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
   });
 
   // ── Path 3: schema validation failure ──────────────────────────────────
+
+  describe('no LLM provider — the job still reaches a terminal state', () => {
+    it('claims the job and fails it with no_llm_provider instead of leaving it queued', async () => {
+      // The handler used to only log, so the row stayed `queued` forever while
+      // pg-boss considered its own message complete — nothing would ever come
+      // back to it, and the jobs table showed work that looked pending
+      // indefinitely.
+      const teamId = freshTeamId();
+      const projectId = freshProjectId();
+      await seedTeam(teamId);
+      await seedProject(teamId, projectId);
+      const eventId = await seedCliEvent(teamId, projectId);
+
+      const { job } = await createJob(
+        db,
+        makeCreateJobReq(teamId, projectId, { kind: 'compilation', eventCount: 1 }),
+      );
+      await upsertJobEvent(db, {
+        teamId,
+        projectId,
+        jobId: job.id,
+        eventId,
+        status: 'pending',
+      });
+
+      const handler = createNoProviderHandler(db);
+      await handler({
+        id: 'pgboss-delivery-id',
+        data: {
+          jobId: job.id,
+          teamId,
+          projectId,
+          kind: 'compilation',
+        },
+      });
+
+      const [row] = await db
+        .select()
+        .from(schema.jobs)
+        .where(eq(schema.jobs.id, job.id));
+
+      expect(row!.status).toBe('failed');
+      expect(row!.finishedAt).not.toBeNull();
+      expect((row!.error as { code: string }).code).toBe('no_llm_provider');
+      // The reason must name the missing configuration without leaking a
+      // payload, prompt, or credential.
+      const serialized = JSON.stringify(row!.error);
+      expect(serialized).toContain('TEAMEM_ANTHROPIC_API_KEY');
+      expect(serialized).not.toContain('tm_');
+    });
+
+    it('ignores a delivery whose scope fields are missing', async () => {
+      // Without teamId/projectId there is no scope to act under, so the
+      // handler must not claim or mutate anything (§5.5).
+      const handler = createNoProviderHandler(db);
+      await expect(
+        handler({ id: 'pgboss-delivery-id', data: { jobId: 'x' } }),
+      ).resolves.toBeUndefined();
+    });
+  });
 
   describe('Path 3: failed — schema validation', () => {
     it('records failed outcome when LLM output fails schema validation', async () => {

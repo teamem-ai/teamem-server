@@ -18,7 +18,7 @@
  * job row (not from the pg-boss message) and passes them through every
  * lifecycle mutation (red line 5.5).
  */
-import type { CompileJob, CompileJobHandler } from './boss.js';
+import type { CompileJob, CompileJobHandler, CompileJobMessage } from './boss.js';
 import { claimJob, updateJobStatus, getJobEvents } from '../db/repositories/jobs.js';
 import {
   handleCompileJob,
@@ -28,15 +28,13 @@ import {
 // ── Message shape ───────────────────────────────────────────────────────────
 
 /**
- * The payload enqueued alongside the DB job row. Mirrors what
- * {@link enqueueCompilation} sends to pg-boss.
+ * The payload enqueued alongside the DB job row.
+ *
+ * Defined on the queue interface (`queue/boss.ts`) so producers and this
+ * consumer are typed against one declaration; re-exported here for callers
+ * that only import the worker.
  */
-export interface CompileJobMessage {
-  readonly jobId: string;
-  readonly teamId: string;
-  readonly projectId: string;
-  readonly kind: string;
-}
+export type { CompileJobMessage } from './boss.js';
 
 // ── Error sanitization ──────────────────────────────────────────────────────
 

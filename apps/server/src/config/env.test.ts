@@ -61,6 +61,31 @@ describe('parseServerEnv', () => {
     });
   });
 
+  it('accepts TEAMEM_DATABASE_URL as an alias for DATABASE_URL', () => {
+    // The bootstrap command reads TEAMEM_DATABASE_URL, and the QA scripts pass
+    // it. Without this the command connected to the right database and then
+    // failed inside this parser complaining that DATABASE_URL was undefined.
+    const env = parseServerEnv({
+      TEAMEM_DATABASE_URL: 'postgres://user:pw@localhost:5432/teamem',
+    });
+    expect(env.databaseUrl).toBe('postgres://user:pw@localhost:5432/teamem');
+  });
+
+  it('prefers TEAMEM_DATABASE_URL over DATABASE_URL so bootstrap cannot disagree', () => {
+    // bootstrap.ts resolves `TEAMEM_DATABASE_URL ?? DATABASE_URL`; the two must
+    // not pick different databases when both are present.
+    const env = parseServerEnv({
+      DATABASE_URL: 'postgres://user:pw@localhost:5432/legacy',
+      TEAMEM_DATABASE_URL: 'postgres://user:pw@localhost:5432/prefixed',
+    });
+    expect(env.databaseUrl).toBe('postgres://user:pw@localhost:5432/prefixed');
+  });
+
+  it('still rejects when neither database URL is set', () => {
+    expect(() => parseServerEnv({})).toThrow();
+  });
+
+
   it.each([
     ['1', 1],
     ['65535', 65_535],

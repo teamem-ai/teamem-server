@@ -267,6 +267,85 @@ describe.skipIf(!url)('ConceptMergeRepository (live Postgres)', () => {
 
   // ── CLI 2: extends does NOT refresh last_confirmed ─────────────────────
 
+  describe('fields a merge is allowed to touch', () => {
+    it('leaves confidence untouched so corroboration cannot downgrade a page', async () => {
+      // Counterexample from a real compile: a `high` page merged with a
+      // `medium` extraction came out `medium`. Corroboration making a claim
+      // LESS certain inverts what a merge means, and M1-F2-04's field list
+      // for a merge does not include confidence at all. The defect lived in a
+      // second, parallel merge implementation that the compile job used
+      // instead of this one; that implementation is gone.
+      const { uuid } = await createTestConcept({ confidence: 'high' });
+
+      await mergeIntoConcept(db, {
+        teamId: testTeam,
+        projectId: testProject,
+        targetId: uuid,
+        relationship: 'confirms',
+        mergedTitle: 'Use TypeScript for backend (corroborated)',
+        mergedBody: 'A second independent source confirms this direction.',
+        resultStatus: 'active',
+        newEvidence: newEvidence(),
+      });
+
+      const [row] = await db
+        .select()
+        .from(schema.concepts)
+        .where(eq(schema.concepts.uuid, uuid));
+
+      expect(row!.confidence).toBe('high');
+      // The fields a merge IS meant to write still changed.
+      expect(row!.title).toContain('corroborated');
+      expect(row!.body).toContain('second independent source');
+    });
+
+    it('replaces tags with the union the caller computed', async () => {
+      const { uuid } = await createTestConcept();
+
+      await mergeIntoConcept(db, {
+        teamId: testTeam,
+        projectId: testProject,
+        targetId: uuid,
+        relationship: 'extends',
+        mergedTitle: 'Use TypeScript for backend',
+        mergedBody: 'Extended with build-tooling detail.',
+        resultStatus: 'active',
+        newEvidence: newEvidence(),
+        tags: ['typescript', 'backend', 'tooling'],
+      });
+
+      const [row] = await db
+        .select()
+        .from(schema.concepts)
+        .where(eq(schema.concepts.uuid, uuid));
+
+      expect([...row!.tags].sort()).toEqual(['backend', 'tooling', 'typescript']);
+    });
+
+    it('leaves tags alone when the caller supplies none', async () => {
+      // Omitting tags must mean "do not touch", not "clear them".
+      const { uuid } = await createTestConcept({ tags: ['db', 'postgres'] });
+
+      await mergeIntoConcept(db, {
+        teamId: testTeam,
+        projectId: testProject,
+        targetId: uuid,
+        relationship: 'extends',
+        mergedTitle: 'Use TypeScript for backend',
+        mergedBody: 'Extended without tag changes.',
+        resultStatus: 'active',
+        newEvidence: newEvidence(),
+      });
+
+      const [row] = await db
+        .select()
+        .from(schema.concepts)
+        .where(eq(schema.concepts.uuid, uuid));
+
+      expect([...row!.tags].sort()).toEqual(['db', 'postgres']);
+    });
+  });
+
   describe('extends merge (CLI 2)', () => {
     it('updates body and appends evidence but does NOT refresh last_confirmed', async () => {
       const pastDate = new Date('2025-01-01T00:00:00.000Z');

@@ -32,6 +32,7 @@ import {
 import {
   createJob,
   findJobByIdempotencyKey,
+  upsertJobEvent,
   IdempotencyConflictError as JobIdempotencyConflictError,
 } from '../db/repositories/jobs.js';
 import { stripPrivateTags } from '../security/private-tags.js';
@@ -240,6 +241,49 @@ export async function processIngestBatch(
     batchJobId = jobResult.job.id;
     const created = jobResult.created;
 
+    // Link the accepted events to the job. The worker resolves what to
+    // compile through these rows, so a job without them claims successfully
+    // and then fails with `no_events_found`. Upserted (PK job_id+event_id)
+    // so a replay that re-enters this branch is harmless.
+    //
+    // Gated on `compile` for the same reason the enqueue below is: with
+    // compile=false the job row exists only to hold the idempotency result
+    // snapshot and is never enqueued, so it stays `queued` forever. Linking
+    // events to it would make getEventCompilationStatus() report them as
+    // `already_active`, and a later POST /v1/compilations would classify every
+    // event as already handled and complete without compiling anything — which
+    // is exactly the CLI's `teamem init` flow (batch with compile=false, then
+    // an explicit compilation request).
+    if (!req.options.compile && created) {
+      // compile=false: this row exists only to hold the idempotency result
+      // snapshot and is never enqueued, so no consumer will ever return to it.
+      // Leaving it `queued` showed operators work that appeared pending
+      // forever. Mark it terminal here, matching what create-compilation.ts
+      // already does when a compilation request has nothing to queue.
+      await db
+        .update(schema.jobs)
+        .set({ status: 'completed', finishedAt: new Date() })
+        .where(
+          and(
+            eq(schema.jobs.id, batchJobId),
+            eq(schema.jobs.teamId, teamId),
+            eq(schema.jobs.projectId, req.projectId),
+          ),
+        );
+    }
+
+    if (req.options.compile && created) {
+      for (const eventId of acceptedEventIds) {
+        await upsertJobEvent(db, {
+          teamId,
+          projectId: req.projectId,
+          jobId: batchJobId,
+          eventId,
+          status: 'pending',
+        });
+      }
+    }
+
     // Build the full response.
     const response: IngestBatchResponse = {
       requestId: requestId ?? '',
@@ -266,7 +310,12 @@ export async function processIngestBatch(
     // Enqueue for compilation only when compile=true and a queue is available.
     if (req.options.compile && queue && created) {
       try {
-        await queue.send({ jobId: batchJobId });
+        await queue.send({
+          jobId: batchJobId,
+          teamId,
+          projectId: req.projectId,
+          kind: JOB_KIND,
+        });
       } catch (err) {
         console.error(
           JSON.stringify({

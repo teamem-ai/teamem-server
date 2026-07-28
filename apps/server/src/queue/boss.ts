@@ -36,6 +36,30 @@ export const DEFAULT_COMPILE_QUEUE_POLICY: PgBossQueueOptions = {
   retryBackoff: true,
 };
 
+/**
+ * The message every producer must enqueue, and the only shape the worker
+ * accepts.
+ *
+ * This lives on the queue interface rather than next to the consumer on
+ * purpose. It used to be documented only in a comment while `send` took a
+ * bare `Record<string, unknown>`, so four of the five producers enqueued
+ * `{ jobId }` or `{ jobId, eventId }` and compiled cleanly. The worker
+ * rejected each of those deliveries as malformed and returned without
+ * claiming, leaving the DB job row in `queued` forever — every ingest path
+ * except `POST /v1/compilations` silently never compiled. Typing the payload
+ * here is what makes that class of drift a compile error.
+ *
+ * `teamId` and `projectId` are mandatory because the worker inherits the
+ * initiator's scope from them (§5.5); a delivery without them has no scope
+ * to run under and must not be processed.
+ */
+export interface CompileJobMessage {
+  readonly jobId: string;
+  readonly teamId: string;
+  readonly projectId: string;
+  readonly kind: string;
+}
+
 /** A single compile job as delivered to the worker handler. */
 export interface CompileJob {
   readonly id: string;
@@ -58,7 +82,7 @@ export interface CompileQueue {
    * caller can catch to treat as an idempotent no-op.
    */
   send(
-    data: Record<string, unknown>,
+    data: CompileJobMessage,
     options?: { id?: string },
   ): Promise<string | null>;
   /** Register a single consumer for the compile queue. */

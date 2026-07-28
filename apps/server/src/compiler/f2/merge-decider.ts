@@ -19,7 +19,7 @@
  * provider-neutral port.
  */
 
-import type { LlmClient } from '../../llm/types.js';
+import type { LlmClient, LlmUsage } from '../../llm/types.js';
 import { f2Decision, type F2Decision } from './decision.js';
 import { buildF2MergePrompt, type F2MergePromptContext } from './merge-prompt.js';
 
@@ -82,6 +82,16 @@ export interface NewConceptInput {
  */
 export interface MergeDeciderDeps {
   readonly llm: LlmClient;
+  /**
+   * Optional metering seam: invoked with the provider-reported token usage of
+   * the merge call, when the provider reported any.
+   *
+   * A callback rather than an extra return value so cost accounting stays
+   * opt-in and every existing caller keeps working unchanged. Never invoked
+   * when the provider omitted usage — absent means "not reported", which must
+   * not be recorded as zero.
+   */
+  readonly onUsage?: (usage: LlmUsage) => void;
 }
 
 // ── Main entry point ────────────────────────────────────────────────────────
@@ -138,6 +148,9 @@ export async function decideMerge(
   //    as an Error cause (§5.3: never leak model payloads to logs).
   const decision = f2Decision.parse(response.output);
 
-  // 4. Return the validated decision.
+  // 4. Report token usage to the optional meter before returning.
+  if (response.usage) deps.onUsage?.(response.usage);
+
+  // 5. Return the validated decision.
   return decision;
 }

@@ -21,7 +21,23 @@ import {
   createCompileQueue,
   DEFAULT_COMPILE_QUEUE_POLICY,
   type CompileJob,
+  type CompileJobMessage,
 } from './boss.js';
+
+/**
+ * A well-formed compile delivery. These tests exercise queue lifecycle rather
+ * than compilation, but the payload must still satisfy the worker contract —
+ * an under-populated message is exactly the defect that left every ingest
+ * path's job stuck in `queued`.
+ */
+function compileMessage(jobId: string): CompileJobMessage {
+  return {
+    jobId,
+    teamId: 'team-queue-test',
+    projectId: 'prj-queue-test',
+    kind: 'ingest_event',
+  };
+}
 import { createDbHandle } from '../db/client.js';
 
 const url = process.env['TEST_DATABASE_URL'];
@@ -86,7 +102,7 @@ describe.skipIf(!url)('pg-boss lifecycle (live Postgres)', () => {
         received.push(job);
       });
 
-      const payload = { eventId: 'evt-test-1', projectId: 'prj-test' };
+      const payload = compileMessage('job-test-1');
       const jobId = await queue.send(payload);
       expect(jobId).toBeTruthy();
 
@@ -181,6 +197,6 @@ describe.skipIf(!url)('pg-boss lifecycle (live Postgres)', () => {
     await queue.stop();
 
     // After stop, the pool is closed — operations should fail or hang-then-fail.
-    await expect(queue.send({ eventId: 'late' })).rejects.toThrow();
+    await expect(queue.send(compileMessage('late'))).rejects.toThrow();
   });
 });
