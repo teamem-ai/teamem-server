@@ -59,6 +59,10 @@ describe.skipIf(!url)('POST /v1/events (live Postgres)', () => {
 
   afterAll(async () => {
     // Clean up in FK dependency order
+    // job_events references events; drop the child rows first.
+    await db.execute(
+      `DELETE FROM job_events WHERE project_id = '${projectId}'`,
+    );
     await db.execute(
       `DELETE FROM events WHERE project_id = '${projectId}'`,
     );
@@ -437,6 +441,9 @@ describe.skipIf(!url)('POST /v1/events (live Postgres)', () => {
       expect(json2.eventId).not.toBe((await res1.json()).eventId);
     } finally {
       await db.execute(
+        `DELETE FROM job_events WHERE project_id IN ('${projectId}', '${project2}')`,
+      );
+      await db.execute(
         `DELETE FROM events WHERE project_id IN ('${projectId}', '${project2}')`,
       );
       await db.execute(`DELETE FROM api_keys WHERE id = '${keyId}'`);
@@ -621,10 +628,16 @@ describe.skipIf(!url)('POST /v1/events (live Postgres)', () => {
     // concept_uuids is uuid[] — use valid UUID values.
     const cid1 = randomUUID();
     const cid2 = randomUUID();
+    // The ingest path already linked the event to the job with status
+    // 'pending'; this stands in for the worker advancing that same row.
     await db.execute(
       `INSERT INTO job_events (team_id, project_id, job_id, event_id, status, concept_uuids, updated_at)
        VALUES ('${teamId}', '${projectId}', '${jobId}', '${eventId}', 'compiled',
-               ARRAY['${cid1}','${cid2}']::uuid[], NOW())`,
+               ARRAY['${cid1}','${cid2}']::uuid[], NOW())
+       ON CONFLICT (job_id, event_id) DO UPDATE
+         SET status = EXCLUDED.status,
+             concept_uuids = EXCLUDED.concept_uuids,
+             updated_at = EXCLUDED.updated_at`,
     );
 
     // Now await the original handler — it should see the completed job on

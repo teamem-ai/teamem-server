@@ -32,6 +32,7 @@ import {
 import {
   createJob,
   findJobByIdempotencyKey,
+  upsertJobEvent,
   IdempotencyConflictError as JobIdempotencyConflictError,
 } from '../db/repositories/jobs.js';
 import { stripPrivateTags } from '../security/private-tags.js';
@@ -239,6 +240,22 @@ export async function processIngestBatch(
 
     batchJobId = jobResult.job.id;
     const created = jobResult.created;
+
+    // Link the accepted events to the job. The worker resolves what to
+    // compile through these rows, so a job without them claims successfully
+    // and then fails with `no_events_found`. Upserted (PK job_id+event_id)
+    // so a replay that re-enters this branch is harmless.
+    if (created) {
+      for (const eventId of acceptedEventIds) {
+        await upsertJobEvent(db, {
+          teamId,
+          projectId: req.projectId,
+          jobId: batchJobId,
+          eventId,
+          status: 'pending',
+        });
+      }
+    }
 
     // Build the full response.
     const response: IngestBatchResponse = {

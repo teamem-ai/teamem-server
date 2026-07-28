@@ -545,6 +545,7 @@ describe.skipIf(!url)('ingestOne pipeline (live Postgres)', () => {
         expect(r2.status).toBe('inserted');
         expect(r1.eventId).not.toBe(r2.eventId);
       } finally {
+        await db.execute(`DELETE FROM job_events WHERE project_id = '${project2}'`);
         await db.execute(`DELETE FROM events WHERE project_id = '${project2}'`);
         await db.execute(`DELETE FROM jobs WHERE project_id = '${project2}'`);
         await db.execute(`DELETE FROM projects WHERE id = '${project2}'`);
@@ -646,6 +647,29 @@ describe.skipIf(!url)('ingestOne pipeline (live Postgres)', () => {
         teamId: auth.teamId,
         projectId: auth.projectId,
         kind: 'ingest_event',
+      });
+    });
+
+    it('compile=true links the event to the job so the worker has work to find', async () => {
+      // The worker resolves what to compile through job_events. A job row with
+      // no job_events row claims successfully and then fails with
+      // `no_events_found`, which is how every ingest path used to end up.
+      const spy = createQueueSpy();
+      const req = makeRequest({ options: { compile: true, wait: false } });
+
+      const result = await ingestOne({ db, queue: spy }, req, auth);
+      expect(result.jobId).toBeTruthy();
+
+      const { rows } = await db.execute(
+        `SELECT event_id, status, team_id, project_id
+           FROM job_events WHERE job_id = '${result.jobId}'`,
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        event_id: result.eventId,
+        status: 'pending',
+        team_id: auth.teamId,
+        project_id: auth.projectId,
       });
     });
 

@@ -30,6 +30,7 @@ import {
 import {
   createJob,
   findJobByIdempotencyKey,
+  upsertJobEvent,
   IdempotencyConflictError as JobIdempotencyConflictError,
 } from '../db/repositories/jobs.js';
 import { stripPrivateTags } from '../security/private-tags.js';
@@ -224,6 +225,17 @@ export async function ingestOne(
         eventCount: 1,
       });
       jobId = jobResult.job.id;
+
+      // Link the event to the job. The worker resolves what to compile
+      // through job_events, so a job without this row claims successfully
+      // and then fails with `no_events_found`.
+      await upsertJobEvent(db, {
+        teamId: auth.teamId,
+        projectId: auth.projectId,
+        jobId,
+        eventId,
+        status: 'pending',
+      });
 
       // Enqueue in pg-boss only when the job was newly created AND a
       // queue instance is available. If the job already existed (race

@@ -35,14 +35,18 @@ vi.mock('../../db/repositories/jobs.js', async (importOriginal) => {
   return {
     ...actual,
     createJob: vi.fn(),
+    // The tool links the event to the job before enqueueing; without a stub
+    // the real repository would be called with the fake db handle.
+    upsertJobEvent: vi.fn(),
   };
 });
 
 import { insertEvent } from '../../db/repositories/events.js';
-import { createJob } from '../../db/repositories/jobs.js';
+import { createJob, upsertJobEvent } from '../../db/repositories/jobs.js';
 
 const mockedInsertEvent = vi.mocked(insertEvent);
 const mockedCreateJob = vi.mocked(createJob);
+const mockedUpsertJobEvent = vi.mocked(upsertJobEvent);
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -90,6 +94,9 @@ async function executeMemoryWrite(
 describe('memory_write tool — input validation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedUpsertJobEvent.mockResolvedValue(
+      {} as Awaited<ReturnType<typeof upsertJobEvent>>,
+    );
   });
 
   it('rejects when content is missing', async () => {
@@ -121,6 +128,9 @@ describe('memory_write tool — input validation', () => {
 describe('memory_write tool — successful write (project scope)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedUpsertJobEvent.mockResolvedValue(
+      {} as Awaited<ReturnType<typeof upsertJobEvent>>,
+    );
   });
 
   it('inserts an event and creates a compile job', async () => {
@@ -236,6 +246,9 @@ describe('memory_write tool — successful write (project scope)', () => {
 describe('memory_write tool — private-tag redaction', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedUpsertJobEvent.mockResolvedValue(
+      {} as Awaited<ReturnType<typeof upsertJobEvent>>,
+    );
   });
 
   it('strips <private> tags from content before persistence', async () => {
@@ -324,6 +337,9 @@ describe('memory_write tool — private-tag redaction', () => {
 describe('memory_write tool — scope enforcement', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedUpsertJobEvent.mockResolvedValue(
+      {} as Awaited<ReturnType<typeof upsertJobEvent>>,
+    );
   });
 
   it('uses project-scoped key project id', async () => {
@@ -387,6 +403,9 @@ describe('memory_write tool — scope enforcement', () => {
 describe('memory_write tool — duplicate replay', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedUpsertJobEvent.mockResolvedValue(
+      {} as Awaited<ReturnType<typeof upsertJobEvent>>,
+    );
   });
 
   it('returns success on duplicate (same deliveryId would mean same event)', async () => {
@@ -408,6 +427,9 @@ describe('memory_write tool — duplicate replay', () => {
 describe('memory_write tool — job creation failure', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedUpsertJobEvent.mockResolvedValue(
+      {} as Awaited<ReturnType<typeof upsertJobEvent>>,
+    );
   });
 
   it('reports partial success when job creation fails', async () => {
@@ -429,6 +451,9 @@ describe('memory_write tool — job creation failure', () => {
 describe('memory_write tool — API key scope enforcement (AGENTS.md §8)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedUpsertJobEvent.mockResolvedValue(
+      {} as Awaited<ReturnType<typeof upsertJobEvent>>,
+    );
   });
 
   it('rejects a key without events:write scope', async () => {

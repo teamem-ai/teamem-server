@@ -11,7 +11,7 @@ import { ingestEventRequest, type IngestEventResponse, PAYLOAD_SCHEMA_VERSION, E
 import type { Context } from 'hono';
 import type { AppDb } from '../../db/client.js';
 import { insertEvent, IdempotencyConflictError as RepoIdempotencyConflictError } from '../../db/repositories/events.js';
-import { createJob, findJobByIdempotencyKey, IdempotencyConflictError as JobIdempotencyConflictError } from '../../db/repositories/jobs.js';
+import { createJob, findJobByIdempotencyKey, upsertJobEvent, IdempotencyConflictError as JobIdempotencyConflictError } from '../../db/repositories/jobs.js';
 import { isProjectScope, getTeamId, getProjectId } from '../../auth/scope.js';
 import { stripPrivateTags } from '../../security/private-tags.js';
 import { payloadHash, payloadByteLength } from '../../security/payload-hash.js';
@@ -204,6 +204,17 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
         eventCount: 1,
       });
       jobId = jobResult.job.id;
+
+      // Link the event to the job. The worker resolves what to compile
+      // through job_events, so a job without this row claims successfully
+      // and then fails with `no_events_found`.
+      await upsertJobEvent(db, {
+        teamId,
+        projectId: req.projectId,
+        jobId,
+        eventId,
+        status: 'pending',
+      });
 
       // Enqueue in pg-boss if a queue is available
       if (queue && jobResult.created) {

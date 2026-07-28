@@ -59,6 +59,10 @@ describe.skipIf(!url)('POST /v1/events/batch (live Postgres)', () => {
   });
 
   afterAll(async () => {
+    // job_events references events; drop the child rows first.
+    await db.execute(
+      `DELETE FROM job_events WHERE project_id = '${projectId}'`,
+    );
     await db.execute(
       `DELETE FROM events WHERE project_id = '${projectId}'`,
     );
