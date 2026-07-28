@@ -496,8 +496,13 @@ validate_concept_pages() {
     ev_sha="$(echo "$data" | jq -r '.evidence[0].commitSha // empty')"
     ev_path="$(echo "$data" | jq -r '.evidence[0].path // empty')"
     assert "  evidence[0].repo is set" "[ -n \"$ev_repo\" ]"
+    # Match before calling assert: inside the command substitution the escaped
+    # quotes are LITERAL, so grep saw `"a1b2…"` and never matched. The same
+    # assertion in m1-why-moment.sh failed for every possible input.
+    local sha_ok=0
+    [[ "$ev_sha" =~ ^[0-9a-f]{7,40}$ ]] && sha_ok=1
     assert "  evidence[0].commitSha matches 7-40 hex chars" \
-      "[ \"$(echo \"$ev_sha\" | grep -cE '^[0-9a-f]{7,40}$' || echo 0)\" = \"1\" ]" \
+      "[ $sha_ok = 1 ]" \
       "got: $ev_sha"
     assert "  evidence[0].path is set" "[ -n \"$ev_path\" ]"
 

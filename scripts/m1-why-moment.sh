@@ -669,8 +669,14 @@ mcp_get_decision_page() {
         ev_path="$(echo "$page" | jq -r ".evidence[$ev_idx].path // \"\"")"
 
         assert "    repo_file.repo is set" "[ -n \"$ev_repo\" ]"
+        # Match before calling assert. Building the test as a string put
+        # `echo \"$ev_sha\"` inside a command substitution, where the escaped
+        # quotes become LITERAL quote characters — grep then saw `"a1b2…"` and
+        # never matched, so this assertion failed for every possible input.
+        local sha_ok=0
+        [[ "$ev_sha" =~ ^[0-9a-f]{7,40}$ ]] && sha_ok=1
         assert "    repo_file.commitSha matches 7-40 hex chars" \
-          "[ \"$(echo \"$ev_sha\" | grep -cE '^[0-9a-f]{7,40}$' || echo 0)\" = \"1\" ]" \
+          "[ $sha_ok = 1 ]" \
           "got: $ev_sha"
         assert "    repo_file.path is set" "[ -n \"$ev_path\" ]"
 
@@ -744,8 +750,10 @@ mcp_get_decision_page() {
 
   # 9. Confidence is set
   local c_conf; c_conf="$(echo "$page" | jq -r '.confidence // ""')"
+  local conf_ok=0
+  [[ "$c_conf" =~ ^(high|medium|low)$ ]] && conf_ok=1
   assert "  confidence is set (high|medium|low)" \
-    "[ \"$(echo \"$c_conf\" | grep -cE '^(high|medium|low)$' || echo 0)\" = \"1\" ]" \
+    "[ $conf_ok = 1 ]" \
     "got: $c_conf"
 
   # 10. Path is a valid concept path
