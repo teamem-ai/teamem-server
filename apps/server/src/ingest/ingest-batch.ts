@@ -254,6 +254,24 @@ export async function processIngestBatch(
     // event as already handled and complete without compiling anything — which
     // is exactly the CLI's `teamem init` flow (batch with compile=false, then
     // an explicit compilation request).
+    if (!req.options.compile && created) {
+      // compile=false: this row exists only to hold the idempotency result
+      // snapshot and is never enqueued, so no consumer will ever return to it.
+      // Leaving it `queued` showed operators work that appeared pending
+      // forever. Mark it terminal here, matching what create-compilation.ts
+      // already does when a compilation request has nothing to queue.
+      await db
+        .update(schema.jobs)
+        .set({ status: 'completed', finishedAt: new Date() })
+        .where(
+          and(
+            eq(schema.jobs.id, batchJobId),
+            eq(schema.jobs.teamId, teamId),
+            eq(schema.jobs.projectId, req.projectId),
+          ),
+        );
+    }
+
     if (req.options.compile && created) {
       for (const eventId of acceptedEventIds) {
         await upsertJobEvent(db, {

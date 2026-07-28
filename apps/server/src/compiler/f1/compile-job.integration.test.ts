@@ -39,8 +39,10 @@ import * as schema from '../../db/schema.js';
 import {
   createJob,
   getJobEvents,
+  upsertJobEvent,
   type CreateJobRequest,
 } from '../../db/repositories/jobs.js';
+import { createNoProviderHandler } from '../../worker/embedded.js';
 import { insertEvent, type EventInsertRequest } from '../../db/repositories/events.js';
 import { payloadHash } from '../../security/payload-hash.js';
 import {
@@ -707,6 +709,66 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
   });
 
   // ── Path 3: schema validation failure ──────────────────────────────────
+
+  describe('no LLM provider — the job still reaches a terminal state', () => {
+    it('claims the job and fails it with no_llm_provider instead of leaving it queued', async () => {
+      // The handler used to only log, so the row stayed `queued` forever while
+      // pg-boss considered its own message complete — nothing would ever come
+      // back to it, and the jobs table showed work that looked pending
+      // indefinitely.
+      const teamId = freshTeamId();
+      const projectId = freshProjectId();
+      await seedTeam(teamId);
+      await seedProject(teamId, projectId);
+      const eventId = await seedCliEvent(teamId, projectId);
+
+      const { job } = await createJob(
+        db,
+        makeCreateJobReq(teamId, projectId, { kind: 'compilation', eventCount: 1 }),
+      );
+      await upsertJobEvent(db, {
+        teamId,
+        projectId,
+        jobId: job.id,
+        eventId,
+        status: 'pending',
+      });
+
+      const handler = createNoProviderHandler(db);
+      await handler({
+        id: 'pgboss-delivery-id',
+        data: {
+          jobId: job.id,
+          teamId,
+          projectId,
+          kind: 'compilation',
+        },
+      });
+
+      const [row] = await db
+        .select()
+        .from(schema.jobs)
+        .where(eq(schema.jobs.id, job.id));
+
+      expect(row!.status).toBe('failed');
+      expect(row!.finishedAt).not.toBeNull();
+      expect((row!.error as { code: string }).code).toBe('no_llm_provider');
+      // The reason must name the missing configuration without leaking a
+      // payload, prompt, or credential.
+      const serialized = JSON.stringify(row!.error);
+      expect(serialized).toContain('TEAMEM_ANTHROPIC_API_KEY');
+      expect(serialized).not.toContain('tm_');
+    });
+
+    it('ignores a delivery whose scope fields are missing', async () => {
+      // Without teamId/projectId there is no scope to act under, so the
+      // handler must not claim or mutate anything (§5.5).
+      const handler = createNoProviderHandler(db);
+      await expect(
+        handler({ id: 'pgboss-delivery-id', data: { jobId: 'x' } }),
+      ).resolves.toBeUndefined();
+    });
+  });
 
   describe('Path 3: failed — schema validation', () => {
     it('records failed outcome when LLM output fails schema validation', async () => {

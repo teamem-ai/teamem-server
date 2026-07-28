@@ -19,7 +19,7 @@ import { parseServerEnv } from './config/env.js';
 import { fatalStartup, installShutdownHandlers } from './lifecycle.js';
 import { createCompileQueue } from './queue/boss.js';
 import { createCompileJobHandler } from './queue/worker.js';
-import { acknowledgeCompileJob } from './worker/embedded.js';
+import { createNoProviderHandler } from './worker/embedded.js';
 import { createDbHandle } from './db/client.js';
 import { createLlmClient } from './llm/factory.js';
 import { createEmbeddingClient } from './llm/embedding/factory.js';
@@ -44,11 +44,11 @@ export async function runWorker(): Promise<void> {
     handler = createCompileJobHandler({ db, llm, embeddingClient });
   } else {
     console.warn(
-      '[worker] no LLM provider configured — compile jobs will be acknowledged ' +
-      'but not processed. Configure TEAMEM_ANTHROPIC_API_KEY, ' +
-      'TEAMEM_OPENAI_API_KEY, or equivalent.',
+      '[worker] no LLM provider configured — compile jobs will be failed with ' +
+      'no_llm_provider rather than compiled. Configure ' +
+      'TEAMEM_ANTHROPIC_API_KEY, TEAMEM_OPENAI_API_KEY, or equivalent.',
     );
-    handler = acknowledgeCompileJob;
+    handler = createNoProviderHandler(db);
   }
 
   // pg-boss lives inside Postgres — the queue start verifies connectivity.
