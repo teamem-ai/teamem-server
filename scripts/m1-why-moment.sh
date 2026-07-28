@@ -30,6 +30,10 @@
 #   TEAMEM_SMOKE_TEAM_ID        — team ID (overrides bootstrap)
 #   TEAMEM_SMOKE_PROJECT_ID     — project ID (overrides bootstrap)
 #   TEAMEM_API_KEY              — API key (overrides bootstrap)
+#   TEAMEM_GITHUB_WEBHOOK_SECRET — enables the full three-element demo (PR
+#                                 discussion + implementing commit on one
+#                                 page). Must match the secret the SERVER was
+#                                 started with. Without it that section skips.
 #
 #   Optional: set any TEAMEM_*_API_KEY to enable the LLM compilation path.
 #
@@ -985,6 +989,178 @@ print_summary() {
   fi
 }
 
+
+# ── Path 2: the full "why" moment, via the GitHub webhook connector ─────────
+#
+# The cli_init path above proves conclusion + implementing commit, but it can
+# never produce the PR discussion link: `to-concept.ts` derives exactly one
+# evidence item per event and its kind is fixed by the event kind, so a
+# cli_init event yields `repo_file` and nothing else. POST /v1/events also
+# accepts ONLY cli_init (publicIngestKind), so GitHub events must arrive
+# through the signature-verifying webhook connector.
+#
+# A page carrying all three elements therefore needs two GitHub deliveries —
+# the PR where the decision was argued, and the commit that landed it — which
+# F2 then merges into one concept. That is what this section drives.
+#
+# Requires TEAMEM_GITHUB_WEBHOOK_SECRET to be set to the SAME value the server
+# was started with. Without it the connector rejects every delivery with 401
+# and this section skips honestly rather than reporting a false pass.
+webhook_why_moment() {
+  header "5b. Full 'Why' Moment — PR discussion + implementing commit (webhook)"
+
+  if [[ -z "${TEAMEM_GITHUB_WEBHOOK_SECRET:-}" ]]; then
+    warn "TEAMEM_GITHUB_WEBHOOK_SECRET not set — skipping the full three-element demo."
+    warn "The cli_init path above proves conclusion + commit permalink only;"
+    warn "the PR discussion link is unreachable without the GitHub connector."
+    info "To run it, set the same secret the server was started with:"
+    info "  TEAMEM_GITHUB_WEBHOOK_SECRET=<secret> bash scripts/m1-why-moment.sh"
+    echo ""
+    return
+  fi
+
+  local repo_owner="teamem-ai" repo_name="teamem-server"
+  local repo_full="${repo_owner}/${repo_name}"
+  local sha="4f3a91c27b6d8e50a1c4f9b2e7d3a6c8b0f5e214"
+  local pr_url="https://github.com/${repo_full}/pull/107"
+  local commit_url="https://github.com/${repo_full}/commit/${sha}"
+
+  # Deliver one signed GitHub webhook. The signature covers the EXACT bytes
+  # sent, so the body is built once and reused for both.
+  deliver_webhook() {
+    local event="$1" delivery="$2" body="$3"
+    local sig
+    sig="sha256=$(printf '%s' "$body" \
+      | openssl dgst -sha256 -hmac "$TEAMEM_GITHUB_WEBHOOK_SECRET" \
+      | sed 's/^.*= //')"
+    curl -s -X POST \
+      "${BASE_URL}/v1/connectors/github/webhook?project=${PROJECT_ID}" \
+      -H "Content-Type: application/json" \
+      -H "X-GitHub-Event: ${event}" \
+      -H "X-GitHub-Delivery: ${delivery}" \
+      -H "X-Hub-Signature-256: ${sig}" \
+      --data-binary "$body" 2>/dev/null || echo '{}'
+  }
+
+  local pr_body push_body pr_resp push_resp
+  pr_body="$(jq -nc --arg repo "$repo_full" --arg owner "$repo_owner" \
+    --arg name "$repo_name" --arg sha "$sha" '{
+      action: "closed",
+      repository: { full_name: $repo, owner: { login: $owner }, name: $name },
+      sender: { login: "why-moment-demo", id: 1, type: "User" },
+      pull_request: {
+        number: 107,
+        title: "Store the compile queue in Postgres via pg-boss instead of adding Redis",
+        body: ("We debated adding Redis for the compile queue and decided against it.\n\n"
+          + "Rationale: a self-hosted team evaluating this product should not have to run\n"
+          + "and back up a second stateful service just to get the compile loop working.\n"
+          + "pg-boss keeps the queue inside the Postgres we already require, so the default\n"
+          + "deployment is three containers instead of four.\n\n"
+          + "The trade-off we accepted: queue polling writes to the same database that\n"
+          + "serves concept reads, so queue churn and query traffic share a connection pool\n"
+          + "and the WAL. Acceptable at self-hosted scale; revisit if a partner hits it.\n\n"
+          + "Implemented in commit " + $sha + "."),
+        state: "closed", merged: true, merged_at: "2026-07-28T02:00:00Z", draft: false,
+        created_at: "2026-07-27T09:00:00Z", updated_at: "2026-07-28T02:00:00Z",
+        user: { login: "why-moment-demo", id: 1, type: "User" },
+        base: { ref: "main", sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        head: { ref: "fix/queue-on-postgres", sha: $sha }
+      }
+    }')"
+
+  push_body="$(jq -nc --arg repo "$repo_full" --arg owner "$repo_owner" \
+    --arg name "$repo_name" --arg sha "$sha" '{
+      ref: "refs/heads/main",
+      before: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      after: $sha, forced: false, created: false, deleted: false,
+      repository: { full_name: $repo, owner: { login: $owner }, name: $name },
+      sender: { login: "why-moment-demo", id: 1, type: "User" },
+      commits: [{
+        id: $sha, distinct: true, timestamp: "2026-07-28T02:00:00Z",
+        message: ("feat(queue): run the compile queue on pg-boss inside Postgres\n\n"
+          + "Keeps the self-hosted deployment at three containers by reusing the\n"
+          + "Postgres we already require instead of introducing Redis. See PR #107\n"
+          + "for the full argument and the contention trade-off we accepted."),
+        author: { name: "Why Moment Demo", email: "demo@example.test", username: "why-moment-demo" },
+        committer: { name: "Why Moment Demo", email: "demo@example.test", username: "why-moment-demo" }
+      }]
+    }')"
+
+  info "Delivering signed pull_request webhook (the decision discussion)..."
+  pr_resp="$(deliver_webhook pull_request "why-moment-pr-$(date +%s)" "$pr_body")"
+  local pr_accepted; pr_accepted="$(echo "$pr_resp" | jq -r '.accepted // 0')"
+  assert "  pull_request delivery accepted (signature verified)" \
+    "[ \"$pr_accepted\" -ge 1 ]" "response: $(echo "$pr_resp" | head -c 200)"
+  if [[ "$pr_accepted" -lt 1 ]]; then
+    warn "  A 401 here means the secret does not match the server's."
+    echo ""
+    return
+  fi
+
+  # Let the PR compile into a page before the commit arrives, so F2 has an
+  # existing candidate to merge into rather than racing it.
+  info "  Waiting for the PR event to compile..."
+  sleep 45
+
+  info "Delivering signed push webhook (the implementing commit)..."
+  push_resp="$(deliver_webhook push "why-moment-push-$(date +%s)" "$push_body")"
+  local push_accepted; push_accepted="$(echo "$push_resp" | jq -r '.accepted // 0')"
+  assert "  push delivery accepted (signature verified)" \
+    "[ \"$push_accepted\" -ge 1 ]" "response: $(echo "$push_resp" | head -c 200)"
+
+  info "  Waiting for the commit event to compile and merge..."
+  sleep 45
+
+  # ── The actual acceptance: one page, all three elements ─────────────────
+  local pages_json page_count
+  pages_json="$(curl -s -H "$(auth_header)" \
+    "${BASE_URL}/v1/concepts?projectId=${PROJECT_ID}&limit=100&type=decision" \
+    2>/dev/null || echo '{}')"
+  page_count="$(echo "$pages_json" | jq -r '[.data[]? | select(.type == "decision")] | length')"
+
+  local uuid ev_kinds pr_ref commit_ref
+  uuid="$(echo "$pages_json" | jq -r '[.data[]? | select(.type == "decision")] | last | .uuid // ""')"
+  assert "  a decision page exists for the webhook events" "[ -n \"$uuid\" ]" \
+    "decision pages found: $page_count"
+  [[ -z "$uuid" ]] && { echo ""; return; }
+
+  local page
+  page="$(echo "$(mcp_tool_call "get_page" "$(jq -nc --arg p "$PROJECT_ID" --arg u "$uuid" \
+    '{projectId: $p, uuid: $u}')")" | jq -r '.result.content[0].text // "{}"')"
+
+  ev_kinds="$(echo "$page" | jq -r '[.evidence[]?.kind] | sort | join(",")')"
+  pr_ref="$(echo "$page" | jq -r '[.evidence[]? | select(.kind == "pr")] | first | .ref // ""')"
+  commit_ref="$(echo "$page" | jq -r '[.evidence[]? | select(.kind == "commit")] | first | .ref // ""')"
+
+  info "  evidence kinds on the page: ${ev_kinds:-none}"
+
+  # Evaluate before asserting — embedding jq in the eval'd condition string is
+  # what broke the two assertions fixed earlier in this file.
+  local page_type page_body conclusion_ok=0
+  page_type="$(echo "$page" | jq -r '.type // ""')"
+  page_body="$(echo "$page" | jq -r '.body // ""')"
+  [[ "$page_type" == "decision" && -n "$page_body" ]] && conclusion_ok=1
+  assert "  conclusion: page type is decision with a non-empty body" \
+    "[ $conclusion_ok = 1 ]" "type=$page_type body_len=${#page_body}"
+
+  assert "  PR discussion link present as 'pr' evidence" \
+    "[ -n \"$pr_ref\" ]" "evidence kinds: ${ev_kinds:-none}"
+
+  assert "  implementing commit permalink present as 'commit' evidence" \
+    "[ -n \"$commit_ref\" ]" "evidence kinds: ${ev_kinds:-none}"
+
+  assert "  all three elements on ONE page (F2 merged, page count did not split)" \
+    "[ -n \"$pr_ref\" ] && [ -n \"$commit_ref\" ]" \
+    "pr=$pr_ref commit=$commit_ref"
+
+  if [[ -n "$pr_ref" && -n "$commit_ref" ]]; then
+    info "  → conclusion:  $(echo "$page" | jq -r '.title')"
+    info "  → PR discussion: $pr_ref"
+    info "  → landed commit: $commit_ref"
+  fi
+  echo ""
+}
+
 # ── Main ────────────────────────────────────────────────────────────────────
 main() {
   check_prereqs
@@ -993,6 +1169,7 @@ main() {
   wait_for_compilation
   mcp_search_decision
   mcp_get_decision_page
+  webhook_why_moment
   test_idempotency
   verify_psql
   cleanup_all
