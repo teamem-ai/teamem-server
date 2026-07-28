@@ -34,7 +34,12 @@
 
 import { createDb, closeDb, type AppDb } from '../apps/server/src/db/client.js';
 import { parseServerEnv } from '../apps/server/src/config/env.js';
-import { createLlmClient, type LlmClient } from '../apps/server/src/llm/factory.js';
+import {
+  createLlmClient,
+  DEFAULT_MODELS,
+  type LlmClient,
+} from '../apps/server/src/llm/factory.js';
+import { createEmbeddingClient } from '../apps/server/src/llm/embedding/factory.js';
 import { recallCandidates } from '../apps/server/src/compiler/f2/candidates.js';
 import {
   decideMerge,
@@ -808,19 +813,18 @@ async function main(): Promise<void> {
   let providerModel: string | undefined;
   let providerAvailable = false;
 
+  let resolvedProvider: ReturnType<typeof parseServerEnv>['llmProviders'][number] | undefined;
+
   try {
     const env = parseServerEnv();
     const provider = env.llmProviders[0];
     if (provider) {
+      resolvedProvider = provider;
       providerKind = provider.kind;
-      providerModel =
-        provider.kind === 'openai'
-          ? 'gpt-4o-2024-08-06'
-          : provider.kind === 'claude'
-            ? 'claude-3-5-sonnet-20241022'
-            : provider.kind === 'openrouter'
-              ? 'openai/gpt-4o-2024-08-06'
-              : undefined;
+      // Read the model from the factory's own table rather than repeating it
+      // here: a duplicated default silently rots when a provider retires a
+      // dated model id.
+      providerModel = DEFAULT_MODELS[provider.kind] || undefined;
       llm = createLlmClient(provider, {
         defaultModel: providerModel,
         defaultTimeoutMs: 30_000,
@@ -843,11 +847,26 @@ async function main(): Promise<void> {
     console.error('[m1-f2-quality] Falling back to similarity-only analysis.');
   }
 
-  // 4. Resolve embedding/semantic capability.
-  //    No embedding client is available in the quality script, so capability
-  //    falls to fts-only (full-text search). This is an honest degradation.
-  const embeddingClient: EmbeddingClient | null = null;
-  const capability = resolveSemanticCapability(embeddingClient);
+  // 4. Resolve embedding/semantic capability from the SAME provider config the
+  //    worker uses, so this report measures the deployment's real recall mode.
+  //    Hardcoding null here made `recallMode` permanently `fts-only` and the
+  //    duplicate-page rate permanently similarity-only, no matter how the
+  //    deployment was configured. `createEmbeddingClient` still returns null
+  //    for providers without an embedding API (Claude), which is the honest
+  //    degradation this report is supposed to surface rather than assume.
+  let embeddingClient: EmbeddingClient | null = null;
+  if (resolvedProvider) {
+    try {
+      embeddingClient = createEmbeddingClient(resolvedProvider);
+    } catch (err) {
+      console.error(
+        `[m1-f2-quality] Embedding client init failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  const capability = resolveSemanticCapability(embeddingClient, {
+    log: (message) => console.error(`[m1-f2-quality] ${message}`),
+  });
 
   console.error(`[m1-f2-quality] Recall mode: ${capability.mode}`);
 
