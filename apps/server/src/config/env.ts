@@ -78,6 +78,26 @@ const optionalHttpUrl = z.preprocess(
     .optional(),
 );
 
+/**
+ * Accept `TEAMEM_DATABASE_URL` as an alias for `DATABASE_URL`.
+ *
+ * Every other variable carries the `TEAMEM_` prefix (AGENTS.md §4), and the
+ * bootstrap command already reads `TEAMEM_DATABASE_URL ?? DATABASE_URL`. This
+ * parser did not, so a caller that set only the prefixed form — which the QA
+ * scripts do — got half a working command: bootstrap connected to the right
+ * database and then failed inside this parser with a confusing
+ * "DATABASE_URL: expected string, received undefined".
+ *
+ * The precedence matches bootstrap's so the two cannot disagree about which
+ * database is in use. Deployments that set only `DATABASE_URL` (docker
+ * compose) are unaffected.
+ */
+function normalizeDatabaseUrl(environment: Environment): Environment {
+  const prefixed = environment['TEAMEM_DATABASE_URL'];
+  if (prefixed === undefined) return environment;
+  return { ...environment, DATABASE_URL: prefixed };
+}
+
 const rawServerEnvSchema = z
   .object({
     DATABASE_URL: requiredPostgresUrl,
@@ -135,7 +155,7 @@ export interface ServerEnvironment {
  * are intentionally ignored.
  */
 export function parseServerEnv(environment: Environment = process.env): ServerEnvironment {
-  const env = rawServerEnvSchema.parse(environment);
+  const env = rawServerEnvSchema.parse(normalizeDatabaseUrl(environment));
   const githubConfigured =
     env.TEAMEM_GITHUB_WEBHOOK_SECRET !== undefined ||
     env.TEAMEM_GITHUB_APP_ID !== undefined ||

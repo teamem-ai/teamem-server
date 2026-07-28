@@ -52,7 +52,16 @@ export function createRuntimeStartup(config: {
       return { stop: () => queue.stop() };
     },
     async startHttpServer() {
-      const server = startServer(undefined, { db: dbHandle.db, queue });
+      // The embedding client must reach the HTTP surface too, not just the
+      // compile worker: POST /v1/search and every MCP tool resolve semantic
+      // capability from it. Omitting it left the read path permanently in
+      // fts-only mode — embeddings were written during compilation and then
+      // never used — no matter how the deployment was configured.
+      const server = startServer(undefined, {
+        db: dbHandle.db,
+        queue,
+        embeddingClient,
+      });
       // `serve()` from @hono/node-server starts listening asynchronously.
       // Wait for the server to be ready so an EADDRINUSE failure surfaces
       // during startup and not as an uncatchable background crash.
