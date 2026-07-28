@@ -57,7 +57,7 @@ import * as schema from '../apps/server/src/db/schema.js';
 
 // ── Configuration ───────────────────────────────────────────────────────────
 
-interface QualityConfig {
+export interface QualityConfig {
   databaseUrl: string;
   teamId: string;
   projectId: string;
@@ -74,7 +74,7 @@ interface QualityConfig {
   maxMisattributionReplays: number;
 }
 
-function parseConfig(): QualityConfig {
+export function parseConfig(): QualityConfig {
   const env = parseServerEnv();
 
   const teamId = process.env['TEAMEM_QUALITY_TEAM_ID'];
@@ -109,7 +109,7 @@ function parseConfig(): QualityConfig {
 
 // ── Result types ────────────────────────────────────────────────────────────
 
-interface DuplicateCandidate {
+export interface DuplicateCandidate {
   conceptA: { uuid: string; title: string; path: string };
   conceptB: { uuid: string; title: string; path: string };
   similarity: number;
@@ -124,7 +124,7 @@ interface DuplicateCandidate {
  * merge-decider is asked afresh. A sample is emitted only when that replay
  * lands somewhere other than where the recorded compile did.
  */
-interface MisattributionSample {
+export interface MisattributionSample {
   /** The event whose attribution is in question. */
   eventId: string;
   externalId: string;
@@ -152,8 +152,42 @@ interface MisattributionSample {
   annotation?: 'correct' | 'wrong' | 'unclear';
 }
 
+/** Token usage accumulated for one cost tier. */
+export interface TierUsage {
+  measured: boolean;
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+/** Accumulates provider-reported usage for one tier. */
+class UsageMeter {
+  private calls = 0;
+  private prompt = 0;
+  private completion = 0;
+  private total = 0;
+
+  record(usage: { promptTokens: number; completionTokens: number; totalTokens: number }): void {
+    this.calls++;
+    this.prompt += usage.promptTokens;
+    this.completion += usage.completionTokens;
+    this.total += usage.totalTokens;
+  }
+
+  snapshot(): TierUsage {
+    return {
+      measured: this.calls > 0,
+      calls: this.calls,
+      promptTokens: this.prompt,
+      completionTokens: this.completion,
+      totalTokens: this.total,
+    };
+  }
+}
+
 /** Wrong-attribution metric over events that F2 merged into a pre-existing page. */
-interface MisattributionMetrics {
+export interface MisattributionMetrics {
   /** Events that were merged into a page that already existed. */
   mergedEvents: number;
   /** Merges actually replayed — the denominator of `rate`. */
@@ -178,7 +212,7 @@ interface LlmReEvaluation {
   error?: string;
 }
 
-interface F2QualityReport {
+export interface F2QualityReport {
   meta: {
     generatedAt: string;
     teamId: string;
@@ -212,6 +246,19 @@ interface F2QualityReport {
     samples: DuplicateCandidate[];
   };
   misattributionRate: MisattributionMetrics;
+  /**
+   * Provider-reported token usage observed while producing this report.
+   *
+   * The replay issues the same F1, F2 and embedding calls a compile does, so
+   * these are real per-tier costs rather than an estimate. A tier is
+   * `measured: false` when no call in that tier reported usage — absent usage
+   * is never recorded as zero cost.
+   */
+  tokenUsage: {
+    f1Extract: TierUsage;
+    f2Merge: TierUsage;
+    embedding: TierUsage;
+  };
   llmReEvaluations: LlmReEvaluation[];
   degradation: {
     providerAvailable: boolean;
@@ -616,6 +663,8 @@ async function detectMisattributions(
   capability: { mode: 'vector' | 'fts-only' },
   llm: LlmClient | null,
   maxReplays: number,
+  f1Meter: UsageMeter,
+  f2Meter: UsageMeter,
 ): Promise<MisattributionMetrics> {
   const scope = projectScope(teamId, projectId);
   const attributions = await loadAttributions(db, teamId, projectId);
@@ -652,6 +701,7 @@ async function detectMisattributions(
         userPrompt: user,
         requestId: `quality-f1:${merge.eventId}`,
       });
+      if (f1.usage) f1Meter.record(f1.usage);
       if (f1.output.action !== 'extract') {
         // The replay would not have produced a concept at all; that is a
         // different failure mode than a wrong target, so do not count it.
@@ -702,7 +752,7 @@ async function detectMisattributions(
       }
 
       const decision = await decideMerge(
-        { llm },
+        { llm, onUsage: (u) => f2Meter.record(u) },
         newConcept,
         candidates,
         `quality-f2:${merge.eventId}`,
@@ -1009,16 +1059,25 @@ async function loadConceptSummary(
 // ── LLM re-evaluation ──────────────────────────────────────────────────────
 
 
-async function main(): Promise<void> {
-  console.error('[m1-f2-quality] Starting F2 merge quality analysis...');
-
-  // 1. Parse configuration.
-  const config = parseConfig();
+/**
+ * Run the full F2 merge-quality analysis and return the report.
+ *
+ * Exported so `scripts/m1-quality-report.ts` can consume this analysis rather
+ * than maintaining its own copy. Two copies had already drifted: the report's
+ * copy still hardcoded `embeddingClient = null` and still derived
+ * misattribution from a similarity heuristic that cannot see a wrong merge.
+ *
+ * The caller owns the process; this function closes the database handle it
+ * opens and never calls `process.exit`.
+ */
+export async function runF2Analysis(
+  config: QualityConfig,
+): Promise<F2QualityReport> {
   console.error(
     `[m1-f2-quality] Team: ${config.teamId}, Project: ${config.projectId}`,
   );
 
-  // 2. Create database connection.
+  // Create database connection.
   const db = createDb(config.databaseUrl, {
     connectionTimeoutMillis: 10_000,
   });
@@ -1070,10 +1129,16 @@ async function main(): Promise<void> {
   //    deployment was configured. `createEmbeddingClient` still returns null
   //    for providers without an embedding API (Claude), which is the honest
   //    degradation this report is supposed to surface rather than assume.
+  const f1Meter = new UsageMeter();
+  const f2Meter = new UsageMeter();
+  const embeddingMeter = new UsageMeter();
+
   let embeddingClient: EmbeddingClient | null = null;
   if (resolvedProvider) {
     try {
-      embeddingClient = createEmbeddingClient(resolvedProvider);
+      embeddingClient = createEmbeddingClient(resolvedProvider, {
+        onUsage: (u) => embeddingMeter.record(u),
+      });
     } catch (err) {
       console.error(
         `[m1-f2-quality] Embedding client init failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -1147,6 +1212,8 @@ async function main(): Promise<void> {
       capability,
       llm,
       config.maxMisattributionReplays,
+      f1Meter,
+      f2Meter,
     );
     console.error(
       `[m1-f2-quality] Merges: ${misattributionRate.mergedEvents}, ` +
@@ -1206,6 +1273,11 @@ async function main(): Promise<void> {
         samples: duplicateMetrics.samples,
       },
       misattributionRate,
+      tokenUsage: {
+        f1Extract: f1Meter.snapshot(),
+        f2Merge: f2Meter.snapshot(),
+        embedding: embeddingMeter.snapshot(),
+      },
       llmReEvaluations: duplicateReEvals,
       degradation: {
         providerAvailable,
@@ -1221,16 +1293,30 @@ async function main(): Promise<void> {
       },
     };
 
-    // 11. Output.
-    console.log(JSON.stringify(report, null, 2));
-
     console.error('[m1-f2-quality] Analysis complete.');
+    return report;
   } finally {
     await closeDb(db);
   }
 }
 
-main().catch((err) => {
-  console.error('[m1-f2-quality] Fatal error:', err);
-  process.exit(1);
-});
+// ── CLI entry point ─────────────────────────────────────────────────────────
+
+async function main(): Promise<void> {
+  console.error('[m1-f2-quality] Starting F2 merge quality analysis...');
+  const report = await runF2Analysis(parseConfig());
+  console.log(JSON.stringify(report, null, 2));
+}
+
+// Only run as a CLI when invoked directly; importing this module for
+// `runF2Analysis` must not start an analysis or exit the process.
+const invokedDirectly =
+  process.argv[1] !== undefined &&
+  process.argv[1].endsWith('m1-f2-quality.ts');
+
+if (invokedDirectly) {
+  main().catch((err) => {
+    console.error('[m1-f2-quality] Fatal error:', err);
+    process.exit(1);
+  });
+}

@@ -19,7 +19,7 @@
  * error and rejected explicitly — no silent truncation or zero-padding.
  */
 import { EMBEDDING_DIMENSION } from './port.js';
-import { LlmError, type FetchLike } from '../types.js';
+import { LlmError, type FetchLike, type LlmUsage } from '../types.js';
 import type { ResolvedLlmConfig } from '../../config/llm.js';
 
 // ── Provider base URLs ──────────────────────────────────────────────────────
@@ -94,6 +94,11 @@ export interface EmbeddingApiCall {
   fetchFn: FetchLike;
   /** Input texts to embed. Empty array returns `[]` without a network call. */
   inputs: string[];
+  /**
+   * Optional metering seam, invoked with normalized token usage when the
+   * provider reported it. Not invoked when the envelope omitted usage.
+   */
+  onUsage?: (usage: LlmUsage) => void;
 }
 
 /**
@@ -163,7 +168,16 @@ export async function callEmbeddingApi(
     }
 
     const raw = await response.text();
-    return parseOpenAiEmbeddingResponse(provider, raw, inputs.length);
+    const vectors = parseOpenAiEmbeddingResponse(provider, raw, inputs.length);
+
+    // Report usage only after the payload validated: metering a response that
+    // is about to be rejected would overstate what the pipeline actually got.
+    if (call.onUsage) {
+      const usage = parseEmbeddingUsage(raw);
+      if (usage) call.onUsage(usage);
+    }
+
+    return vectors;
   } catch (err) {
     if (err instanceof LlmError) throw err;
     // Unexpected failure — wrap without attaching raw error as cause
@@ -188,6 +202,33 @@ export async function callEmbeddingApi(
  * Non-conforming responses throw `provider_error` — no partial acceptance,
  * no silent dimension coercion.
  */
+/**
+ * Normalize the OpenAI-family embeddings `usage` envelope.
+ *
+ * Embedding responses report `prompt_tokens` and `total_tokens` and have no
+ * completion side, so `completionTokens` is 0 — that is a real zero, not an
+ * unknown. An unparseable or absent envelope yields `undefined`.
+ */
+export function parseEmbeddingUsage(raw: string): LlmUsage | undefined {
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (typeof envelope !== 'object' || envelope === null) return undefined;
+  const usage = (envelope as Record<string, unknown>)['usage'];
+  if (typeof usage !== 'object' || usage === null) return undefined;
+  const promptTokens = (usage as Record<string, unknown>)['prompt_tokens'];
+  if (typeof promptTokens !== 'number') return undefined;
+  const total = (usage as Record<string, unknown>)['total_tokens'];
+  return {
+    promptTokens,
+    completionTokens: 0,
+    totalTokens: typeof total === 'number' ? total : promptTokens,
+  };
+}
+
 export function parseOpenAiEmbeddingResponse(
   provider: 'openai' | 'openrouter' | 'custom',
   raw: string,

@@ -12,7 +12,7 @@
  * fall back to full-text search (§5.5: never pretend vector search succeeded
  * when semantic capability is unavailable).
  */
-import type { FetchLike } from '../types.js';
+import type { FetchLike, LlmUsage } from '../types.js';
 
 /** Fixed embedding dimension per AGENTS.md §4. */
 export const EMBEDDING_DIMENSION = 1536;
@@ -46,4 +46,14 @@ export interface EmbeddingClientDeps {
   defaultTimeoutMs?: number;
   /** Transport; defaults to `globalThis.fetch`. */
   fetch?: FetchLike;
+  /**
+   * Optional metering seam: invoked with the provider-reported token usage of
+   * each successful embedding call.
+   *
+   * A callback rather than a change to `generate`'s return type so cost
+   * accounting stays opt-in and the three existing call sites keep working
+   * unchanged. Never invoked when the provider omitted usage — absent means
+   * "not reported", which must not be recorded as zero.
+   */
+  onUsage?: (usage: LlmUsage) => void;
 }

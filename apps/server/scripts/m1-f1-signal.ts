@@ -47,7 +47,7 @@ import {
   DEFAULT_MODELS,
   type LlmClient,
 } from '../src/llm/factory.js';
-import type { LlmResponse } from '../src/llm/types.js';
+import type { LlmResponse, LlmUsage } from '../src/llm/types.js';
 import { resolveLlmConfig } from '../src/config/llm.js';
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -55,8 +55,8 @@ import { resolveLlmConfig } from '../src/config/llm.js';
 /** Per-event outcome after the full F1 pipeline. */
 export type F1Outcome =
   | { kind: 'prefilter_skip'; reason: string; latencyMs: number }
-  | { kind: 'llm_skip'; reason: string; latencyMs: number }
-  | { kind: 'extract'; output: F1ExtractOutput; latencyMs: number }
+  | { kind: 'llm_skip'; reason: string; latencyMs: number; usage?: LlmUsage }
+  | { kind: 'extract'; output: F1ExtractOutput; latencyMs: number; usage?: LlmUsage }
   | { kind: 'schema_failure'; latencyMs: number; errorCode: string; errorMessage: string }
   | { kind: 'provider_failure'; latencyMs: number; errorCode: string; errorMessage: string };
 
@@ -117,6 +117,20 @@ export interface SignalReport {
     avg: number;
     p50: number;
     p95: number;
+  };
+  /**
+   * Provider-reported token usage summed over the F1 calls in this run.
+   *
+   * `measured` is false when the provider reported no usage at all — absent
+   * usage must not be presented as zero cost.
+   */
+  tokenUsage: {
+    measured: boolean;
+    llmCalls: number;
+    callsWithUsage: number;
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
   };
   details: EventDetail[];
   invariants: {
@@ -597,12 +611,14 @@ export async function runOneEvent(
         kind: 'extract',
         output: response.output,
         latencyMs,
+        ...(response.usage ? { usage: response.usage } : {}),
       };
     }
     return {
       kind: 'llm_skip',
       reason: response.output.reason,
       latencyMs,
+      ...(response.usage ? { usage: response.usage } : {}),
     };
   } catch (err: unknown) {
     const latencyMs = Math.round(performance.now() - started);
@@ -721,6 +737,22 @@ export function buildReport(
       ? Math.round(latencies.reduce((s, l) => s + l, 0) / latencies.length)
       : 0;
 
+  // Token usage: only outcomes that actually issued an LLM call can carry it.
+  // Prefilter skips never reached a provider, so they are excluded from the
+  // call count rather than counted as zero-cost calls.
+  const llmOutcomes = outcomes.filter((o) => o.kind !== 'prefilter_skip');
+  const usages = llmOutcomes.flatMap((o) =>
+    'usage' in o && o.usage ? [o.usage] : [],
+  );
+  const tokenUsage = {
+    measured: usages.length > 0,
+    llmCalls: llmOutcomes.length,
+    callsWithUsage: usages.length,
+    promptTokens: usages.reduce((n, u) => n + u.promptTokens, 0),
+    completionTokens: usages.reduce((n, u) => n + u.completionTokens, 0),
+    totalTokens: usages.reduce((n, u) => n + u.totalTokens, 0),
+  };
+
   const totalExtract = extracts.length;
   const signalRatio =
     totalExtract + totalSkip > 0
@@ -751,6 +783,7 @@ export function buildReport(
       p50: percentile(latencies, 50),
       p95: percentile(latencies, 95),
     },
+    tokenUsage,
     details,
     invariants: {
       // Schema failures must carry error info in details, never output data.

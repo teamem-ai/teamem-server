@@ -224,7 +224,11 @@ describe('F2 section', () => {
         samples: [],
       },
       misattribution: {
-        candidateCount: 0,
+        mergedEvents: 0,
+        judged: 0,
+        disagreements: 0,
+        rate: 0,
+        unreplayable: 0,
         samples: [],
       },
     };
@@ -273,7 +277,11 @@ describe('F2 section', () => {
         samples: [],
       },
       misattribution: {
-        candidateCount: 0,
+        mergedEvents: 0,
+        judged: 0,
+        disagreements: 0,
+        rate: 0,
+        unreplayable: 0,
         samples: [],
       },
     };
@@ -485,7 +493,11 @@ describe('M1QualityReport full assembly', () => {
           samples: [],
         },
         misattribution: {
-          candidateCount: 0,
+          mergedEvents: 0,
+          judged: 0,
+          disagreements: 0,
+          rate: 0,
+          unreplayable: 0,
           samples: [],
         },
       },
@@ -636,7 +648,11 @@ describe('M1 quality report boundary cases', () => {
         samples: [],
       },
       misattribution: {
-        candidateCount: 0,
+        mergedEvents: 0,
+        judged: 0,
+        disagreements: 0,
+        rate: 0,
+        unreplayable: 0,
         samples: [],
       },
     };
@@ -667,7 +683,11 @@ describe('M1 quality report boundary cases', () => {
         samples: [],
       },
       misattribution: {
-        candidateCount: 5,
+        mergedEvents: 5,
+        judged: 5,
+        disagreements: 0,
+        rate: 0,
+        unreplayable: 0,
         samples: [],
       },
     };
