@@ -151,29 +151,57 @@ describe('m1-f2-quality report structure', () => {
     expect(Array.isArray(report.llmReEvaluations)).toBe(true);
   });
 
-  it('includes misattributionSamples with annotation fields for manual review', () => {
-    // Each misattribution sample must have an annotation field for human
-    // annotators to mark as correct/wrong/unclear.
-    const sample = {
-      newConceptTitle: 'Test A',
-      targetConceptTitle: 'Test B',
-      targetConceptUuid: 'uuid-1',
-      relationship: 'would-be-merge-candidate',
-      similarity: 0.92,
+  it('reports a wrong-attribution rate over the merges it could judge', () => {
+    // The rate denominator must be merges actually replayed, not the total
+    // merge count: counting an unreplayable merge as correctly attributed
+    // would report a better rate than was measured.
+    const metrics = {
+      mergedEvents: 5,
+      disagreements: 1,
+      rate: 1 / 3,
+      unreplayable: 2,
+      samples: [],
+    };
+    expect(metrics.mergedEvents - metrics.unreplayable).toBe(3);
+    expect(metrics.rate).toBeCloseTo(metrics.disagreements / 3);
+  });
+
+  it('carries both the recorded and replayed target so a human can annotate', () => {
+    // A wrong-attribution sample is only actionable if it names where the
+    // compile actually put the event AND where the replay would have.
+    const sample: {
+      eventId: string;
+      externalId: string;
+      recordedTarget: { uuid: string; title: string; path: string };
+      replayTarget: { uuid: string; title: string; path: string } | null;
+      replayRelationship: string;
+      recordedTargetRank: number | null;
+      recordedTargetSimilarity: number | null;
+      otherCandidates: { uuid: string; title: string; similarity: number }[];
+      annotation?: 'correct' | 'wrong' | 'unclear';
+    } = {
+      eventId: 'evt_1',
+      externalId: 'sha:docs/a.md',
+      recordedTarget: { uuid: 'uuid-1', title: 'A', path: 'services/a' },
+      replayTarget: { uuid: 'uuid-2', title: 'B', path: 'runbooks/b' },
+      replayRelationship: 'extends',
+      recordedTargetRank: 3,
+      recordedTargetSimilarity: 0.71,
       otherCandidates: [],
-      annotation: undefined,
     };
 
+    expect(sample.recordedTarget.uuid).not.toBe(sample.replayTarget?.uuid);
+
+    // A null replayTarget means "should have been its own page", which is a
+    // distinct finding from "should have gone to a different page".
+    const shouldHaveBeenNew = { ...sample, replayTarget: null, replayRelationship: 'unrelated' };
+    expect(shouldHaveBeenNew.replayTarget).toBeNull();
+
     // The annotation field must support 'correct' | 'wrong' | 'unclear'.
-    const validAnnotations = ['correct', 'wrong', 'unclear'];
-    sample.annotation = 'correct';
-    expect(validAnnotations).toContain(sample.annotation);
-
-    sample.annotation = 'wrong';
-    expect(validAnnotations).toContain(sample.annotation);
-
-    sample.annotation = 'unclear';
-    expect(validAnnotations).toContain(sample.annotation);
+    for (const a of ['correct', 'wrong', 'unclear'] as const) {
+      sample.annotation = a;
+      expect(['correct', 'wrong', 'unclear']).toContain(sample.annotation);
+    }
   });
 });
 

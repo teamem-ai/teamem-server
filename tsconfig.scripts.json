@@ -1,0 +1,18 @@
+{
+  // The QA/quality scripts under scripts/ produce M1's acceptance evidence but
+  // were covered by no tsconfig: apps/server/tsconfig.json includes only "src".
+  // That is how a hardcoded `embeddingClient = null` and a call with the wrong
+  // argument shape survived in m1-f2-quality.ts. They import server internals,
+  // so they typecheck against the same base config as the server.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // scripts/ sits at the repo root but imports server dependencies, which
+    // pnpm installs under apps/server. Point resolution there explicitly.
+    "baseUrl": ".",
+    "paths": {
+      "*": ["apps/server/node_modules/*", "node_modules/*"]
+    }
+  },
+  "include": ["scripts/**/*.ts", "apps/server/scripts/**/*.ts"]
+}
