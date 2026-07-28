@@ -13,6 +13,25 @@
 > pending. Overall M1 therefore remains open. Real-provider checks described
 > below also remain conditional on external credentials.
 
+
+> ---
+>
+> ## ⚠️ 2026-07-28 更正：§6.2 的判定前提已被实测推翻
+>
+> 本报告 §6.2 把六项能力标为 **CONDITIONAL PASS — Infrastructure Ready,
+> Blocked by External Credentials**。**"Infrastructure Ready" 这个前提是错的。**
+> 接上真实 provider 之后发现，那些路径当时在**任何配置下都跑不通** —— 缺的
+> 不是凭据。
+>
+> §6.1 里也有若干条 PASS 被高估：它们依据的是"代码存在 + 集成测试通过"，
+> 而集成测试用的是 fake fetch / mock LLM，恰好绕开了真实 provider 会拒绝的
+> 那一层。
+>
+> **本报告正文保留原样**（它是 2026-07-23 那个 commit 的时点记录），
+> 更正与实测结果见文末 **[附录 A](#附录-a2026-07-28-真实-provider-实测更正)**。
+>
+> ---
+
 ---
 
 ## Environment
@@ -362,6 +381,9 @@ docker exec teamem-postgres-1 psql -U teamem -d teamem \
 
 ### 6.2 CONDITIONAL PASS — Infrastructure Ready, Blocked by External Credentials
 
+> **⚠️ 这一节的判定前提已于 2026-07-28 被实测推翻。**"Infrastructure Ready" 是
+> 错的 —— 缺的不是凭据。逐项更正见 [附录 A.2](#a2-62-六项的重新判定)。
+
 | # | Criterion | Condition | Evidence |
 |---|---|---|---|
 | 1 | F1 real LLM extraction produces concept pages | Requires LLM provider | F1 signal script: honest `{"status":"skipped"}`. All infrastructure ready (20 fixtures, Zod validation, provider resolution). Tests pass with real DB. |
@@ -374,6 +396,11 @@ docker exec teamem-postgres-1 psql -U teamem -d teamem \
 ### 6.3 FAIL
 
 _None._ All code paths that can be verified without external credentials pass.
+
+> **⚠️ 2026-07-28 更正**：这句话字面成立，但它掩盖了一个方法论问题 ——
+> "without external credentials" 恰好排除了唯一能发现真实缺陷的那类验证。
+> 接上真实 provider 后，§6.2 的六项里有四项当时其实是 **FAIL**。
+> 见 [附录 A](#附录-a2026-07-28-真实-provider-实测更正)。
 
 ---
 
@@ -496,3 +523,116 @@ and is accessible to agents via MCP — is architecturally complete and
 verified against real infrastructure on the server track. Overall M1 must
 remain open until CLI-02 through CLI-04 are complete and the standalone CLI
 passes its cold-start end-to-end acceptance.**
+
+
+---
+
+# 附录 A：2026-07-28 真实 provider 实测更正
+
+**日期**：2026-07-28
+**验证方式**：真实 OpenRouter provider（LLM + embedding）、真实 PostgreSQL/pgvector、
+真实 server/worker/MCP、真实 GitHub webhook connector（签名验证）
+**修复**：[teamem-server#107](https://github.com/teamem-ai/teamem-server/pull/107)
+（13 commits，已合并）、[teamem-ai/cli#6](https://github.com/teamem-ai/cli/pull/6)（已合并）
+**详细过程**：`tasks/M1/CLOSEOUT.md`
+
+## A.1 为什么 §6.2 的判定是错的
+
+§6.2 的措辞是 "Infrastructure Ready, Blocked by External Credentials" ——
+意思是代码已经就绪，只差一把 key。接上 key 之后的实测证明**不是**：
+
+`f1Output` 和 `f2Decision` 都是 `z.discriminatedUnion`，`z.toJSONSchema` 把它们
+渲染成**没有 `type` 的根级 `oneOf`**。两大 provider 家族都在 schema 根部拒收：
+
+| 发出的 schema | provider | 响应 |
+|---|---|---|
+| `{ oneOf: [...] }` | Anthropic | 400 `tools.0.custom.input_schema.type: Field required` |
+| `{ type:"object", oneOf: [...] }` | Anthropic | 400 `input_schema does not support oneOf, allOf, or anyOf at the top level` |
+| `{ oneOf: [...] }` | OpenAI | 400 `schema must be a JSON Schema of 'type: "object"', got 'type: "None"'` |
+
+**所有 provider 的每一次 F1/F2 调用都是 400，请求根本到不了模型。**
+不是缺凭据，是发出去的请求本身非法。
+
+之所以没被发现，是因为单元测试在外部边界注入 fake `fetch` —— 喂什么进去都不会
+被真实 provider 拒绝。还有一条测试注释明确写着"strict-less 是 OpenAI 唯一接受
+的形状"，而实测中 OpenAI 在 `strict` 完全没发送的情况下同样拒绝。
+
+另外还叠着两个缺陷，任一单独存在都会让编译闭环失效：
+
+- **队列消息缺字段**：五个入队点里四个发的 pg-boss 消息缺 `teamId`/`projectId`，
+  worker 拒收后**不 claim**，job 永远停在 `queued`；
+- **`job_events` 从不写入**：四条摄取路径都不写，worker claim 到了也立刻
+  `no_events_found` 失败。
+
+**合并起来的结论**：`POST /v1/events`、`POST /v1/events/batch`、
+MCP `memory_write`、GitHub webhook 这四条摄取路径，**在本报告出具时从未编译出过
+任何一个概念页**。
+
+## A.2 §6.2 六项的重新判定
+
+| # | 原判定 | 更正后 |
+|---|---|---|
+| 1 | F1 real LLM extraction — CONDITIONAL | **当时 FAIL**（所有 provider 400）→ 修复后 **PASS**：两个 provider 各 20/20（8 extract / 12 skip / 0 schema failure / 0 provider failure），且在同一批输入上给出**相同**的 extract/skip 划分 |
+| 2 | F2 real LLM merge decisions — CONDITIONAL | **当时 FAIL**（同一根因）→ 修复后 **PASS**：`confirms` / `extends` / `contradicts` / `unrelated` 四个分支全部实测触发；矛盾证据把页面置为 `disputed` 且**不降低 confidence** |
+| 3 | Semantic recall differentiator — CONDITIONAL | **当时 FAIL** → 修复后 **PASS**：`m1-semantic-recall.sh` **3/3、0 skipped**，英文 "Redis token bucket rate limiting" 与零关键词重叠的中文"避免接口被刷爆，用了令牌桶那套方案"归属同一 UUID，页数未增加 |
+| 4 | "Why moment" demo — CONDITIONAL | **当时 FAIL** → 修复后 **PASS**：`m1-why-moment.sh` **38/38**，同一页上三要素齐全（结论 + `pr` evidence + `commit` evidence）。需要 `TEAMEM_GITHUB_WEBHOOK_SECRET` |
+| 5 | Embedding generation — CONDITIONAL | **部分 FAIL**：写路径确实会生成（修复后 7/7 非空、1536 维、HNSW 索引可用），但**读路径拿不到 embedding client** —— `index.ts` 只把它给了 worker，没给 HTTP server，所以 `/v1/search` 和所有 MCP 工具**在任何配置下都是 fts-only**。已修 |
+| 6 | GitHub webhook E2E — CONDITIONAL | **仍 CONDITIONAL**，但已用**签名验证的真实投递**跑通：`pull_request` + `push` 两条 delivery 经 HMAC-SHA256 验签后被 F2 合并成一页。尚未对接真实 GitHub App 凭据 |
+
+## A.3 §6.1 里被高估的 PASS
+
+这些行当时依据的是"代码存在 + 集成测试通过"，而测试恰好绕开了真实 provider
+会拒绝的那一层：
+
+| # | 原文 | 实际情况 |
+|---|---|---|
+| 5 | Provider-native structured output with Zod re-validation | 机制在，但**发出的 JSON Schema 被所有 provider 拒收**（A.1）。已修 |
+| 6 | pgvector semantic search capability | 列、索引、仓储都在，但**读路径永远拿不到 embedding client**，实际从未走过向量检索。已修 |
+| 7 | Hybrid search with vector+FTS fusion | 融合代码在，但因上一条，实际运行中**恒为 `degraded: true`**。已修 |
+| 11 | F2 merge persistence | 引用的 `concepts-merge.integration.test.ts` 测的是 `mergeIntoConcept` —— 那个函数**在生产里零调用**。编译任务用的是另一份实现（`updateConcept`），两者已漂移：它会覆盖 `confidence`（一条 `medium` 佐证能把 `high` 页降级）、不去重 evidence、把 `contradicts→disputed` 交给调用方。已收敛到规格实现并删除重复实现 |
+| 17 | Dual-machine sharing | 仅有集成测试证据。**2026-07-28 已补 live 验证**：A 用 `memory_write` 写入，B 用另一把独立铸出的 key 以零关键词重叠的自然语言 `search` 命中同一页；`<private>` 段整段不落库 |
+
+## A.4 新增的实测证据（本报告出具后）
+
+| 能力 | 证据 |
+|---|---|
+| `POST /v1/search` 边界 | `limit=101` → 400 且带 `{field, max:100, provided:101}`；`limit=100` → 200（不静默截断） |
+| 跨租户不泄露存在性 | A 的 key 查 B 真实存在的项目，与查一个不存在的项目 id，两个响应**去掉 requestId 后逐字节一致**；跨团队那次留下 `search.query / denied` 审计 |
+| 审计不落 query 原文 | `audit_log` 表结构**没有承载 query 的列**；全表扫 `ZEBRAFISH` / `billing rewrite` / `token bucket` / `令牌桶` 均 0 行 |
+| MCP `memory_write` 脱敏 | `<private>` 段整段不落库（`events` 表命中 0 行），前后文完好，`get_page` 读路径同样不残留 |
+| MCP `timeline` | 三条 `occurredAt` 与插入顺序相反的事件，返回**严格按 occurred_at 降序** |
+| `teamem init` 冷启动 | 官方脚本 `scripts/m1-init-e2e.ts` 报 `ALL CHECKS PASSED`，产出 5 个概念页、每页有 evidence |
+| 质量度量报告 v1 | 三层 token 成本全部 `measured: true`，报告里 "未测" 出现 **0 次**（f1 33553 / f2 18655 / embedding 3306 tokens） |
+| F1 六类型全覆盖 | 全库累计 `decision` 9 / `gotcha` 18 / `concept` 7 / `service` 6 / `runbook` 6 / `convention` 2。`runbook` 专项复测：三份纯操作型 runbook **3/3 正确归类，confidence 均为 high**。（此前"`runbook` 从未产出"的说法有误 —— 它早已在另外两个项目里出现过，是 run-to-run 波动，不是能力缺失） |
+| 全量回归（修复后） | lint / typecheck 干净；单测 **1153 passed**；集成 **628 passed**（真实 Postgres/pgvector） |
+| Compose 两种拓扑 | `m0-compose-smoke.sh --mode standard` **18/18**、`--mode all-in-one` **17/17**。因继承了 shell 中的 provider key，两次跑的都是真实编译 —— **all-in-one 的嵌入式 worker 真的执行了 F1/F2**，这是本报告出具后才被验证的路径 |
+| License 边界 | 六项复核通过：根/`apps/*` = AGPL-3.0-only；`packages/schema` 有独立 MIT LICENSE、import 全表只有 `zod`、发布白名单只含 `dist/LICENSE/README.md`；CLI = MIT 且只依赖 registry 版本的 `@teamem/schema@^0.1.0` |
+| 跳过项归因 | 单测 645 跳过 = 639 缺 `TEST_DATABASE_URL`（即集成运行里实际跑的那批）+ 6 缺 GitHub App 凭据；集成 6 跳过全部是后者。**无任何"不明原因跳过"** |
+
+## A.5 仍未验证的项
+
+**诚实声明，不是简化掉**：
+
+1. **GitHub App 真实凭据未接**（A.2 #6）。webhook 链路已用签名验证的真实投递
+   跑通，但未对接真实 GitHub App；相关 6 个用例在单测与集成两次运行里都跳过。
+2. **F1/F2 分类存在 run-to-run 波动** —— 同一份输入在不同运行里可能得到不同的
+   类型或合并目标。这是质量度量要持续跟踪的对象，不是一次性验收项。
+3. **错归属率的 `rate: 0` 不等于"没有错误归属"** —— 该指标靠重放已记录的合并
+   决策计算，重放问的是同一个 decider 同一个问题，**系统性判错的 decider 每次
+   都会跟自己一致**。样本清单里列的是全部被重放的合并，供人工标注；判断质量看
+   标注结果，不看这个数字。
+
+## A.6 方法论教训
+
+本报告当时的判定方式是"代码路径 + 集成测试通过 → PASS 或 CONDITIONAL PASS"。
+这套方式**系统性地看不见**上述缺陷，因为：
+
+- 单测在外部边界注入 fake `fetch`，永远不会收到 provider 的 400；
+- 多条测试**主动断言了错误行为**（"strict-less 是 OpenAI 唯一接受的形状"、
+  `send` 带 `{jobId, eventId}`、skip 的 reason 保留模型自由文本），把缺陷钉死成了
+  "预期行为"；
+- QA 脚本自身从未被 typecheck 覆盖（`apps/server/tsconfig.json` 只 include
+  `"src"`），硬编码的 `embeddingClient = null` 因此长期存活。
+
+**结论**：涉及外部 provider 契约的能力，"集成测试通过"不能替代"真实 provider
+跑通一次"。M1 的出口清单要求"命令 + 真实输出"是对的，本报告当时没有严格执行。
