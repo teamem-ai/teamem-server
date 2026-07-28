@@ -69,8 +69,20 @@ export interface UpdateConceptInput {
   readonly body: string;
   /** New status (from F2 resultStatus). */
   readonly status: 'active' | 'superseded' | 'disputed' | 'needs-review';
-  /** New confidence (server-computed). */
-  readonly confidence: 'high' | 'medium' | 'low';
+  /**
+   * New confidence. Optional, and deliberately NOT set by the F2 merge path.
+   *
+   * M1-F2-04 enumerates what a merge writes — title/body, evidence,
+   * contributors, embedding, last_confirmed, status — and confidence is not in
+   * it. Overwriting it with the incoming extraction's value let a corroborating
+   * event DOWNGRADE a page: a `high` page confirmed by a `medium` extraction
+   * became `medium`, which inverts what corroboration means. It also cuts
+   * against §6.1, where contradiction is expressed through `status`
+   * (-> disputed) precisely so it does not merely lower confidence.
+   *
+   * Omit it and the stored value is left untouched.
+   */
+  readonly confidence?: 'high' | 'medium' | 'low';
   /** Merged tags (union of old + new). */
   readonly tags?: string[];
   /** Updated last_confirmed — only set for 'confirms' relationship. */
@@ -294,8 +306,8 @@ export async function createConcept(
  * database transaction.
  *
  * This is the merge counterpart to {@link createConcept}: it updates the
- * concept row (title, body, status, confidence, tags, embedding, and
- * optionally `last_confirmed`), appends new evidence rows (never deletes
+ * concept row (title, body, status, tags, embedding, optionally `confidence`,
+ * and optionally `last_confirmed`), appends new evidence rows (never deletes
  * existing evidence), and appends new trusted contributors (with ON CONFLICT
  * DO NOTHING to avoid duplicates across multiple merges).
  *
@@ -346,10 +358,15 @@ export async function updateConcept(
       title: input.title,
       body: input.body,
       status: input.status,
-      confidence: input.confidence,
       tags: input.tags ?? [],
       updatedAt: new Date(),
     };
+
+    // Only write confidence when the caller explicitly asks for it; the F2
+    // merge path never does (see UpdateConceptInput.confidence).
+    if (input.confidence !== undefined) {
+      updateValues['confidence'] = input.confidence;
+    }
 
     if (input.lastConfirmed) {
       updateValues['lastConfirmed'] = input.lastConfirmed;

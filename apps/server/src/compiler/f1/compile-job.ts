@@ -361,7 +361,9 @@ async function executeMergeDecision(
     title: decision.mergedTitle,
     body: decision.mergedBody,
     status: decision.resultStatus,
-    confidence: conceptInput.confidence,
+    // confidence is deliberately absent: M1-F2-04's field list for a merge
+    // does not include it, and writing the incoming extraction's value let a
+    // corroborating `medium` event downgrade a `high` page.
     // Union of existing tags + new tags from F1 extraction.
     tags: [...new Set([...existingTags, ...(conceptInput.tags ?? [])])],
     lastConfirmed:
