@@ -15,7 +15,26 @@
  */
 import { randomBytes } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createCompileQueue, type CompileJob } from './queue/boss.js';
+import {
+  createCompileQueue,
+  type CompileJob,
+  type CompileJobMessage,
+} from './queue/boss.js';
+
+/**
+ * A well-formed compile delivery. These tests only care whether a consumer
+ * picks the message up, but the payload must still satisfy the worker
+ * contract — an under-populated message is exactly the defect that left every
+ * ingest path's job stuck in `queued`.
+ */
+function compileMessage(jobId: string): CompileJobMessage {
+  return {
+    jobId,
+    teamId: 'team-lifecycle-test',
+    projectId: 'prj-lifecycle-test',
+    kind: 'ingest_event',
+  };
+}
 import { createDbHandle } from './db/client.js';
 import { startEmbeddedWorker } from './worker/embedded.js';
 import { startRuntime, type Runtime, type RuntimeStartup } from './composition-root.js';
@@ -93,7 +112,7 @@ describe.skipIf(!url)('all-in-one lifecycle (live Postgres + pg-boss)', () => {
       const { runtime, queue, processed, stopLog } = await buildHarness(true);
       expect(runtime.workerCount).toBe(1);
 
-      const jobId = await queue.send({ eventId: 'evt-1' });
+      const jobId = await queue.send(compileMessage('evt-1'));
       expect(jobId).toBeTruthy();
 
       // Wait for the embedded worker to claim and run the job.
@@ -118,7 +137,7 @@ describe.skipIf(!url)('all-in-one lifecycle (live Postgres + pg-boss)', () => {
       const { runtime, queue, processed, stopLog } = await buildHarness(false);
       expect(runtime.workerCount).toBe(0);
 
-      await queue.send({ eventId: 'evt-2' });
+      await queue.send(compileMessage('evt-2'));
 
       // No consumer exists in-process; wait well past a poll interval and
       // confirm nothing consumed it.

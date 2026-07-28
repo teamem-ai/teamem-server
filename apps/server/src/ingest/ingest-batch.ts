@@ -266,7 +266,12 @@ export async function processIngestBatch(
     // Enqueue for compilation only when compile=true and a queue is available.
     if (req.options.compile && queue && created) {
       try {
-        await queue.send({ jobId: batchJobId });
+        await queue.send({
+          jobId: batchJobId,
+          teamId,
+          projectId: req.projectId,
+          kind: JOB_KIND,
+        });
       } catch (err) {
         console.error(
           JSON.stringify({

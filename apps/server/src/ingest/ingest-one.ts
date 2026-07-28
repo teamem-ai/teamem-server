@@ -231,7 +231,12 @@ export async function ingestOne(
       // the enqueue — the original caller already enqueued it.
       if (queue && jobResult.created) {
         try {
-          await queue.send({ jobId, eventId });
+          await queue.send({
+            jobId,
+            teamId: auth.teamId,
+            projectId: auth.projectId,
+            kind: 'ingest_event',
+          });
         } catch (err) {
           // Enqueue failure does not roll back the event or job — the job
           // row already exists and can be picked up by the worker later.

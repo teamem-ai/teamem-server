@@ -28,7 +28,7 @@ import {
   type Pool,
 } from '../test/database.js';
 import { ingestOne, IngestOneError, type IngestOneAuth } from './ingest-one.js';
-import type { CompileQueue } from '../queue/boss.js';
+import type { CompileJobMessage, CompileQueue } from '../queue/boss.js';
 import { stripPrivateTags } from '../security/private-tags.js';
 import { payloadHash } from '../security/payload-hash.js';
 import { PAYLOAD_SCHEMA_VERSION, type IngestEventRequest } from '@teamem/schema';
@@ -612,8 +612,8 @@ describe.skipIf(!url)('ingestOne pipeline (live Postgres)', () => {
 
   describe('queue integration — injectable spy', () => {
     /** Build a lightweight queue spy that records send() calls. */
-    function createQueueSpy(): CompileQueue & { sent: Array<{ jobId: string; eventId: string }> } {
-      const sent: Array<{ jobId: string; eventId: string }> = [];
+    function createQueueSpy(): CompileQueue & { sent: CompileJobMessage[] } {
+      const sent: CompileJobMessage[] = [];
       const noop = () => Promise.resolve();
       return {
         sent,
@@ -622,13 +622,17 @@ describe.skipIf(!url)('ingestOne pipeline (live Postgres)', () => {
         work: () => Promise.resolve('ok'),
         offWork: noop,
         async send(data) {
-          sent.push({ jobId: data.jobId as string, eventId: data.eventId as string });
+          sent.push(data);
           return 'fake-pg-boss-job-id';
         },
       };
     }
 
-    it('compile=true + new job → queue.send called exactly once with {jobId, eventId}', async () => {
+    it('compile=true + new job → queue.send called once with the full worker contract', async () => {
+      // The worker rejects a delivery without teamId/projectId and returns
+      // without claiming, which leaves the job row stuck in `queued` forever.
+      // This asserts the scope fields the worker actually requires (§5.5),
+      // not merely that some message was sent.
       const spy = createQueueSpy();
       const req = makeRequest({ options: { compile: true, wait: false } });
 
@@ -637,9 +641,11 @@ describe.skipIf(!url)('ingestOne pipeline (live Postgres)', () => {
       expect(result.status).toBe('inserted');
       expect(result.jobId).toBeTruthy();
       expect(spy.sent).toHaveLength(1);
-      expect(spy.sent[0]).toMatchObject({
+      expect(spy.sent[0]).toEqual({
         jobId: result.jobId,
-        eventId: result.eventId,
+        teamId: auth.teamId,
+        projectId: auth.projectId,
+        kind: 'ingest_event',
       });
     });
 

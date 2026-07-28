@@ -208,7 +208,12 @@ export async function postEventsHandler(c: Context, deps: EventsWriteDeps): Prom
       // Enqueue in pg-boss if a queue is available
       if (queue && jobResult.created) {
         try {
-          await queue.send({ jobId, eventId });
+          await queue.send({
+            jobId,
+            teamId,
+            projectId: req.projectId,
+            kind: 'ingest_event',
+          });
         } catch (err) {
           // Enqueue failure does not roll back the event or job — the job
           // row already exists and can be picked up by the worker later.

@@ -230,7 +230,9 @@ export async function postWebhookHandler(
             try {
               await queue.send({
                 jobId: jobResult.job.id,
-                eventId: persisted.eventId,
+                teamId: scope.teamId,
+                projectId: scope.projectId,
+                kind: 'ingest_event',
               });
             } catch (err) {
               // Enqueue failure does not roll back the event or job.

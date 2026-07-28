@@ -218,7 +218,12 @@ async function handleMemoryWrite(
       // Enqueue in pg-boss when queue is available and job was newly created.
       if (queue && jobResult.created) {
         try {
-          await queue.send({ jobId, eventId });
+          await queue.send({
+            jobId,
+            teamId,
+            projectId,
+            kind: 'ingest_event',
+          });
         } catch (err) {
           console.error(
             JSON.stringify({
