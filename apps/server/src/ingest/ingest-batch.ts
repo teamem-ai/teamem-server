@@ -245,7 +245,16 @@ export async function processIngestBatch(
     // compile through these rows, so a job without them claims successfully
     // and then fails with `no_events_found`. Upserted (PK job_id+event_id)
     // so a replay that re-enters this branch is harmless.
-    if (created) {
+    //
+    // Gated on `compile` for the same reason the enqueue below is: with
+    // compile=false the job row exists only to hold the idempotency result
+    // snapshot and is never enqueued, so it stays `queued` forever. Linking
+    // events to it would make getEventCompilationStatus() report them as
+    // `already_active`, and a later POST /v1/compilations would classify every
+    // event as already handled and complete without compiling anything — which
+    // is exactly the CLI's `teamem init` flow (batch with compile=false, then
+    // an explicit compilation request).
+    if (req.options.compile && created) {
       for (const eventId of acceptedEventIds) {
         await upsertJobEvent(db, {
           teamId,
