@@ -580,12 +580,17 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
         .from(schema.concepts)
         .where(eq(schema.concepts.teamId, teamId));
       expect(allConcepts).toHaveLength(1);
-      // The concept should now have two evidence items (one from each event).
+      // Both compilations ran over the SAME event, so both produced the same
+      // repo_file evidence. M1-F2-04 specifies that a merge appends evidence
+      // "保留原有、去重" — deduplicated — so the page keeps one row, not two
+      // identical ones. This assertion previously expected 2, pinning the
+      // behaviour of a second merge implementation that did not dedup and
+      // that the compile job should never have been calling.
       const evidenceRows = await db
         .select()
         .from(schema.conceptEvidence)
         .where(eq(schema.conceptEvidence.conceptUuid, firstConceptUuid.value!));
-      expect(evidenceRows).toHaveLength(2);
+      expect(evidenceRows).toHaveLength(1);
     });
   });
 

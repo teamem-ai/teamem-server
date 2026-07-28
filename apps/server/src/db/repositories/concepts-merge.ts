@@ -79,6 +79,15 @@ export interface MergeIntoConceptInput {
   /** New contributor candidates (trusted-filtered, deduplicated by PK). */
   readonly newContributors?: ConceptContributorInput[];
   /**
+   * Tags for the merged page — the caller supplies the union of the existing
+   * tags and the newly extracted ones.
+   *
+   * Optional: omitting it leaves the stored tags untouched, so a caller that
+   * has nothing to add cannot accidentally erase them by passing an empty
+   * array's worth of intent.
+   */
+  readonly tags?: string[];
+  /**
    * Optional new embedding vector for the merged body (EMB-04 path).
    *
    * When provided, replaces the existing embedding. When null/undefined,
@@ -190,6 +199,21 @@ export async function mergeIntoConcept(
     if (input.newEmbedding !== undefined && input.newEmbedding !== null) {
       updatePayload['embedding'] = input.newEmbedding;
     }
+
+    // Tags are replaced wholesale with what the caller computed (the union of
+    // existing and newly extracted). Omitted means "leave them alone" rather
+    // than "clear them".
+    if (input.tags !== undefined) {
+      updatePayload['tags'] = input.tags;
+    }
+
+    // `confidence` is deliberately absent from this payload. M1-F2-04
+    // enumerates what a merge writes — title/body, evidence, contributors,
+    // embedding, last_confirmed, status — and confidence is not in it.
+    // Writing the incoming extraction's value let a corroborating `medium`
+    // event downgrade a `high` page, which inverts what corroboration means,
+    // and §6.1 expresses contradiction through `status` (-> disputed)
+    // precisely so it does not merely lower confidence.
 
     // 5. Update the concept row — scope filter carries team_id + project_id
     //    (red line §5.5: every write query must carry team_id; the SELECT

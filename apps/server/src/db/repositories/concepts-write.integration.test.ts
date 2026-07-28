@@ -20,7 +20,6 @@ import { createDb, type AppDb } from '../client.js';
 import * as schema from '../schema.js';
 import {
   createConcept,
-  updateConcept,
   InvalidConceptError,
   type CreateConceptInput,
 } from './concepts-write.js';
@@ -530,79 +529,6 @@ describe.skipIf(!url)('ConceptWriteRepository (live Postgres)', () => {
   });
 
   // ── Embedding persistence (M1-EMB-04) ──────────────────────────────────
-
-  // ── Merge semantics ────────────────────────────────────────────────────
-
-  describe('updateConcept — fields a merge is allowed to touch', () => {
-    it('leaves confidence untouched so corroboration cannot downgrade a page', async () => {
-      // Counterexample from a real compile: a `high` page merged with a
-      // `medium` extraction came out `medium`. Corroboration making a claim
-      // LESS certain inverts what a merge means, and M1-F2-04's field list
-      // for a merge does not include confidence at all.
-      const created = await createConcept(
-        db,
-        validInput({ confidence: 'high', path: `conf-keep-${randomUUID()}` }),
-      );
-
-      await updateConcept(db, {
-        teamId: testTeam,
-        projectId: testProject,
-        conceptUuid: created.uuid,
-        title: 'Test Service (corroborated)',
-        body: 'A test concept page. A second source confirms this.',
-        status: 'active',
-        // No `confidence` — the merge path must not supply one.
-        newEvidence: [
-          {
-            kind: 'repo_file',
-            repo: 'teamem-ai/teamem',
-            commitSha: 'def5678',
-            path: 'src/other.ts',
-            at: new Date('2025-02-01T00:00:00.000Z'),
-          },
-        ],
-      });
-
-      const [row] = await db
-        .select()
-        .from(schema.concepts)
-        .where(eq(schema.concepts.uuid, created.uuid));
-
-      expect(row!.confidence).toBe('high');
-      // The fields a merge IS meant to write still changed.
-      expect(row!.title).toContain('corroborated');
-      expect(row!.body).toContain('second source');
-    });
-
-    it('still writes confidence when a caller explicitly supplies one', async () => {
-      // The repository stays capable of setting confidence; only the F2 merge
-      // path declines to. Otherwise a future human-review action could not
-      // correct a page's confidence.
-      const created = await createConcept(
-        db,
-        validInput({ confidence: 'high', path: `conf-set-${randomUUID()}` }),
-      );
-
-      await updateConcept(db, {
-        teamId: testTeam,
-        projectId: testProject,
-        conceptUuid: created.uuid,
-        title: 'Test Service',
-        body: 'Downgraded after review.',
-        status: 'needs-review',
-        confidence: 'low',
-        newEvidence: [],
-      });
-
-      const [row] = await db
-        .select()
-        .from(schema.concepts)
-        .where(eq(schema.concepts.uuid, created.uuid));
-
-      expect(row!.confidence).toBe('low');
-      expect(row!.status).toBe('needs-review');
-    });
-  });
 
   describe('embedding persistence', () => {
     it('CLI step 1: vector mode — writes embedding and verifies 1536 dimensions', async () => {

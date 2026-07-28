@@ -10,7 +10,7 @@
  *  4. Calls F2 candidate recall (vector or FTS) to find potential merge targets.
  *  5. Calls F2 merge-decider (strong-model LLM) to decide: confirms, extends,
  *     contradicts, or unrelated.
- *  6. Transactionally persists: merges into existing concept (updateConcept)
+ *  6. Transactionally persists: merges into existing concept (mergeIntoConcept)
  *     or creates a new concept (createConcept).
  *  7. Records per-event outcomes: compiled, skipped (no_knowledge), or failed.
  *  8. Completes the job with the set of concept page UUIDs produced.
@@ -32,7 +32,8 @@
  *  - EmbeddingClient (generating embeddings for F1 concepts)
  *  - The frozen @teamem/schema f1Output + f2Decision contracts
  *  - The jobs repository (lifecycle + per-event outcomes)
- *  - The concepts-write repository (createConcept + updateConcept)
+ *  - The concepts-write repository (createConcept) and the concepts-merge
+ *    repository (mergeIntoConcept)
  *  - The events repository (scoped event loading)
  *  - F1 prompt builder + toConcept mapper + output schema (local F1 modules)
  *  - F2 candidate recall + merge-decider + decision schema (local F2 modules)
@@ -47,10 +48,9 @@ import { toConcept } from './to-concept.js';
 import { getEventsByIds } from '../../db/repositories/events.js';
 import {
   createConcept,
-  updateConcept,
   type CreateConceptInput,
-  type UpdateConceptInput,
 } from '../../db/repositories/concepts-write.js';
+import { mergeIntoConcept } from '../../db/repositories/concepts-merge.js';
 import {
   updateJobStatus,
   upsertJobEvent,
@@ -350,9 +350,16 @@ async function enrichF2Candidates(
  * Execute the F2 merge decision against the database.
  *
  * For `unrelated`: creates a new concept page via {@link createConcept}.
- * For `confirms`, `extends`, `contradicts`: updates the existing concept
- * via {@link updateConcept} — title, body, status, tags, evidence, and
- * contributors are merged; last_confirmed is only refreshed for `confirms`.
+ * For `confirms`, `extends`, `contradicts`: merges into the existing page via
+ * {@link mergeIntoConcept} — the repository named by M1-F2-04, which owns the
+ * Q10 `last_confirmed` rule (refresh only on corroboration) and re-enforces
+ * `contradicts -> disputed` rather than trusting the caller for either.
+ *
+ * This used to call a second, parallel merge implementation in
+ * concepts-write.ts. The two had drifted: the one that actually ran wrote
+ * `confidence` on every merge — a field M1-F2-04 does not list — so a
+ * corroborating `medium` extraction downgraded a `high` page, while the
+ * specified repository (with 22 integration tests) sat unused.
  *
  * @returns The concept UUID that was created or updated.
  */
@@ -374,29 +381,25 @@ async function executeMergeDecision(
     return persisted.uuid;
   }
 
-  // Merge into existing concept.
-  // Build the update payload from the F2 decision + server-owned facts.
-  const now = new Date();
-  const updateInput: UpdateConceptInput = {
+  await mergeIntoConcept(db, {
     teamId,
     projectId,
-    conceptUuid: decision.targetConceptId,
-    title: decision.mergedTitle,
-    body: decision.mergedBody,
-    status: decision.resultStatus,
-    // confidence is deliberately absent: M1-F2-04's field list for a merge
-    // does not include it, and writing the incoming extraction's value let a
-    // corroborating `medium` event downgrade a `high` page.
+    targetId: decision.targetConceptId,
+    relationship: decision.relationship,
+    mergedTitle: decision.mergedTitle,
+    mergedBody: decision.mergedBody,
+    resultStatus: decision.resultStatus,
+    newEvidence: conceptInput.evidence,
+    ...(conceptInput.contributors
+      ? { newContributors: conceptInput.contributors }
+      : {}),
     // Union of existing tags + new tags from F1 extraction.
     tags: [...new Set([...existingTags, ...(conceptInput.tags ?? [])])],
-    lastConfirmed:
-      decision.relationship === 'confirms' ? now : undefined,
-    newEvidence: conceptInput.evidence,
-    newContributors: conceptInput.contributors,
-    embedding: embedding ?? undefined,
-  };
+    ...(embedding !== undefined && embedding !== null
+      ? { newEmbedding: embedding }
+      : {}),
+  });
 
-  await updateConcept(db, updateInput);
   return decision.targetConceptId;
 }
 
