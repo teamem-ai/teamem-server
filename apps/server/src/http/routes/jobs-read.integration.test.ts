@@ -633,4 +633,37 @@ describe.skipIf(!url)('GET /v1/jobs (live Postgres)', () => {
     const json = await res.json();
     expect(json.error.code).toBe('invalid_request');
   });
+  // ── Out-of-contract skip reason ─────────────────────────────────────────
+
+  describe('skipped reason stays inside the frozen enum', () => {
+    it('serializes a legacy free-text reason instead of answering 500', async () => {
+      // jobEventResult types a skipped result's reason as
+      // z.enum(['no_knowledge', 'already_compiled']). The compiler used to
+      // persist the model's own words there, and this endpoint cast the value
+      // instead of normalizing it — so Zod rejected the response and every job
+      // containing an LLM skip returned 500, which broke `teamem init`.
+      const jobId = await seedJob({ kind: 'compilation', status: 'completed' });
+      const eventId = `evt_${randomUUID().replace(/-/g, '')}`;
+      await seedEvent(eventId);
+      await db.execute(
+        `INSERT INTO job_events (team_id, project_id, job_id, event_id, status, reason, updated_at)
+         VALUES ('${teamId}', '${projectId}', '${jobId}', '${eventId}', 'skipped',
+                 'Purely mechanical change with no rationale provided.', NOW())`,
+      );
+
+      const res = await app.request(
+        `/v1/jobs/${jobId}?projectId=${projectId}`,
+        { headers: authHeader() },
+      );
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as {
+        data: { events: Array<{ status: string; reason?: string }> };
+      };
+      const skipped = json.data.events.find((e) => e.status === 'skipped');
+      expect(skipped).toBeDefined();
+      expect(['no_knowledge', 'already_compiled']).toContain(skipped!.reason);
+    });
+  });
+
 });

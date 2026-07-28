@@ -140,15 +140,38 @@ async function recordSkipped(
   projectId: string,
   jobId: string,
   eventId: string,
-  reason: string,
+  /**
+   * The model's or prefilter's own words. Diagnostic only — see below.
+   */
+  detail: string,
 ): Promise<void> {
+  // `job_events.reason` is a CONTRACT field: jobEventResult types a skipped
+  // result's reason as z.enum(['no_knowledge', 'already_compiled']). Writing
+  // the model's free-text explanation here produced rows that GET /v1/jobs/:id
+  // could not serialize, so the endpoint answered 500 for any job containing
+  // an LLM skip — which broke `teamem init`, since the CLI polls that endpoint.
+  //
+  // The prose is kept in the structured log rather than persisted: the DTO is
+  // a strictObject, so there is nowhere in the frozen contract to put it, and
+  // inventing a near-equivalent string in an enum field is exactly what
+  // AGENTS.md §6.2 forbids.
+  console.log(
+    JSON.stringify({
+      event: 'compile_event_skipped',
+      jobId,
+      eventId,
+      reason: 'no_knowledge',
+      detail,
+    }),
+  );
+
   await upsertJobEvent(db, {
     teamId,
     projectId,
     jobId,
     eventId,
     status: 'skipped',
-    reason,
+    reason: 'no_knowledge',
   });
 }
 

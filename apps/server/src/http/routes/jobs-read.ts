@@ -133,8 +133,14 @@ function toJobEventResult(row: JobEventRow): JobEventResult {
       return {
         eventId: row.eventId,
         status: 'skipped',
-        reason: (row.reason as 'no_knowledge' | 'already_compiled') ??
-          'no_knowledge',
+        // Normalize, do not assert. The previous `as` cast silenced the
+        // compiler while letting an out-of-contract value through to the
+        // response DTO, where Zod rejected it and the request became a 500.
+        // Rows written before the writer was corrected still carry free text,
+        // so an unrecognized value degrades to `no_knowledge` rather than
+        // taking down the endpoint.
+        reason:
+          row.reason === 'already_compiled' ? 'already_compiled' : 'no_knowledge',
       };
     case 'failed':
       return {

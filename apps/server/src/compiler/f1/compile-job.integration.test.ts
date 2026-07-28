@@ -635,9 +635,15 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
       const jobEvents = await getJobEvents(db, teamId, projectId, job.id);
       expect(jobEvents).toHaveLength(1);
       expect(jobEvents[0]!.status).toBe('skipped');
-      // The LLM's specific skip reason is now preserved (not replaced with
-      // a generic enum). The fixture's reason is the canned skip output.
-      expect(jobEvents[0]!.reason).toBe('Event contains no extractable team knowledge');
+      // `reason` is a CONTRACT field: jobEventResult types a skipped result's
+      // reason as z.enum(['no_knowledge', 'already_compiled']). This assertion
+      // previously pinned the opposite — the LLM's free-text explanation — and
+      // those rows made GET /v1/jobs/:id fail its own response DTO, so the
+      // endpoint answered 500 for any job containing an LLM skip and
+      // `teamem init` could not poll to completion. The model's wording is
+      // kept in the structured log instead; there is nowhere in the frozen
+      // strictObject to persist it (AGENTS.md §6.2).
+      expect(jobEvents[0]!.reason).toBe('no_knowledge');
 
       // No concept pages created.
       const concepts = await db
