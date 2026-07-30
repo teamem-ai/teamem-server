@@ -21,9 +21,9 @@
  */
 import { Hono, type Context } from 'hono';
 import { randomBytes } from 'node:crypto';
-import { createHash } from 'node:crypto';
 import type { AppDb } from '../../db/client.js';
 import { formatMcpAddCommand, type McpCommandConfig } from '../../commands/format-mcp-command.js';
+import { generateApiKeyToken, hashToken } from '../../auth/api-key.js';
 import {
   requireWebSession,
   requireTeamMembership,
@@ -42,22 +42,6 @@ import {
   type ApiScope,
 } from '@teamem/schema';
 import { validateApiKeyScopes } from '../../db/repositories/api-keys.js';
-
-// ── Token generation ────────────────────────────────────────────────────────
-
-const TOKEN_BYTES = 32;
-const TOKEN_PREFIX = 'tm_';
-
-function generateApiKeyToken(): string {
-  const randomPart = randomBytes(TOKEN_BYTES)
-    .toString('base64url')
-    .replace(/=/g, '');
-  return `${TOKEN_PREFIX}${randomPart}`;
-}
-
-function hashToken(token: string): string {
-  return createHash('sha256').update(token, 'utf8').digest('hex');
-}
 
 // ── Dependencies ────────────────────────────────────────────────────────────
 
