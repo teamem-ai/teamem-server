@@ -149,6 +149,14 @@ export const auditOutcome = pgEnum('audit_outcome', [
   'denied',
   'failed',
 ]);
+// v0.3 additive (DUA-222): mirrors the frozen teamRole Zod enum — used by
+// memberships.role and invites.target_role.
+export const teamRole = pgEnum('team_role', [
+  'viewer',
+  'member',
+  'admin',
+  'owner',
+]);
 
 const createdAt = () =>
   timestamp('created_at', { withTimezone: true, precision: 3 })
@@ -259,6 +267,102 @@ export const apiKeys = pgTable(
       'api_keys_scope_superset_ck',
       sql`NOT ('read:payload' = ANY(${t.scopes})) OR ('read' = ANY(${t.scopes}))`,
     ),
+  ],
+);
+
+// ── M2 Auth: Users, sessions, invites, memberships (v0.3 additive, DUA-222) ─
+
+/**
+ * GitHub-authenticated user. `github_id` is the stable numeric identity
+ * key — it survives login renames. Linked to one `principals` row per
+ * team the user belongs to (resolved at membership-creation time via the
+ * matching GitHub providerUserId).
+ */
+export const users = pgTable(
+  'users',
+  {
+    id: text('id').primaryKey(), // usr_...
+    githubId: integer('github_id').notNull().unique(),
+    githubLogin: text('github_login').notNull(),
+    avatarUrl: text('avatar_url'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('users_github_id_idx').on(t.githubId),
+  ],
+);
+
+/**
+ * Web session. Stores an irreversible SHA-256 hash of the session token;
+ * the plaintext is returned once at login and never persisted. Sessions
+ * can be revoked individually (revoked_at) without deleting the row.
+ */
+export const webSessions = pgTable(
+  'web_sessions',
+  {
+    id: text('id').primaryKey(), // ses_...
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    tokenHash: text('token_hash').notNull().unique(),
+    issuedAt: ts('issued_at').notNull(),
+    expiresAt: ts('expires_at').notNull(),
+    revokedAt: ts('revoked_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('web_sessions_user_idx').on(t.userId),
+    index('web_sessions_token_hash_idx').on(t.tokenHash),
+  ],
+);
+
+/**
+ * Team invitation. `token_hash` is SHA-256 of the invite token (returned
+ * once at creation). Single-use: `used_at` is set on first acceptance;
+ * subsequent attempts with the same token are rejected.
+ */
+export const invites = pgTable(
+  'invites',
+  {
+    id: text('id').primaryKey(), // inv_...
+    teamId: text('team_id')
+      .notNull()
+      .references(() => teams.id),
+    tokenHash: text('token_hash').notNull().unique(),
+    targetRole: teamRole('target_role').notNull(),
+    invitedByUserId: text('invited_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    expiresAt: ts('expires_at').notNull(),
+    usedAt: ts('used_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('invites_team_idx').on(t.teamId),
+    index('invites_token_hash_idx').on(t.tokenHash),
+  ],
+);
+
+/**
+ * Team membership — the (user, team) → role binding. One row per user
+ * per team; the unique constraint on (user_id, team_id) is the primary
+ * protection against duplicate membership.
+ */
+export const memberships = pgTable(
+  'memberships',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => teams.id),
+    role: teamRole('role').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.teamId] }),
+    index('memberships_team_idx').on(t.teamId),
   ],
 );
 
