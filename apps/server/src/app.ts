@@ -40,6 +40,7 @@ import { searchTool, searchHandler } from './mcp/tools/search.js';
 import { buildSearchRoutes, type SearchRoutesDeps } from './http/routes/search.js';
 import { buildContextRoutes } from './http/routes/context.js';
 import { buildAuthRoutes } from './http/routes/auth.js';
+import { buildMembersRoutes } from './http/routes/members.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
 
@@ -82,6 +83,7 @@ export function buildApp(deps: AppDeps = {}) {
   // Auth routes — wired when OAuth config and db are both available.
   if (deps.githubOAuth && deps.db) {
     app.route('/', buildAuthRoutes(deps.githubOAuth, deps.db));
+    app.route('/', buildMembersRoutes(deps.githubOAuth, deps.db));
   }
 
   // Ingestion routes — wired only when db is available.
