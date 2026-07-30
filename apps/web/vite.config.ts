@@ -13,7 +13,19 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/v1": {
-        target: "http://localhost:3000",
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+      "/auth": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+      "/invites": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+      },
+      "/teams": {
+        target: "http://localhost:8080",
         changeOrigin: true,
       },
     },

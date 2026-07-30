@@ -490,6 +490,168 @@
     }
   }
 
+  /* ---------- typography utilities ---------- */
+  .mono { font-family: var(--font-mono); }
+  .muted { color: var(--text-3); }
+  .muted-2 { color: var(--text-2); }
+  .small { font-size: 12.5px; }
+
+  /* ---------- stack layout ---------- */
+  .stack { display: flex; flex-direction: column; gap: 16px; }
+
+  /* ---------- buttons ---------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    font: 500 13.5px/1 var(--font-sans);
+    padding: 8px 14px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+    text-decoration: none;
+  }
+  .btn:hover { text-decoration: none; }
+  .btn:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .btn-primary {
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+    box-shadow: var(--shadow-sm);
+    border-color: transparent;
+  }
+  .btn-primary:hover { background: var(--btn-bg-hover); }
+  .btn-outline {
+    background: var(--surface);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
+  }
+  .btn-outline:hover { background: var(--surface-2); }
+  .btn-ghost {
+    color: var(--text-2);
+    border-color: transparent;
+    background: transparent;
+  }
+  .btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+  .btn-danger-outline {
+    background: var(--surface);
+    border-color: var(--red);
+    color: var(--red);
+  }
+  .btn-danger-outline:hover { background: var(--red-soft); }
+  .btn-sm { padding: 6px 10px; font-size: 12.5px; }
+  .btn-lg { padding: 11px 20px; font-size: 14.5px; border-radius: var(--r); }
+  .btn[disabled], .btn.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  .btn-block { width: 100%; }
+
+  /* ---------- icons ---------- */
+  svg.ic { width: 16px; height: 16px; flex: none; vertical-align: -3px; }
+  svg.ic.lg { width: 20px; height: 20px; }
+  svg.ic.sm { width: 13px; height: 13px; }
+
+  /* ---------- avatars ---------- */
+  .avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 99px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: 600 10px/1 var(--font-sans);
+    color: #fff;
+    flex: none;
+  }
+
+  /* ---------- logo ---------- */
+  .logo-mark { display: inline-flex; }
+
+  /* ---------- auth pages ---------- */
+  .auth {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    background: var(--bg);
+  }
+  .auth-card { width: 100%; max-width: 400px; text-align: center; }
+  .auth-card .logo-mark { width: 44px; height: 44px; margin: 0 auto 16px; }
+  .auth-card h1 { font-size: 22px; letter-spacing: -0.02em; }
+  .auth-card .tagline {
+    color: var(--text-2);
+    margin-top: 8px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .auth-card .auth-box { margin-top: 26px; }
+  .auth-foot {
+    margin-top: 22px;
+    font-size: 12.5px;
+    color: var(--text-3);
+    line-height: 1.6;
+  }
+
+  /* ---------- auth feature list ---------- */
+  .auth-feats {
+    margin-top: 34px;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .auth-feats .af {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 13px;
+    color: var(--text-2);
+    line-height: 1.5;
+  }
+  .auth-feats .af svg.ic {
+    color: var(--accent);
+    margin-top: 2px;
+  }
+
+  /* ---------- invite summary card ---------- */
+  .invite-summary {
+    margin-top: 24px;
+    text-align: left;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .invite-summary .is-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13.5px;
+  }
+  .invite-summary .is-row .k {
+    width: 88px;
+    flex: none;
+    color: var(--text-3);
+    font-size: 12.5px;
+  }
+  .invite-summary .is-row svg.ic {
+    color: var(--text-3);
+  }
+
   /* ---------- copy chip ---------- */
   .copy-chip {
     @apply inline-flex items-center gap-[6px] rounded-sm px-2 py-1 cursor-pointer max-w-full;

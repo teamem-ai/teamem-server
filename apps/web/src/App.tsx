@@ -6,12 +6,20 @@ import { ComponentShowcase } from "@/pages/component-showcase";
 import { KnowledgePage } from "@/pages/knowledge-page";
 import { SoonPage } from "@/pages/soon-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
+import { LoginPage } from "@/pages/login";
+import { InvitePage } from "@/pages/invite";
+import { AppLanding } from "@/pages/app-landing";
 
 export default function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
         <Routes>
+          {/* Public auth entry pages (no AppShell) */}
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/join" element={<InvitePage />} />
+          <Route path="/app" element={<AppLanding />} />
+
           {/* Component showcase (design system self-check) */}
           <Route path="/components" element={<AppShell />}>
             <Route index element={<ComponentShowcase />} />

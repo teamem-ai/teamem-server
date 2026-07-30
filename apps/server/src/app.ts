@@ -47,8 +47,10 @@ import { buildKeysRoutes } from './http/routes/keys.js';
 import { buildAuditRoutes } from './http/routes/audit.js';
 import { buildMembersRoutes } from './http/routes/members.js';
 import { buildInvitesRoutes } from './http/routes/invites.js';
+import { lookupInviteByToken } from './auth/invites.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
+import { InvalidRequestError, NotFoundError } from './http/errors.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -86,6 +88,14 @@ export function buildApp(deps: AppDeps = {}) {
   app.get('/healthz', healthzHandler);
   app.get('/readyz', readyzHandler);
 
+  // GitHub OAuth status — always mounted so the login page can determine
+  // whether the "Sign in with GitHub" button should be enabled.
+  app.get('/auth/github/status', (c) => {
+    return c.json({
+      configured: !!(deps.githubOAuth),
+    });
+  });
+
   // Auth routes — wired when OAuth config and db are both available.
   if (deps.githubOAuth && deps.db) {
     app.route('/', buildAuthRoutes(deps.githubOAuth, deps.db));
@@ -109,6 +119,60 @@ export function buildApp(deps: AppDeps = {}) {
     // Purge route — project-level data deletion (DUA-228).
     // Owner-only; requires web session + team membership.
     app.route('/', buildPurgeRoutes({ db: deps.db }));
+  }
+
+  // Invite lookup — public endpoint (no auth required).
+  // Mounted when db is available so the invite acceptance page can show
+  // what the user is joining before they sign in.
+  if (deps.db) {
+    const db = deps.db;
+    app.get('/invites/:token', async (c) => {
+      const token = c.req.param('token');
+      if (!token || token.length === 0) {
+        throw new InvalidRequestError('token is required');
+      }
+      if (!token.startsWith('inv_')) {
+        throw new NotFoundError();
+      }
+
+      const lookupResult = await lookupInviteByToken(db, token);
+      if (lookupResult.status === 'not_found') {
+        throw new NotFoundError();
+      }
+
+      const { invite } = lookupResult;
+
+      // Look up team name
+      let teamName: string | null = null;
+      const teamResult = await db.$client.query(
+        `SELECT name FROM teams WHERE id = $1 LIMIT 1`,
+        [invite.teamId],
+      );
+      const teamRow = teamResult.rows[0] as Record<string, unknown> | undefined;
+      teamName = (teamRow?.['name'] as string) ?? null;
+
+      // Look up inviter login
+      let inviterLogin: string | null = null;
+      const userResult = await db.$client.query(
+        `SELECT github_login FROM users WHERE id = $1 LIMIT 1`,
+        [invite.invitedByUserId],
+      );
+      const userRow = userResult.rows[0] as Record<string, unknown> | undefined;
+      inviterLogin = (userRow?.['github_login'] as string) ?? null;
+
+      return c.json({
+        status: lookupResult.status,
+        invite: {
+          id: invite.id,
+          teamId: invite.teamId,
+          teamName,
+          targetRole: invite.targetRole,
+          invitedByLogin: inviterLogin,
+          expiresAt: invite.expiresAt,
+          usedAt: invite.usedAt,
+        },
+      });
+    });
   }
 
   // Governance routes (teams, projects, keys) — wired when db is available.
