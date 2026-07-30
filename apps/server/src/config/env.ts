@@ -86,6 +86,18 @@ const optionalHttpUrl = z.preprocess(
     .optional(),
 );
 
+const optionalBaseUrl = z.preprocess(
+  blankToUndefined,
+  z
+    .string()
+    .trim()
+    .pipe(z.url('TEAMEM_BASE_URL must be a valid URL'))
+    .refine((value) => ['http:', 'https:'].includes(new URL(value).protocol), {
+      message: 'TEAMEM_BASE_URL must use http or https',
+    })
+    .optional(),
+);
+
 /**
  * Accept `TEAMEM_DATABASE_URL` as an alias for `DATABASE_URL`.
  *
@@ -121,6 +133,7 @@ const rawServerEnvSchema = z
     TEAMEM_ANTHROPIC_API_KEY: optionalSecret,
     TEAMEM_OPENAI_API_KEY: optionalSecret,
     TEAMEM_OPENROUTER_API_KEY: optionalSecret,
+    TEAMEM_BASE_URL: optionalBaseUrl,
     TEAMEM_OPENAI_COMPAT_BASE_URL: optionalHttpUrl,
     TEAMEM_OPENAI_COMPAT_API_KEY: optionalSecret,
   })
@@ -174,6 +187,8 @@ export interface ServerEnvironment {
   databaseUrl: string;
   host: string;
   port: number;
+  /** Public base URL for OAuth redirect URI construction. */
+  baseUrl: string;
   allInOne: boolean;
   github?: GithubEnvironment;
   /**
@@ -184,6 +199,8 @@ export interface ServerEnvironment {
   githubAppConfigured: boolean;
   llmProviders: ResolvedLlmConfig[];
 }
+
+
 
 /**
  * Parse deployment configuration from environment variables. Only explicitly
@@ -235,10 +252,13 @@ export function parseServerEnv(environment: Environment = process.env): ServerEn
     });
   }
 
+  const baseUrl = env.TEAMEM_BASE_URL ?? `http://localhost:${env.TEAMEM_PORT}`;
+
   return {
     databaseUrl: env.DATABASE_URL,
     host: env.TEAMEM_HOST,
     port: env.TEAMEM_PORT,
+    baseUrl,
     allInOne: env.TEAMEM_ALL_IN_ONE,
     github: githubConfigured
       ? {

@@ -39,6 +39,8 @@ import { timelineTool, timelineHandler } from './mcp/tools/timeline.js';
 import { searchTool, searchHandler } from './mcp/tools/search.js';
 import { buildSearchRoutes, type SearchRoutesDeps } from './http/routes/search.js';
 import { buildContextRoutes } from './http/routes/context.js';
+import { buildAuthRoutes } from './http/routes/auth.js';
+import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
 
 export interface AppDeps extends HealthDeps {
@@ -50,6 +52,8 @@ export interface AppDeps extends HealthDeps {
   waitTimeoutMs?: number;
   /** Optional embedding client for hybrid (vector + FTS) search. */
   embeddingClient?: EmbeddingClient | null;
+  /** Optional GitHub OAuth config for user login (M2-AUTH-02). */
+  githubOAuth?: GitHubOAuthConfig;
 }
 
 type AppEnv = { Variables: { healthDeps: HealthDeps } };
@@ -74,6 +78,11 @@ export function buildApp(deps: AppDeps = {}) {
 
   app.get('/healthz', healthzHandler);
   app.get('/readyz', readyzHandler);
+
+  // Auth routes — wired when OAuth config and db are both available.
+  if (deps.githubOAuth && deps.db) {
+    app.route('/', buildAuthRoutes(deps.githubOAuth, deps.db));
+  }
 
   // Ingestion routes — wired only when db is available.
   if (deps.db) {

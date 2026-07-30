@@ -14,6 +14,7 @@ describe('parseServerEnv', () => {
       databaseUrl: DATABASE_URL,
       host: DEFAULT_SERVER_HOST,
       port: DEFAULT_SERVER_PORT,
+      baseUrl: `http://localhost:${DEFAULT_SERVER_PORT}`,
       allInOne: false,
       github: undefined,
       githubAppConfigured: false,
@@ -44,6 +45,7 @@ describe('parseServerEnv', () => {
       databaseUrl: DATABASE_URL.replace('postgres:', 'postgresql:'),
       host: '::1',
       port: 3000,
+      baseUrl: 'http://localhost:3000',
       allInOne: true,
       github: {
         webhookSecret: 'webhook-secret',
