@@ -35,6 +35,7 @@ import {
   generateSessionToken,
   parseSessionCookie,
   SESSION_COOKIE_NAME,
+  OAUTH_STATE_COOKIE_NAME,
 } from '../../auth/oauth-github.js';
 import { requestContext } from '../request-context.js';
 import { globalErrorHandler, notFoundHandler } from '../errors.js';
@@ -135,6 +136,36 @@ describe.skipIf(!url)('GitHub OAuth Auth Routes (live Postgres)', () => {
     return { plaintext, sessionId };
   }
 
+  /**
+   * Helper: build a callback request with matching state and CSRF cookie.
+   *
+   * Calls GET /auth/github first to get the cookie, then makes the
+   * callback request with both the query state and the matching cookie —
+   * exactly what a real browser does.
+   */
+  async function callbackRequest(state: string, code: string): Promise<Response> {
+    const cookieHeader = `${OAUTH_STATE_COOKIE_NAME}=${encodeURIComponent(state)}`;
+    return appRequest(
+      `/auth/github/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
+      {
+        redirect: 'manual',
+        headers: { Cookie: cookieHeader },
+      },
+    );
+  }
+
+  /**
+   * Helper: build a callback request WITHOUT a matching CSRF cookie
+   * (simulates a CSRF attack where the attacker crafts a URL but
+   * cannot set cookies).
+   */
+  async function callbackRequestNoCookie(state: string, code: string): Promise<Response> {
+    return appRequest(
+      `/auth/github/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`,
+      { redirect: 'manual' },
+    );
+  }
+
   /** Helper: create a session that is already expired. */
   async function createExpiredSession(userId: string): Promise<{ plaintext: string; sessionId: string }> {
     const { plaintext, hash } = generateSessionToken();
@@ -176,7 +207,7 @@ describe.skipIf(!url)('GitHub OAuth Auth Routes (live Postgres)', () => {
     it('sets a CSRF state cookie for defense-in-depth', async () => {
       const res = await appRequest('/auth/github', { redirect: 'manual' });
       const setCookie = res.headers.get('set-cookie');
-      expect(setCookie).toContain('teamem_oauth_state=');
+      expect(setCookie).toContain(`${OAUTH_STATE_COOKIE_NAME}=`);
       expect(setCookie).toContain('HttpOnly');
       expect(setCookie).toContain('SameSite=Lax');
       expect(setCookie).toContain('Max-Age=600');
@@ -215,10 +246,7 @@ describe.skipIf(!url)('GitHub OAuth Auth Routes (live Postgres)', () => {
         ),
       );
 
-      const res = await appRequest(
-        `/auth/github/callback?code=test_code&state=${encodeURIComponent(state)}`,
-        { redirect: 'manual' },
-      );
+      const res = await callbackRequest(state, 'test_code');
 
       // Should redirect to /app (success)
       expect(res.status).toBe(302);
@@ -278,10 +306,7 @@ describe.skipIf(!url)('GitHub OAuth Auth Routes (live Postgres)', () => {
       );
 
       // First login
-      await appRequest(
-        `/auth/github/callback?code=code1&state=${encodeURIComponent(state)}`,
-        { redirect: 'manual' },
-      );
+      await callbackRequest(state, 'code1');
 
       const count1Result = await db.execute(`SELECT COUNT(*) as count FROM users WHERE github_id = 42`);
       const count1 = Number((count1Result.rows[0] as Record<string, unknown>)['count']);
@@ -303,10 +328,7 @@ describe.skipIf(!url)('GitHub OAuth Auth Routes (live Postgres)', () => {
       );
 
       // Second login (same github_id, different login name)
-      await appRequest(
-        `/auth/github/callback?code=code2&state=${encodeURIComponent(state2)}`,
-        { redirect: 'manual' },
-      );
+      await callbackRequest(state2, 'code2');
 
       const count2Result = await db.execute(`SELECT COUNT(*) as count FROM users WHERE github_id = 42`);
       const count2 = Number((count2Result.rows[0] as Record<string, unknown>)['count']);
@@ -324,6 +346,38 @@ describe.skipIf(!url)('GitHub OAuth Auth Routes (live Postgres)', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('GET /auth/github/callback — counterexamples', () => {
+    // ── CSRF cookie binding ───────────────────────────────────────────
+
+    it('rejects a valid state without the CSRF state cookie (cross-site attack)', async () => {
+      const state = generateState(oauthConfig.clientSecret);
+      // No cookie header — simulates a CSRF attacker who cannot set cookies
+      const res = await callbackRequestNoCookie(state, 'test_code');
+
+      expect(res.status).toBe(302);
+      const location = res.headers.get('location');
+      expect(location).toContain('error=invalid_state');
+    });
+
+    it('rejects a valid state with a mismatched CSRF state cookie', async () => {
+      const realState = generateState(oauthConfig.clientSecret);
+      const otherState = generateState(oauthConfig.clientSecret);
+      // Cookie has otherState but query param has realState
+      const cookieHeader = `${OAUTH_STATE_COOKIE_NAME}=${encodeURIComponent(otherState)}`;
+      const res = await appRequest(
+        `/auth/github/callback?code=test_code&state=${encodeURIComponent(realState)}`,
+        {
+          redirect: 'manual',
+          headers: { Cookie: cookieHeader },
+        },
+      );
+
+      expect(res.status).toBe(302);
+      const location = res.headers.get('location');
+      expect(location).toContain('error=invalid_state');
+    });
+
+    // ── Missing/invalid parameters ────────────────────────────────────
+
     it('rejects callback with missing state parameter', async () => {
       const res = await appRequest(
         '/auth/github/callback?code=test_code',
@@ -347,11 +401,17 @@ describe.skipIf(!url)('GitHub OAuth Auth Routes (live Postgres)', () => {
       expect(location).toContain('error=invalid_request');
     });
 
-    it('rejects tampered/forged state parameter (HMAC mismatch)', async () => {
+    it('rejects tampered/forged state parameter with matching cookie (HMAC mismatch)', async () => {
       const forgedState = `forged_random.${Date.now() + 999999}.badsignature`;
+      // Send the forged state as both the cookie AND query param — the
+      // CSRF cookie check passes (they match) but the HMAC check fails.
+      const cookieHeader = `${OAUTH_STATE_COOKIE_NAME}=${encodeURIComponent(forgedState)}`;
       const res = await appRequest(
         `/auth/github/callback?code=test_code&state=${encodeURIComponent(forgedState)}`,
-        { redirect: 'manual' },
+        {
+          redirect: 'manual',
+          headers: { Cookie: cookieHeader },
+        },
       );
 
       expect(res.status).toBe(302);
@@ -359,7 +419,7 @@ describe.skipIf(!url)('GitHub OAuth Auth Routes (live Postgres)', () => {
       expect(location).toContain('error=invalid_state');
     });
 
-    it('rejects expired state parameter', async () => {
+    it('rejects expired state parameter with matching cookie', async () => {
       // Build an expired state token manually
       const random = 'expiredtest';
       const pastExpiry = Date.now() - 3600_000; // 1 hour ago
@@ -367,9 +427,14 @@ describe.skipIf(!url)('GitHub OAuth Auth Routes (live Postgres)', () => {
       const sig = createHmac('sha256', oauthConfig.clientSecret).update(payload).digest('base64url');
       const expiredState = `${payload}.${sig}`;
 
+      // Send matching cookie so CSRF check passes, but HMAC/expiry fails
+      const cookieHeader = `${OAUTH_STATE_COOKIE_NAME}=${encodeURIComponent(expiredState)}`;
       const res = await appRequest(
         `/auth/github/callback?code=test_code&state=${encodeURIComponent(expiredState)}`,
-        { redirect: 'manual' },
+        {
+          redirect: 'manual',
+          headers: { Cookie: cookieHeader },
+        },
       );
 
       expect(res.status).toBe(302);
@@ -415,10 +480,7 @@ describe.skipIf(!url)('GitHub OAuth Auth Routes (live Postgres)', () => {
         ),
       );
 
-      const res = await appRequest(
-        `/auth/github/callback?code=new_user_code&state=${encodeURIComponent(state)}`,
-        { redirect: 'manual' },
-      );
+      const res = await callbackRequest(state, 'new_user_code');
 
       expect(res.status).toBe(302);
       const location = res.headers.get('location');

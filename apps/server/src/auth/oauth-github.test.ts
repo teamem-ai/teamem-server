@@ -14,9 +14,11 @@ import {
   verifyState,
   generateSessionToken,
   parseSessionCookie,
+  parseOAuthStateCookie,
   buildSessionCookie,
   buildClearSessionCookie,
   SESSION_COOKIE_NAME,
+  OAUTH_STATE_COOKIE_NAME,
 } from '../auth/oauth-github.js';
 
 const CLIENT_SECRET = 'test_client_secret_for_hmac';
@@ -122,6 +124,25 @@ describe('generateSessionToken', () => {
 });
 
 // ── Cookie parsing ──────────────────────────────────────────────────────────
+
+describe('parseOAuthStateCookie', () => {
+  it('extracts the OAuth state from a cookie header', () => {
+    const cookie = `${OAUTH_STATE_COOKIE_NAME}=statevalue123; OtherCookie=xyz`;
+    expect(parseOAuthStateCookie(cookie)).toBe('statevalue123');
+  });
+
+  it('returns null when header is null', () => {
+    expect(parseOAuthStateCookie(null)).toBeNull();
+  });
+
+  it('returns null when state cookie is not present', () => {
+    expect(parseOAuthStateCookie('OtherCookie=value; Another=123')).toBeNull();
+  });
+
+  it('returns null when state cookie value is empty', () => {
+    expect(parseOAuthStateCookie(`${OAUTH_STATE_COOKIE_NAME}=`)).toBeNull();
+  });
+});
 
 describe('parseSessionCookie', () => {
   it('extracts the session token from a cookie header', () => {

@@ -42,6 +42,9 @@ const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Cookie name for the web session. */
 const SESSION_COOKIE = 'teamem_session';
 
+/** Cookie name for the OAuth CSRF state cookie. */
+const OAUTH_STATE_COOKIE = 'teamem_oauth_state';
+
 /** HMAC key for session token hashing (server-side secret, not exposed). */
 const SESSION_HMAC_KEY = 'teamem-session';
 
@@ -560,13 +563,26 @@ export function buildClearSessionCookie(): string {
  * Extract the session token from the request cookies.
  */
 export function parseSessionCookie(cookieHeader: string | null): string | null {
+  return parseNamedCookie(cookieHeader, SESSION_COOKIE);
+}
+
+/**
+ * Extract the OAuth state from the CSRF cookie.
+ */
+export function parseOAuthStateCookie(cookieHeader: string | null): string | null {
+  return parseNamedCookie(cookieHeader, OAUTH_STATE_COOKIE);
+}
+
+/**
+ * Low-level cookie parser: extract a named cookie value from a Cookie header.
+ */
+function parseNamedCookie(cookieHeader: string | null, name: string): string | null {
   if (!cookieHeader) return null;
 
-  // Parse cookies: split by ';', trim whitespace, find the session cookie
   const cookies = cookieHeader.split(';').map((c) => c.trim());
   for (const cookie of cookies) {
-    const [name, ...valueParts] = cookie.split('=');
-    if (name?.trim() === SESSION_COOKIE) {
+    const [cookieName, ...valueParts] = cookie.split('=');
+    if (cookieName?.trim() === name) {
       const value = valueParts.join('=').trim();
       return value || null;
     }
@@ -578,6 +594,7 @@ export function parseSessionCookie(cookieHeader: string | null): string | null {
 // ── Re-exports for testing ──────────────────────────────────────────────────
 
 export const SESSION_COOKIE_NAME = SESSION_COOKIE;
+export const OAUTH_STATE_COOKIE_NAME = OAUTH_STATE_COOKIE;
 export const __test = {
   STATE_EXPIRY_MS,
   SESSION_TOKEN_BYTES,

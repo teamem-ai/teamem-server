@@ -34,6 +34,8 @@ import {
   buildSessionCookie,
   buildClearSessionCookie,
   parseSessionCookie,
+  parseOAuthStateCookie,
+  OAUTH_STATE_COOKIE_NAME,
 } from '../../auth/oauth-github.js';
 import {
   UnauthorizedError,
@@ -181,7 +183,7 @@ export function buildAuthRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
     // adds defense-in-depth (the callback handler verifies both match).
     c.header(
       'Set-Cookie',
-      `teamem_oauth_state=${state}; HttpOnly; SameSite=Lax; Path=/auth/github; Max-Age=600`,
+      `${OAUTH_STATE_COOKIE_NAME}=${state}; HttpOnly; SameSite=Lax; Path=/auth/github; Max-Age=600`,
     );
 
     return c.redirect(authorizeUrl, 302);
@@ -225,7 +227,30 @@ export function buildAuthRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
       return c.redirect(redirectUrl.toString(), 302);
     }
 
-    // Verify CSRF state
+    // ── CSRF defense: verify state cookie matches query parameter ──────
+    // Read the cookie that GET /auth/github set on this browser.
+    const oauthCookieHeader = c.req.header('cookie') ?? null;
+    const cookieState = parseOAuthStateCookie(oauthCookieHeader);
+
+    if (!cookieState || cookieState !== state) {
+      // The state in the URL does not match the state cookie.
+      // Either:
+      //   a) The browser never went through /auth/github (CSRF attack), or
+      //   b) The cookie expired (10 min Max-Age).
+      // Never distinguish between these cases in the response.
+      console.warn(
+        JSON.stringify({
+          event: 'oauth_csrf_mismatch',
+          requestId,
+        }),
+      );
+      const redirectUrl = new URL(config.serverBaseUrl);
+      redirectUrl.pathname = '/login';
+      redirectUrl.searchParams.set('error', 'invalid_state');
+      return c.redirect(redirectUrl.toString(), 302);
+    }
+
+    // ── CSRF defense: verify state signature (HMAC + expiry) ───────────
     const stateResult = verifyState(state, config.clientSecret);
     if (!stateResult.valid) {
       console.warn(
@@ -317,12 +342,12 @@ export function buildAuthRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
     }
 
     // Set the session cookie
-    const cookieHeader = buildSessionCookie(
+    const sessionCookieHeader = buildSessionCookie(
       sessionToken.plaintext,
       sessionToken.expiresAt,
       config.serverBaseUrl,
     );
-    c.header('Set-Cookie', cookieHeader);
+    c.header('Set-Cookie', sessionCookieHeader);
 
     // Redirect to the frontend — if the user has no team membership,
     // include a flag so the frontend can show the "no team" onboarding
