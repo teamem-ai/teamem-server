@@ -5,6 +5,7 @@ import { NotFound } from "@/components/ui/not-found";
 import { ComponentShowcase } from "@/pages/component-showcase";
 import { KnowledgePage } from "@/pages/knowledge-page";
 import { SoonPage } from "@/pages/soon-page";
+import { AuditPage } from "@/pages/audit-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
 
 export default function App() {
@@ -59,15 +60,7 @@ export default function App() {
                 />
               }
             />
-            <Route
-              path="/audit"
-              element={
-                <PlaceholderPage
-                  title="Audit log"
-                  description="Who read what, and when. Metadata only — query text and payloads are never stored."
-                />
-              }
-            />
+            <Route path="/audit" element={<AuditPage />} />
             <Route path="/soon" element={<SoonPage />} />
             <Route
               path="/settings/keys"

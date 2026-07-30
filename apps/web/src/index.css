@@ -508,4 +508,193 @@
     height: 12px;
     color: var(--text-3);
   }
+
+  /* ---------- ghost card (soon placeholder) ---------- */
+  .ghost-card {
+    border: 1.5px dashed var(--border-strong);
+    border-radius: var(--r-lg);
+    padding: 18px 20px;
+    background: var(--surface);
+  }
+  .ghost-card .g-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 0;
+    color: var(--text-3);
+    font-size: 13px;
+  }
+
+  /* ---------- filter chips ---------- */
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 99px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .filter-chip:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+  .filter-chip svg {
+    width: 12px;
+    height: 12px;
+    color: var(--text-3);
+  }
+
+  /* ---------- avatar variants ---------- */
+  .avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 99px;
+    font-weight: 600;
+    flex: none;
+  }
+  .avatar.service {
+    border-radius: 6px;
+  }
+
+  /* ---------- table ---------- */
+  .table-card {
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .table th {
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-3);
+    text-align: left;
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .table td {
+    padding: 10px 14px;
+    font-size: 13.5px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    color: var(--text);
+  }
+  .table tr:last-child td {
+    border-bottom: none;
+  }
+  .table tr:hover td {
+    background: var(--surface-2);
+  }
+  .table td.muted {
+    color: var(--text-2);
+  }
+  .table td.muted-2 {
+    color: var(--text-3);
+  }
+
+  /* ---------- page header ---------- */
+  .page-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 18px;
+    gap: 12px;
+  }
+  .page-head .ph-text h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 4px;
+  }
+  .page-head .ph-text .sub {
+    color: var(--text-2);
+    font-size: 13.5px;
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  /* ---------- filter row ---------- */
+  .filter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+
+  /* ---------- pager ---------- */
+  .pager {
+    display: flex;
+    justify-content: center;
+    padding: 14px 0 4px;
+  }
+
+  /* ---------- btn ---------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 7px 16px;
+    border-radius: var(--r);
+    border: 1px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s;
+    line-height: 1.4;
+  }
+  .btn-primary {
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+  }
+  .btn-primary:hover {
+    background: var(--btn-bg-hover);
+  }
+  .btn-outline {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-outline:hover {
+    background: var(--surface-2);
+    border-color: var(--border-strong);
+  }
+  .btn-sm {
+    font-size: 12px;
+    padding: 5px 12px;
+  }
+
+  /* ---------- monospace inline ---------- */
+  .mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  /* ---------- text helpers ---------- */
+  .small {
+    font-size: 12.5px;
+  }
+  .muted {
+    color: var(--text-2);
+  }
+  .row {
+    display: flex;
+    align-items: center;
+  }
 }
