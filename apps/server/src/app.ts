@@ -39,6 +39,7 @@ import { timelineTool, timelineHandler } from './mcp/tools/timeline.js';
 import { searchTool, searchHandler } from './mcp/tools/search.js';
 import { buildSearchRoutes, type SearchRoutesDeps } from './http/routes/search.js';
 import { buildContextRoutes } from './http/routes/context.js';
+import { buildPurgeRoutes } from './http/routes/purge.js';
 import { buildAuthRoutes } from './http/routes/auth.js';
 import { buildTeamsRoutes } from './http/routes/teams.js';
 import { buildProjectsRoutes } from './http/routes/projects.js';
@@ -104,6 +105,10 @@ export function buildApp(deps: AppDeps = {}) {
 
     // Invite routes — team invitation generation (admin+) and acceptance.
     app.route('/', buildInvitesRoutes(deps.db, deps.githubOAuth.serverBaseUrl));
+
+    // Purge route — project-level data deletion (DUA-228).
+    // Owner-only; requires web session + team membership.
+    app.route('/', buildPurgeRoutes({ db: deps.db }));
   }
 
   // Governance routes (teams, projects, keys) — wired when db is available.

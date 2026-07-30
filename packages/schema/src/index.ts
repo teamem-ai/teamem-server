@@ -150,6 +150,34 @@ export const CONTRACT_ADDITIVE_CHANGES = [
     },
   },
   {
+    change: 'DUA-228: project-level purge response DTO',
+    summary:
+      'New purgeResponse DTO for POST /teams/:teamId/projects/:projectId/purge ' +
+      '(project-level purge endpoint). Returns deletion counts for events, ' +
+      'concepts, conceptPaths, conceptEvidence, conceptContributors, jobs, ' +
+      'and jobEvents. auditLog and principals are excluded — they survive ' +
+      'purge by design.',
+    impact: {
+      database:
+        'None — the purge operation is a DELETE path; no new columns or ' +
+        'tables are needed. The DTO mirrors the tables that will be purged.',
+      api:
+        'New POST endpoint (web-session, not v1 API). Uses existing auth ' +
+        'middleware (requireWebSession, requireTeamMembership, requireRole). ' +
+        'No existing endpoint behavior changed.',
+      cli: 'None — the CLI does not call this endpoint.',
+      mcp: 'None — MCP does not expose purge functionality.',
+      ui:
+        'None yet — apps/web does not consume this DTO. M2 onboarding will ' +
+        'add a project settings page with purge capability.',
+      compiler: 'None — purge is a delete path; F1/F2 compilation is unaffected.',
+      export: 'None — OKF export is an M3 concern.',
+      externalTsConsumers:
+        'Fully additive: new file, new export. Existing imports and runtime ' +
+        'behavior are unaffected. No published npm release of @teamem/schema exists yet.',
+    },
+  },
+  {
     change: 'DUA-203: search request/response DTOs',
     summary:
       'New POST /v1/search endpoint DTOs: searchRequest (projectId, query, ' +
@@ -187,3 +215,4 @@ export * from './audit.js';
 export * from './search.js';
 export * from './context.js';
 export * from './governance.js';
+export * from './purge.js';
