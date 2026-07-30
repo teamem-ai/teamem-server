@@ -62,6 +62,7 @@ export default {
       },
       spacing: {
         topbar: "56px",
+        sidebar: "252px",
       },
     },
   },

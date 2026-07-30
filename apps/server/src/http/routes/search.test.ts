@@ -121,6 +121,8 @@ describe('POST /v1/search route (DUA-205 M1-SR-03)', () => {
         title: 'Auth Service',
         tags: ['auth'],
         lastConfirmed: '2025-06-01T00:00:00.000Z',
+        evidenceCount: 2,
+        contributors: [{ principalId: 'pri_test', kind: 'human', provider: 'github', displayName: 'alice', githubLogin: 'alice' }],
         relevance: 0.85,
         ftsFallback: true,
       }],
