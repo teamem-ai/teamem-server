@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audit · teamem</title>
+<link rel="stylesheet" href="assets/main.css">
+<script src="assets/mock.js"></script>
+</head>
+<body data-state="default">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="logo" viewBox="0 0 32 32"><rect fill="var(--accent)" x="1.5" y="1.5" width="29" height="29" rx="7.5"/><path d="M9 11h14M9 16h10.5M9 21h12.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></g></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></g></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></g></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></g></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></g></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></g></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></g></symbol>
+<symbol id="i-bot" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></g></symbol>
+</defs></svg>
+<div class="mockbar">
+  <span class="mock-tag">PREVIEW</span>
+  <a class="mock-link" href="index.html">← 总览</a>
+  <span class="mock-label">State</span>
+  <button class="mock-pill on" data-set="default">默认</button>
+  <button class="mock-pill" data-set="empty">空态</button>
+  <span class="mock-spacer"></span>
+  <button class="mock-pill" data-theme-btn="light">Light</button>
+  <button class="mock-pill" data-theme-btn="dark">Dark</button>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-brand"><svg class="logo-mark"><use href="#logo"/></svg>teamem</div>
+    <nav class="side-scroll">
+      <div class="side-sec">Knowledge</div>
+      <a class="side-item" href="knowledge.html"><svg class="ic"><use href="#i-book"/></svg>Knowledge</a>
+      <a class="side-item" href="context-preview.html"><svg class="ic"><use href="#i-sparkle"/></svg>Context preview</a>
+      <div class="side-sec">Activity</div>
+      <a class="side-item" href="events.html"><svg class="ic"><use href="#i-act"/></svg>Events</a>
+      <a class="side-item" href="jobs.html"><svg class="ic"><use href="#i-cpu"/></svg>Jobs</a>
+      <div class="side-sec">Team</div>
+      <a class="side-item" href="members.html"><svg class="ic"><use href="#i-users"/></svg>Members</a>
+      <a class="side-item active" href="audit.html"><svg class="ic"><use href="#i-shield"/></svg>Audit</a>
+      <a class="side-item" href="soon.html"><svg class="ic"><use href="#i-mail"/></svg>Team digest<span class="pill soon">SOON</span></a>
+      <div class="side-sec">Settings</div>
+      <a class="side-item" href="settings-keys.html"><svg class="ic"><use href="#i-sliders"/></svg>Settings</a>
+    </nav>
+    <div class="side-foot"><span style="width:7px;height:7px;border-radius:99px;background:var(--green)"></span>portal v0.2.0 · self-hosted</div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="switcher"><span class="avatar" style="background:var(--accent)">A</span>Acme Corp<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="topbar-sep">/</span>
+      <button class="switcher">web-app<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="spacer"></span>
+      <button class="search-btn"><svg class="ic"><use href="#i-search"/></svg>Search knowledge…<kbd>⌘K</kbd></button>
+      <span class="avatar" style="background:var(--emerald);cursor:pointer" title="dli · owner">DL</span>
+    </header>
+
+    <div class="content wide">
+      <div class="page-head">
+        <div class="ph-text">
+          <h1>Audit log</h1>
+          <p class="sub">Who read what, and when. Metadata only — query text and payloads are never stored here.</p>
+        </div>
+      </div>
+
+      <!-- ===== 默认 ===== -->
+      <div data-view="default">
+        <div class="filter-row" style="margin-top:0">
+          <button class="filter-chip">Actor<svg class="ic"><use href="#i-chev"/></svg></button>
+          <button class="filter-chip">Action<svg class="ic"><use href="#i-chev"/></svg></button>
+          <button class="filter-chip">Project<svg class="ic"><use href="#i-chev"/></svg></button>
+          <button class="filter-chip">Time range<svg class="ic"><use href="#i-chev"/></svg></button>
+          <span class="small muted" style="margin-left:auto"><code class="mono">mcp.*</code> = via agent · others = web UI</span>
+        </div>
+
+        <div class="table-card">
+          <table class="table">
+            <thead><tr>
+              <th style="width:130px">Time</th><th style="width:210px">Actor</th><th style="width:170px">Action</th>
+              <th>Resource</th><th style="width:95px">Outcome</th><th style="width:130px">Request ID</th>
+            </tr></thead>
+            <tbody>
+              <tr>
+                <td class="muted small" title="2026-07-29T10:02:11Z">2m ago</td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--emerald);font-size:9px">DL</span>dli</span></td>
+                <td><code class="mono small">concept.read</code></td>
+                <td><a href="concept-detail.html">Use PostgreSQL with pgvector…</a><div class="small muted mono" style="font-size:11px">decisions/use-postgresql-pgvector</div></td>
+                <td><span class="small" style="color:var(--green)">success</span></td>
+                <td><button class="copy-chip" title="Copy request ID">69fa9eac<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              </tr>
+              <tr>
+                <td class="muted small" title="2026-07-29T09:54:03Z">10m ago</td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--emerald);font-size:9px">DL</span>dli</span></td>
+                <td><code class="mono small">search.query</code></td>
+                <td class="muted-2">project <code class="mono small">web-app</code></td>
+                <td><span class="small" style="color:var(--green)">success</span></td>
+                <td><button class="copy-chip">7b2c1d04<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              </tr>
+              <tr>
+                <td class="muted small" title="2026-07-29T09:50:47Z">14m ago</td>
+                <td><span class="row" style="gap:8px"><span class="avatar service" style="width:22px;height:22px"><svg class="ic sm"><use href="#i-key"/></svg></span>ci-readonly <span class="muted small">key</span></span></td>
+                <td><code class="mono small">mcp.search</code></td>
+                <td class="muted-2">project <code class="mono small">web-app</code></td>
+                <td><span class="small" style="color:var(--green)">success</span></td>
+                <td><button class="copy-chip">3f8e2a91<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              </tr>
+              <tr>
+                <td class="muted small" title="2026-07-29T09:03:22Z">1h ago</td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--sky);font-size:9px">W</span>why-moment-demo</span></td>
+                <td><code class="mono small">event.payload_read</code></td>
+                <td><a href="event-detail.html">event <code class="mono small">evt_53014880aBcD</code></a></td>
+                <td><span class="small" style="color:var(--green)">success</span></td>
+                <td><button class="copy-chip">c41d7b08<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              </tr>
+              <tr>
+                <td class="muted small" title="2026-07-29T08:12:40Z">2h ago</td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--violet);font-size:9px">KZ</span>k.zhang</span></td>
+                <td><code class="mono small">concept.read</code></td>
+                <td><a href="concept-detail.html">Decision on Compile Queue: Redis vs. Postgres…</a><div class="small muted mono" style="font-size:11px">decisions/use-pg-boss-for-compile-queue</div></td>
+                <td><span class="small" style="color:var(--green)">success</span></td>
+                <td><button class="copy-chip">aa90e5f2<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              </tr>
+              <tr>
+                <td class="muted small" title="2026-07-29T07:41:15Z">3h ago</td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--rose);font-size:9px">JR</span>j.rivera <span class="role viewer" style="padding:2px 5px">Viewer</span></span></td>
+                <td><code class="mono small">search.query</code></td>
+                <td class="muted-2">project <code class="mono small">web-app</code> <span class="muted small">· role too low</span></td>
+                <td><span class="pill red">denied</span></td>
+                <td><button class="copy-chip">d17b3c60<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              </tr>
+              <tr>
+                <td class="muted small" title="2026-07-29T05:28:02Z">5h ago</td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--emerald);font-size:9px">DL</span>dli</span></td>
+                <td><code class="mono small">mcp.timeline</code></td>
+                <td><a href="concept-detail.html">concept <code class="mono small">13ee5d2e…</code></a></td>
+                <td><span class="small" style="color:var(--green)">success</span></td>
+                <td><button class="copy-chip">e52f9a14<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              </tr>
+              <tr>
+                <td class="muted small" title="2026-07-28T15:00:00Z">1d ago</td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--emerald);font-size:9px">DL</span>dli</span></td>
+                <td><code class="mono small">project.purge</code></td>
+                <td class="muted-2">project <code class="mono small">web-app</code> <span class="muted small">· 82 events, 48 pages, 31 jobs</span></td>
+                <td><span class="small" style="color:var(--green)">success</span></td>
+                <td><button class="copy-chip">f04c8b22<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              </tr>
+              <tr>
+                <td class="muted small" title="2026-07-28T13:44:51Z">1d ago</td>
+                <td><span class="row" style="gap:8px"><span class="avatar service" style="width:22px;height:22px"><svg class="ic sm"><use href="#i-bot"/></svg></span>m1-semrecall-svc <span class="muted small">service</span></span></td>
+                <td><code class="mono small">mcp.search</code></td>
+                <td class="muted-2">project <code class="mono small">api</code></td>
+                <td><span class="small" style="color:var(--green)">success</span></td>
+                <td><button class="copy-chip">9d3e7f05<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              </tr>
+              <tr>
+                <td class="muted small" title="2026-07-28T11:05:33Z">1d ago</td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--rose);font-size:9px">JR</span>j.rivera</span></td>
+                <td><code class="mono small">concept.read</code></td>
+                <td><a href="concept-detail.html">Restore Postgres from Nightly Backup</a><div class="small muted mono" style="font-size:11px">runbooks/restore-postgres-from-backup</div></td>
+                <td><span class="small" style="color:var(--green)">success</span></td>
+                <td><button class="copy-chip">6b21ac93<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              </tr>
+
+            </tbody>
+          </table>
+        </div>
+        <div class="pager"><button class="btn btn-outline">Load more</button></div>
+      </div>
+
+      <!-- ===== 空态 ===== -->
+      <div data-view="empty" class="card">
+        <div class="empty" style="padding:64px 24px">
+          <div class="e-icon"><svg><use href="#i-shield"/></svg></div>
+          <h3>No audit records in this range</h3>
+          <p>Reads, searches and payload access will appear here as they happen.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

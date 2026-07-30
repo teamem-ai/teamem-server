@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Use PostgreSQL with pgvector… · teamem</title>
+<link rel="stylesheet" href="assets/main.css">
+<script src="assets/mock.js"></script>
+<style>
+  .concept-grid{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:24px;align-items:start;margin-top:20px}
+  .rail{position:sticky;top:calc(var(--mockbar-h) + var(--topbar-h) + 20px);display:flex;flex-direction:column;gap:16px}
+  @media (max-width:1020px){.concept-grid{grid-template-columns:1fr}.rail{position:static}}
+  .c-head{display:flex;flex-direction:column;gap:12px}
+  .c-badges{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .c-title{font-size:24px;font-weight:700;letter-spacing:-.02em;line-height:1.3;max-width:840px}
+  .c-meta{display:flex;gap:14px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--text-3)}
+  .c-tags{display:flex;gap:6px;flex-wrap:wrap}
+  .contrib-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border)}
+  .contrib-row:last-child{border-bottom:0}
+  .rail .card-body{padding:16px}
+</style>
+</head>
+<body data-state="default">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="logo" viewBox="0 0 32 32"><rect fill="var(--accent)" x="1.5" y="1.5" width="29" height="29" rx="7.5"/><path d="M9 11h14M9 16h10.5M9 21h12.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></g></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></g></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></g></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></g></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></g></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></g></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10.29 3.86-8.47 14.14a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></g></symbol>
+<symbol id="i-bulb" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0 0 12 2z"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></g></symbol>
+<symbol id="i-ext" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6M10 14 21 3"/></g></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></g></symbol>
+<symbol id="i-commit" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M3 12h6m6 0h6"/></g></symbol>
+<symbol id="i-pr" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v12"/></g></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></g></symbol>
+<symbol id="i-back" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M19 12H5m7 7-7-7 7-7"/></symbol>
+<symbol id="i-bot" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/></g></symbol>
+<symbol id="i-gh" viewBox="0 0 24 24"><path fill="currentColor" d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.17-.02-2.12-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 5.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.76.11 3.05.74.81 1.18 1.83 1.18 3.09 0 4.42-2.7 5.39-5.26 5.68.41.35.77 1.05.77 2.12 0 1.53-.01 2.76-.01 3.14 0 .31.21.68.8.56A10.52 10.52 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z"/></symbol>
+</defs></svg>
+<div class="mockbar">
+  <span class="mock-tag">PREVIEW</span>
+  <a class="mock-link" href="index.html">← 总览</a>
+  <span class="mock-label">State</span>
+  <button class="mock-pill on" data-set="default">决策页(3类证据)</button>
+  <button class="mock-pill" data-set="disputed">disputed 页</button>
+  <button class="mock-pill" data-set="mcp">mcp 证据+空贡献者</button>
+  <button class="mock-pill" data-set="loading">骨架</button>
+  <span class="mock-spacer"></span>
+  <button class="mock-pill" data-theme-btn="light">Light</button>
+  <button class="mock-pill" data-theme-btn="dark">Dark</button>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-brand"><svg class="logo-mark"><use href="#logo"/></svg>teamem</div>
+    <nav class="side-scroll">
+      <div class="side-sec">Knowledge</div>
+      <a class="side-item active" href="knowledge.html"><svg class="ic"><use href="#i-book"/></svg>Knowledge</a>
+      <a class="side-item" href="context-preview.html"><svg class="ic"><use href="#i-sparkle"/></svg>Context preview</a>
+      <div class="side-sec">Activity</div>
+      <a class="side-item" href="events.html"><svg class="ic"><use href="#i-act"/></svg>Events</a>
+      <a class="side-item" href="jobs.html"><svg class="ic"><use href="#i-cpu"/></svg>Jobs</a>
+      <div class="side-sec">Team</div>
+      <a class="side-item" href="members.html"><svg class="ic"><use href="#i-users"/></svg>Members</a>
+      <a class="side-item" href="audit.html"><svg class="ic"><use href="#i-shield"/></svg>Audit</a>
+      <a class="side-item" href="soon.html"><svg class="ic"><use href="#i-mail"/></svg>Team digest<span class="pill soon">SOON</span></a>
+      <div class="side-sec">Settings</div>
+      <a class="side-item" href="settings-keys.html"><svg class="ic"><use href="#i-sliders"/></svg>Settings</a>
+    </nav>
+    <div class="side-foot"><span style="width:7px;height:7px;border-radius:99px;background:var(--green)"></span>portal v0.2.0 · self-hosted</div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="switcher"><span class="avatar" style="background:var(--accent)">A</span>Acme Corp<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="topbar-sep">/</span>
+      <button class="switcher">web-app<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="spacer"></span>
+      <button class="search-btn"><svg class="ic"><use href="#i-search"/></svg>Search knowledge…<kbd>⌘K</kbd></button>
+      <span class="avatar" style="background:var(--emerald);cursor:pointer" title="dli · owner">DL</span>
+    </header>
+
+    <div class="content wide">
+      <a class="btn btn-ghost btn-sm" href="knowledge.html" style="margin-bottom:14px"><svg class="ic"><use href="#i-back"/></svg>Knowledge</a>
+
+      <!-- ================= 默认：三证据决策页 ================= -->
+      <div data-view="default">
+        <div class="c-head">
+          <div class="c-badges">
+            <span class="tbadge decision"><svg class="ic"><use href="#i-branch"/></svg>Decision</span>
+            <span class="sbadge active"><span class="dot"></span>Active</span>
+            <span class="conf high"><span class="bars"><i></i><i></i><i></i></span><span class="clabel">High confidence</span></span>
+          </div>
+          <h1 class="c-title">Use PostgreSQL with pgvector and pg-boss for Queue Management as the Primary Database</h1>
+          <div class="c-meta">
+            <button class="copy-chip" title="Copy path"><svg class="ic"><use href="#i-link"/></svg>decisions/use-postgresql-pgvector<svg class="ic"><use href="#i-copy"/></svg></button>
+            <span title="2026-07-28T04:03:20Z">Last confirmed 2h ago</span>
+            <span title="2026-07-28T04:02:22Z">Created Jul 28, 2026</span>
+            <button class="copy-chip" title="Copy UUID">UUID 13ee5d2e<svg class="ic"><use href="#i-copy"/></svg></button>
+            <button class="copy-chip" title="Copy link to this page"><svg class="ic"><use href="#i-ext"/></svg>Copy link</button>
+          </div>
+          <div class="c-tags">
+            <a class="tag" href="knowledge.html">postgresql</a><a class="tag" href="knowledge.html">pgvector</a>
+            <a class="tag" href="knowledge.html">decision</a><a class="tag" href="knowledge.html">database</a>
+            <a class="tag" href="knowledge.html">storage</a><a class="tag" href="knowledge.html">postgres</a>
+            <a class="tag" href="knowledge.html">pg-boss</a><a class="tag" href="knowledge.html">redis</a>
+            <a class="tag" href="knowledge.html">queue</a><a class="tag" href="knowledge.html">deployment</a>
+          </div>
+        </div>
+        <div class="concept-grid">
+          <!-- 正文（长文，六个小节） -->
+          <div class="card"><div class="card-body md" style="padding:26px 30px">
+            <h3>Context</h3>
+            <p>We needed a primary datastore that supports:</p>
+            <ul>
+              <li>Transactional semantics for event ingestion and idempotency enforcement</li>
+              <li>Vector similarity search for concept retrieval (F2 merge candidates)</li>
+              <li>Job queue semantics for the compilation pipeline</li>
+              <li>Strong consistency guarantees</li>
+            </ul>
+            <h3>Decision</h3>
+            <p>We chose PostgreSQL with the pgvector extension as our single database, explicitly rejecting a multi-database architecture. Additionally, <a class="ilink" href="#disputed-demo" title="teamem://concept/70de6dde-2ab5-4917-97c2-2013ab91cf95">pg-boss</a> is used for managing the compile queue directly within Postgres, thereby eliminating the need for a separate Redis instance.</p>
+            <h3>Rationale</h3>
+            <p><strong>1. Single operational dependency.</strong> PostgreSQL + pgvector handles relational data, vector search, and (via pg-boss) job queuing in one system, which eliminates the need for Redis/Valkey, Qdrant, and Milvus as separate stateful services, dramatically simplifying self-hosted deployments.</p>
+            <p><strong>2. Transactional consistency across domains.</strong> Event ingestion, idempotency checks, and compilation job creation happen in a single Postgres transaction. With separate databases, distributed transactions or outbox patterns would be necessary.</p>
+            <p><strong>3. Team operational experience.</strong> The team already runs Postgres in production. Adding pgvector is a simple extension and does not require new infrastructure skills.</p>
+            <p><strong>4. pg-boss provides exactly-once job delivery</strong> on top of Postgres SKIP LOCKED, eliminating the need for a Redis-backed queue. Using pg-boss also avoids the burden of running and maintaining Redis just for the compile loop when pg-boss can utilize the existing Postgres setup. This keeps the default deployment simpler by reducing the number of required stateful services.</p>
+            <h3>Alternatives Considered</h3>
+            <ul>
+              <li><strong>Redis/Valkey + Postgres (no pgvector).</strong> Would require a separate vector database (Qdrant, Milvus), totaling three stateful services, and was rejected due to operational complexity for self-hosted users.</li>
+              <li><strong>Postgres + separate vector DB (Qdrant).</strong> Would involve two databases with no cross-domain transactions, which could lead to independent drift between embedding and relational data.</li>
+              <li><strong>SQLite + pgvector.</strong> Suitable for single-process workloads but not for multi-process server deployments where concurrent access by the worker, API, and MCP endpoints is needed.</li>
+            </ul>
+            <h3>Consequences</h3>
+            <ul>
+              <li>The default deployment is two containers (postgres + server/worker all-in-one) instead of four or five.</li>
+              <li>Embedding dimension is fixed at 1536 (OpenAI text-embedding-3-small).</li>
+              <li>Semantic search gracefully degrades to full-text search when embedding is unavailable, never pretending that vector search succeeded.</li>
+              <li>The compile queue in the default deployment now requires only three containers, enhancing ease of self-hosting, sharing the connection pool, and Write-Ahead Logging (WAL). This setup is considered acceptable at the self-hosted scale but might need revisiting for larger partner deployments.</li>
+            </ul>
+          </div></div>
+
+          <!-- 右栏：证据 / 贡献者 / 时间线 -->
+          <div class="rail">
+            <div class="card">
+              <div class="card-body">
+                <h4>Evidence · 3</h4>
+                <div class="stack" style="margin-top:12px;gap:10px">
+                  <a class="ev-item" href="#">
+                    <span class="ev-ic"><svg class="ic"><use href="#i-pr"/></svg></span>
+                    <span class="ev-main">
+                      <span class="ev-kind">Pull request <span class="muted" style="font-weight:400">· permalink</span></span>
+                      <span class="ev-ref">teamem-server/pull/107</span>
+                      <span class="ev-time">Occurred Jul 28, 2026 · 02:00 UTC</span>
+                    </span>
+                    <svg class="ic ev-ext"><use href="#i-ext"/></svg>
+                  </a>
+                  <a class="ev-item" href="#">
+                    <span class="ev-ic"><svg class="ic"><use href="#i-commit"/></svg></span>
+                    <span class="ev-main">
+                      <span class="ev-kind">Commit <span class="muted" style="font-weight:400">· permalink</span></span>
+                      <span class="ev-ref">teamem-server@4f3a91c</span>
+                      <span class="ev-time">Occurred Jul 28, 2026 · 02:00 UTC</span>
+                    </span>
+                    <svg class="ic ev-ext"><use href="#i-ext"/></svg>
+                  </a>
+                  <a class="ev-item" href="#">
+                    <span class="ev-ic"><svg class="ic"><use href="#i-file"/></svg></span>
+                    <span class="ev-main">
+                      <span class="ev-kind">Repo file <span class="muted" style="font-weight:400">· commit-pinned</span></span>
+                      <span class="ev-ref">teamem-server@a1b2c3d · docs/decisions/001-use-postgres-pgvector.md</span>
+                      <span class="ev-time">Snapshot Jul 28, 2026 · 04:02 UTC</span>
+                    </span>
+                    <svg class="ic ev-ext"><use href="#i-ext"/></svg>
+                  </a>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-body">
+                <h4>Contributors · 2</h4>
+                <div style="margin-top:8px">
+                  <div class="contrib-row" title="Service account — not clickable">
+                    <span class="avatar service"><svg class="ic sm"><use href="#i-bot"/></svg></span>
+                    <div style="flex:1;min-width:0">
+                      <div style="font-weight:500">why-demo-service</div>
+                      <div class="small muted">Service account</div>
+                    </div>
+                  </div>
+                  <a class="contrib-row" href="member-profile.html" style="color:inherit" title="GitHub profile — not a portal member yet">
+                    <span class="avatar" style="background:var(--sky)">W</span>
+                    <div style="flex:1;min-width:0">
+                      <div style="font-weight:500">why-moment-demo</div>
+                      <div class="small muted">GitHub · not a portal member yet</div>
+                    </div>
+                    <svg class="ic" style="color:var(--text-3)"><use href="#i-ext"/></svg>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-body">
+                <h4>Timeline</h4>
+                <div class="timeline" style="margin-top:14px">
+                  <div class="tl-item">
+                    <span class="tl-dot"></span>
+                    <div class="tl-time">Jul 28, 2026 · 04:02 UTC</div>
+                    <div class="tl-title">Repo file ingested via <code class="mono">teamem init</code></div>
+                    <div class="tl-sub">docs/decisions/001-use-postgres-pgvector.md</div>
+                  </div>
+                  <div class="tl-item">
+                    <span class="tl-dot gray"></span>
+                    <div class="tl-time">Jul 28, 2026 · 02:00 UTC</div>
+                    <div class="tl-title">PR #107 merged</div>
+                    <div class="tl-sub">github_pr · why-moment-demo <svg class="ic sm" style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></div>
+                  </div>
+                  <div class="tl-item">
+                    <span class="tl-dot gray"></span>
+                    <div class="tl-time">Jul 28, 2026 · 02:00 UTC</div>
+                    <div class="tl-title">Push · commit 4f3a91c</div>
+                    <div class="tl-sub">github_commit · why-moment-demo <svg class="ic sm" style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- ================= disputed 页 ================= -->
+      <div data-view="disputed">
+        <div class="banner warn" style="margin-bottom:16px">
+          <svg class="ic"><use href="#i-warn"/></svg>
+          <div><span class="b-title">Conflicting evidence — disputed.</span>
+          This page records two opposing positions in its body. It stays High confidence; the conflict is about what was decided, not how well it's supported.</div>
+          <div class="b-actions"><button class="btn btn-sm btn-outline" disabled title="Compare both positions side by side with their evidence — coming in V1.5">Reconciliation <span class="pill soon">SOON</span></button></div>
+        </div>
+        <div class="c-head">
+          <div class="c-badges">
+            <span class="tbadge decision"><svg class="ic"><use href="#i-branch"/></svg>Decision</span>
+            <span class="sbadge disputed"><svg class="ic"><use href="#i-warn"/></svg>Disputed</span>
+            <span class="conf high"><span class="bars"><i></i><i></i><i></i></span><span class="clabel">High confidence</span></span>
+          </div>
+          <h1 class="c-title">Decision: Queue Technology Choice for Compile Queue (Postgres vs. Redis)</h1>
+          <div class="c-meta">
+            <button class="copy-chip" title="Copy path"><svg class="ic"><use href="#i-link"/></svg>decisions/use-pg-boss-on-postgres<svg class="ic"><use href="#i-copy"/></svg></button>
+            <span title="2026-07-28T03:06:41Z">Last confirmed 1d ago</span>
+            <span title="2026-07-28T03:05:11Z">Created Jul 28, 2026</span>
+            <button class="copy-chip" title="Copy UUID">UUID 70de6dde<svg class="ic"><use href="#i-copy"/></svg></button>
+          </div>
+          <div class="c-tags">
+            <a class="tag" href="knowledge.html">queue</a><a class="tag" href="knowledge.html">pg-boss</a>
+            <a class="tag" href="knowledge.html">redis</a><a class="tag" href="knowledge.html">postgres</a>
+          </div>
+        </div>
+
+        <div class="concept-grid">
+          <div class="card"><div class="card-body md" style="padding:26px 30px">
+            <h4>Position 1: Use pg-boss on Postgres</h4>
+            <p>The compile queue is implemented with pg-boss running inside Postgres rather than Redis. This choice is operational rather than based on a technical preference. … As a consequence, Redis or Valkey should not be introduced for queueing, caching, or rate limiting without revisiting these trade-offs explicitly.</p>
+            <h4>Position 2: Move compile queue from Postgres to Redis</h4>
+            <p>The team decided to migrate the compile queue from running inside Postgres using pg-boss to Redis.</p>
+            <p class="small muted" style="margin-top:18px">Both positions were compiled from separate repo files (see evidence). The compiler does not map which evidence supports which position — that mapping is part of the upcoming reconciliation feature.</p>
+          </div></div>
+
+          <div class="rail">
+            <div class="card">
+              <div class="card-body">
+                <h4>Evidence · 2</h4>
+                <div class="stack" style="margin-top:12px;gap:10px">
+                  <a class="ev-item" href="#">
+                    <span class="ev-ic"><svg class="ic"><use href="#i-file"/></svg></span>
+                    <span class="ev-main">
+                      <span class="ev-kind">Repo file <span class="muted" style="font-weight:400">· commit-pinned</span></span>
+                      <span class="ev-ref">teamem-server@9c8d2e1 · docs/decisions/queue-on-postgres.md</span>
+                      <span class="ev-time">Snapshot Jul 28, 2026 · 03:05 UTC</span>
+                    </span>
+                    <svg class="ic ev-ext"><use href="#i-ext"/></svg>
+                  </a>
+                  <a class="ev-item" href="#">
+                    <span class="ev-ic"><svg class="ic"><use href="#i-file"/></svg></span>
+                    <span class="ev-main">
+                      <span class="ev-kind">Repo file <span class="muted" style="font-weight:400">· commit-pinned</span></span>
+                      <span class="ev-ref">teamem-server@7f2b9a4 · docs/decisions/queue-to-redis.md</span>
+                      <span class="ev-time">Snapshot Jul 28, 2026 · 03:06 UTC</span>
+                    </span>
+                    <svg class="ic ev-ext"><use href="#i-ext"/></svg>
+                  </a>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-body">
+                <h4>Contributors · 0</h4>
+                <div class="empty" style="padding:18px 8px">
+                  <p class="small">No verified contributors. Both events arrived via <code class="mono">teamem init</code> — self-reported identities don't appear here.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- ================= mcp_write 证据 + 空贡献者 ================= -->
+      <div data-view="mcp">
+        <div class="c-head">
+          <div class="c-badges">
+            <span class="tbadge gotcha"><svg class="ic"><use href="#i-warn"/></svg>Gotcha</span>
+            <span class="sbadge active"><span class="dot"></span>Active</span>
+            <span class="conf medium"><span class="bars"><i></i><i></i><i></i></span><span class="clabel">Medium confidence</span></span>
+          </div>
+          <h1 class="c-title">Stripe webhook retries and the risk of double charges</h1>
+          <div class="c-meta">
+            <button class="copy-chip" title="Copy path"><svg class="ic"><use href="#i-link"/></svg>gotchas/stripe-webhook-retries<svg class="ic"><use href="#i-copy"/></svg></button>
+            <span title="2026-07-28T12:19:43Z">Last confirmed Jul 28, 2026</span>
+            <span title="2026-07-28T12:19:48Z">Created Jul 28, 2026</span>
+            <button class="copy-chip" title="Copy UUID">UUID 711d3989<svg class="ic"><use href="#i-copy"/></svg></button>
+          </div>
+          <div class="c-tags">
+            <a class="tag" href="knowledge.html">stripe</a><a class="tag" href="knowledge.html">idempotency</a>
+            <a class="tag" href="knowledge.html">webhooks</a><a class="tag" href="knowledge.html">retries</a>
+            <a class="tag" href="knowledge.html">double-charge</a>
+          </div>
+        </div>
+
+        <div class="concept-grid">
+          <div class="card"><div class="card-body md" style="padding:26px 30px">
+            <p>Stripe webhooks may retry delivery for up to three days if not acknowledged, leading to potential duplicate processing of events. To avoid double charges, handlers must be designed to be idempotent by keying operations on the Stripe event ID. It's crucial to store a processed marker <strong>BEFORE</strong> executing any irreversible side effects, as once a duplicate charge is settled, it becomes unrecoverable.</p>
+          </div></div>
+
+          <div class="rail">
+            <div class="card">
+              <div class="card-body">
+                <h4>Evidence · 1</h4>
+                <div class="stack" style="margin-top:12px;gap:10px">
+                  <a class="ev-item" href="event-detail.html">
+                    <span class="ev-ic"><svg class="ic"><use href="#i-sparkle"/></svg></span>
+                    <span class="ev-main">
+                      <span class="ev-kind">Agent write (MCP) <span class="muted" style="font-weight:400">· internal event</span></span>
+                      <span class="ev-ref">evt_53014880b618482c94dc28ac167acee9</span>
+                      <span class="ev-time">Occurred Jul 28, 2026 · 12:19 UTC</span>
+                    </span>
+                    <svg class="ic ev-ext"><use href="#i-link"/></svg>
+                  </a>
+                </div>
+                <p class="small muted" style="margin-top:10px">Written by an agent via MCP — no external permalink; opens the internal event record instead.</p>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-body">
+                <h4>Contributors · 0</h4>
+                <div class="empty" style="padding:18px 8px">
+                  <p class="small">No verified contributors. This page was written by an agent — self-reported (<code class="mono">client_claimed</code>) identities never appear here.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 骨架 ================= -->
+      <div data-view="loading">
+        <div class="c-head">
+          <div class="skeleton" style="height:22px;width:180px"></div>
+          <div class="skeleton" style="height:30px;width:64%"></div>
+          <div class="skeleton" style="height:20px;width:46%"></div>
+        </div>
+        <div class="concept-grid">
+          <div class="card"><div class="card-body" style="padding:26px 30px">
+            <div class="skeleton" style="height:18px;width:30%;margin-bottom:14px"></div>
+            <div class="skeleton" style="height:12px;width:100%;margin-bottom:8px"></div>
+            <div class="skeleton" style="height:12px;width:96%;margin-bottom:8px"></div>
+            <div class="skeleton" style="height:12px;width:88%;margin-bottom:22px"></div>
+            <div class="skeleton" style="height:18px;width:24%;margin-bottom:14px"></div>
+            <div class="skeleton" style="height:12px;width:100%;margin-bottom:8px"></div>
+            <div class="skeleton" style="height:12px;width:92%;margin-bottom:8px"></div>
+            <div class="skeleton" style="height:12px;width:70%"></div>
+          </div></div>
+          <div class="rail">
+            <div class="card"><div class="card-body">
+              <div class="skeleton" style="height:14px;width:90px;margin-bottom:14px"></div>
+              <div class="skeleton" style="height:64px;border-radius:8px;margin-bottom:10px"></div>
+              <div class="skeleton" style="height:64px;border-radius:8px"></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+
+
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

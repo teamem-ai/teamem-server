@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Events · teamem</title>
+<link rel="stylesheet" href="assets/main.css">
+<script src="assets/mock.js"></script>
+</head>
+<body data-state="default">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="logo" viewBox="0 0 32 32"><rect fill="var(--accent)" x="1.5" y="1.5" width="29" height="29" rx="7.5"/><path d="M9 11h14M9 16h10.5M9 21h12.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></g></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></g></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></g></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></g></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></g></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-shieldcheck" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></g></symbol>
+<symbol id="i-commit" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M3 12h6m6 0h6"/></g></symbol>
+<symbol id="i-pr" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v12"/></g></symbol>
+<symbol id="i-issue" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1" fill="currentColor"/></g></symbol>
+<symbol id="i-comment" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m4 17 6-6-6-6M12 19h8"/></symbol>
+</defs></svg>
+<div class="mockbar">
+  <span class="mock-tag">PREVIEW</span>
+  <a class="mock-link" href="index.html">← 总览</a>
+  <span class="mock-label">State</span>
+  <button class="mock-pill on" data-set="default">默认</button>
+  <button class="mock-pill" data-set="empty">空态</button>
+  <span class="mock-spacer"></span>
+  <button class="mock-pill" data-theme-btn="light">Light</button>
+  <button class="mock-pill" data-theme-btn="dark">Dark</button>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-brand"><svg class="logo-mark"><use href="#logo"/></svg>teamem</div>
+    <nav class="side-scroll">
+      <div class="side-sec">Knowledge</div>
+      <a class="side-item" href="knowledge.html"><svg class="ic"><use href="#i-book"/></svg>Knowledge</a>
+      <a class="side-item" href="context-preview.html"><svg class="ic"><use href="#i-sparkle"/></svg>Context preview</a>
+      <div class="side-sec">Activity</div>
+      <a class="side-item active" href="events.html"><svg class="ic"><use href="#i-act"/></svg>Events</a>
+      <a class="side-item" href="jobs.html"><svg class="ic"><use href="#i-cpu"/></svg>Jobs</a>
+      <div class="side-sec">Team</div>
+      <a class="side-item" href="members.html"><svg class="ic"><use href="#i-users"/></svg>Members</a>
+      <a class="side-item" href="audit.html"><svg class="ic"><use href="#i-shield"/></svg>Audit</a>
+      <a class="side-item" href="soon.html"><svg class="ic"><use href="#i-mail"/></svg>Team digest<span class="pill soon">SOON</span></a>
+      <div class="side-sec">Settings</div>
+      <a class="side-item" href="settings-keys.html"><svg class="ic"><use href="#i-sliders"/></svg>Settings</a>
+    </nav>
+    <div class="side-foot"><span style="width:7px;height:7px;border-radius:99px;background:var(--green)"></span>portal v0.2.0 · self-hosted</div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="switcher"><span class="avatar" style="background:var(--accent)">A</span>Acme Corp<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="topbar-sep">/</span>
+      <button class="switcher">web-app<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="spacer"></span>
+      <button class="search-btn"><svg class="ic"><use href="#i-search"/></svg>Search knowledge…<kbd>⌘K</kbd></button>
+      <span class="avatar" style="background:var(--emerald);cursor:pointer" title="dli · owner">DL</span>
+    </header>
+
+    <div class="content">
+      <div class="page-head">
+        <div class="ph-text">
+          <h1>Events</h1>
+          <p class="sub">Raw development activity ingested from GitHub webhooks, <code class="mono">teamem init</code> and agent writes. Events are the compiler's input.</p>
+        </div>
+      </div>
+
+      <!-- ===== 默认 ===== -->
+      <div data-view="default">
+        <div class="filter-row" style="margin-top:0">
+          <button class="filter-chip on">All sources</button>
+          <button class="filter-chip"><svg class="ic"><use href="#i-commit"/></svg>GitHub</button>
+          <button class="filter-chip"><svg class="ic"><use href="#i-term"/></svg>CLI init</button>
+          <button class="filter-chip"><svg class="ic"><use href="#i-sparkle"/></svg>MCP write</button>
+          <span class="small muted" style="margin-left:auto">82 events · cursor pagination</span>
+        </div>
+
+        <div class="table-card">
+          <table class="table">
+            <thead><tr>
+              <th style="width:170px">Source</th><th style="width:210px">Actor</th><th>Summary</th><th style="width:150px">Occurred</th>
+            </tr></thead>
+            <tbody>
+              <tr class="clickable" onclick="location.href='event-detail.html'">
+                <td><span class="pill"><svg class="ic"><use href="#i-commit"/></svg>github_commit</span></td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--emerald);font-size:9px">DL</span><span>dli</span><svg class="ic sm" style="color:var(--green)" title="Identity verified by GitHub webhook signature"><use href="#i-shieldcheck"/></svg></span></td>
+                <td class="muted-2">Push to main · 3 commits</td>
+                <td class="muted small" title="2026-07-28T02:00:00Z">2h ago</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='event-detail.html'">
+                <td><span class="pill"><svg class="ic"><use href="#i-pr"/></svg>github_pr</span></td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--sky);font-size:9px">W</span><span>why-moment-demo</span><svg class="ic sm" style="color:var(--green)" title="Identity verified by GitHub webhook signature"><use href="#i-shieldcheck"/></svg></span></td>
+                <td class="muted-2">PR #107 merged — feat: adopt pg-boss for compile queue</td>
+                <td class="muted small" title="2026-07-28T02:00:00Z">2h ago</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='event-detail.html'">
+                <td><span class="pill"><svg class="ic"><use href="#i-term"/></svg>cli_init</span></td>
+                <td><span class="row" style="gap:8px"><span class="avatar unknown" style="width:22px;height:22px;font-size:9px">?</span><span class="muted">Unknown</span></span></td>
+                <td><code class="mono small">ec316e3a…:docs/…/roll-back-a-deployment.md</code></td>
+                <td class="muted small" title="2026-07-28T04:02:17Z">3h ago</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='event-detail.html'">
+                <td><span class="pill"><svg class="ic"><use href="#i-term"/></svg>cli_init</span></td>
+                <td><span class="row" style="gap:8px"><span class="avatar unknown" style="width:22px;height:22px;font-size:9px">?</span><span class="muted">Unknown</span></span></td>
+                <td><code class="mono small">ec316e3a…:docs/…/rotate-database-credentials.md</code></td>
+                <td class="muted small" title="2026-07-28T04:02:16Z">3h ago</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='event-detail.html'">
+                <td><span class="pill"><svg class="ic"><use href="#i-term"/></svg>cli_init</span></td>
+                <td><span class="row" style="gap:8px"><span class="avatar unknown" style="width:22px;height:22px;font-size:9px">?</span><span class="muted">Unknown</span></span></td>
+                <td><code class="mono small">9b8c7d6e…:src/…/task-service.ts</code></td>
+                <td class="muted small" title="2026-07-28T04:02:15Z">3h ago</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='event-detail.html'">
+                <td><span class="pill"><svg class="ic"><use href="#i-sparkle"/></svg>mcp_write</span></td>
+                <td><span class="row" style="gap:8px"><span class="avatar unknown" style="width:22px;height:22px;font-size:9px">?</span><span class="muted">Unknown</span></span></td>
+                <td class="muted-2">Stripe webhook retries and the risk of double charges</td>
+                <td class="muted small" title="2026-07-28T12:19:43Z">5h ago</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='event-detail.html'">
+                <td><span class="pill"><svg class="ic"><use href="#i-term"/></svg>cli_init</span></td>
+                <td><span class="row" style="gap:8px"><span class="avatar unknown" style="width:22px;height:22px;font-size:9px">?</span><span class="muted">Unknown</span></span></td>
+                <td><code class="mono small">ec316e3a…:docs/…/bringing-up-a-new-environment.md</code></td>
+                <td class="muted small" title="2026-07-28T04:02:14Z">3h ago</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='event-detail.html'">
+                <td><span class="pill"><svg class="ic"><use href="#i-issue"/></svg>github_issue</span></td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--emerald);font-size:9px">DL</span><span>dli</span><svg class="ic sm" style="color:var(--green)" title="Identity verified by GitHub webhook signature"><use href="#i-shieldcheck"/></svg></span></td>
+                <td class="muted-2">Issue #98 opened — pgvector migration fails on fresh install</td>
+                <td class="muted small" title="2026-07-27T16:40:00Z">1d ago</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='event-detail.html'">
+                <td><span class="pill"><svg class="ic"><use href="#i-comment"/></svg>github_comment</span></td>
+                <td><span class="row" style="gap:8px"><span class="avatar" style="width:22px;height:22px;background:var(--violet);font-size:9px">KZ</span><span>k.zhang</span><svg class="ic sm" style="color:var(--green)" title="Identity verified by GitHub webhook signature"><use href="#i-shieldcheck"/></svg></span></td>
+                <td class="muted-2">PR #107 review comment — pg-boss vs redis trade-offs</td>
+                <td class="muted small" title="2026-07-27T11:12:00Z">1d ago</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='event-detail.html'">
+                <td><span class="pill"><svg class="ic"><use href="#i-term"/></svg>cli_init</span></td>
+                <td><span class="row" style="gap:8px"><span class="avatar unknown" style="width:22px;height:22px;font-size:9px">?</span><span class="muted">Unknown</span></span></td>
+                <td><code class="mono small">ec316e3a…:docs/…/restore-postgres-from-backup.md</code></td>
+                <td class="muted small" title="2026-07-27T09:30:00Z">1d ago</td>
+              </tr>
+
+            </tbody>
+          </table>
+        </div>
+        <div class="pager"><button class="btn btn-outline">Load more</button></div>
+      </div>
+
+      <!-- ===== 空态 ===== -->
+      <div data-view="empty" class="card">
+        <div class="empty" style="padding:64px 24px">
+          <div class="e-icon"><svg><use href="#i-act"/></svg></div>
+          <h3>No events ingested yet</h3>
+          <p>Events arrive from GitHub, <code class="mono">teamem init</code>, or agent writes. They are the compiler's raw material.</p>
+          <div class="e-actions">
+            <a class="btn btn-outline" href="settings-sources.html">Set up an ingestion source</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>
