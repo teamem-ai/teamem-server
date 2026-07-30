@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API keys · Settings · teamem</title>
+<link rel="stylesheet" href="assets/main.css">
+<script src="assets/mock.js"></script>
+</head>
+<body data-state="default">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="logo" viewBox="0 0 32 32"><rect fill="var(--accent)" x="1.5" y="1.5" width="29" height="29" rx="7.5"/><path d="M9 11h14M9 16h10.5M9 21h12.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></g></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></g></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></g></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></g></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></g></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></g></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M18 6 6 18M6 6l12 12"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></g></symbol>
+<symbol id="i-rotate" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></g></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10.29 3.86-8.47 14.14a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></g></symbol>
+</defs></svg>
+<div class="mockbar">
+  <span class="mock-tag">PREVIEW</span>
+  <a class="mock-link" href="index.html">← 总览</a>
+  <span class="mock-label">State</span>
+  <button class="mock-pill on" data-set="default">列表</button>
+  <button class="mock-pill" data-set="modal">铸造弹窗</button>
+  <button class="mock-pill" data-set="minted">一次性明文</button>
+  <button class="mock-pill" data-set="revoke">吊销确认</button>
+  <button class="mock-pill" data-set="empty">空态</button>
+  <span class="mock-spacer"></span>
+  <button class="mock-pill" data-theme-btn="light">Light</button>
+  <button class="mock-pill" data-theme-btn="dark">Dark</button>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-brand"><svg class="logo-mark"><use href="#logo"/></svg>teamem</div>
+    <nav class="side-scroll">
+      <div class="side-sec">Knowledge</div>
+      <a class="side-item" href="knowledge.html"><svg class="ic"><use href="#i-book"/></svg>Knowledge</a>
+      <a class="side-item" href="context-preview.html"><svg class="ic"><use href="#i-sparkle"/></svg>Context preview</a>
+      <div class="side-sec">Activity</div>
+      <a class="side-item" href="events.html"><svg class="ic"><use href="#i-act"/></svg>Events</a>
+      <a class="side-item" href="jobs.html"><svg class="ic"><use href="#i-cpu"/></svg>Jobs</a>
+      <div class="side-sec">Team</div>
+      <a class="side-item" href="members.html"><svg class="ic"><use href="#i-users"/></svg>Members</a>
+      <a class="side-item" href="audit.html"><svg class="ic"><use href="#i-shield"/></svg>Audit</a>
+      <a class="side-item" href="soon.html"><svg class="ic"><use href="#i-mail"/></svg>Team digest<span class="pill soon">SOON</span></a>
+      <div class="side-sec">Settings</div>
+      <a class="side-item active" href="settings-keys.html"><svg class="ic"><use href="#i-sliders"/></svg>Settings</a>
+    </nav>
+    <div class="side-foot"><span style="width:7px;height:7px;border-radius:99px;background:var(--green)"></span>portal v0.2.0 · self-hosted</div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="switcher"><span class="avatar" style="background:var(--accent)">A</span>Acme Corp<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="topbar-sep">/</span>
+      <button class="switcher">web-app<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="spacer"></span>
+      <button class="search-btn"><svg class="ic"><use href="#i-search"/></svg>Search knowledge…<kbd>⌘K</kbd></button>
+      <span class="avatar" style="background:var(--emerald);cursor:pointer" title="dli · owner">DL</span>
+    </header>
+
+    <div class="content">
+      <nav class="tabs">
+        <a class="tab active" href="settings-keys.html">API keys</a>
+        <a class="tab" href="settings-sources.html">Ingestion</a>
+        <a class="tab" href="settings-llm.html">LLM &amp; retrieval</a>
+        <a class="tab" href="settings-project.html">Project</a>
+        <a class="tab" href="settings-team.html">Team</a>
+      </nav>
+      <div class="page-head">
+        <div class="ph-text">
+          <h1>API keys</h1>
+          <p class="sub">Credentials for agents and the CLI. Keys carry data-plane scopes only — they can never administer the portal.</p>
+        </div>
+        <div class="ph-actions">
+          <button class="btn btn-primary"><svg class="ic"><use href="#i-plus"/></svg>Mint API key</button>
+        </div>
+      </div>
+
+      <!-- ===== 列表 ===== -->
+      <div data-view="default modal minted revoke" class="table-card">
+        <table class="table">
+          <thead><tr>
+            <th>Name</th><th style="width:150px">Key ID</th><th style="width:170px">Scopes</th>
+            <th style="width:120px">Project</th><th style="width:110px">Created</th><th style="width:95px">Status</th><th style="width:170px"></th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>claude-code-laptop</strong></td>
+              <td><button class="copy-chip" title="Key ID — not the secret, safe to display">key_7f3aB2cD<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              <td><span class="scope-tag">read</span> <span class="scope-tag">write</span></td>
+              <td class="muted-2">web-app</td>
+              <td class="muted small">Jul 28</td>
+              <td><span class="pill green">Active</span></td>
+              <td><span class="row" style="gap:2px"><button class="btn btn-ghost btn-sm" title="Rotate: mint new + revoke this one immediately"><svg class="ic"><use href="#i-rotate"/></svg>Rotate</button><button class="btn btn-ghost btn-sm" style="color:var(--red)">Revoke</button></span></td>
+            </tr>
+            <tr>
+              <td><strong>ci-readonly</strong></td>
+              <td><button class="copy-chip" title="Key ID — not the secret, safe to display">key_2mKx9Ab7<svg class="ic"><use href="#i-copy"/></svg></button></td>
+              <td><span class="scope-tag">read</span></td>
+              <td class="muted-2">All projects</td>
+              <td class="muted small">Jul 28</td>
+              <td><span class="pill green">Active</span></td>
+              <td><span class="row" style="gap:2px"><button class="btn btn-ghost btn-sm"><svg class="ic"><use href="#i-rotate"/></svg>Rotate</button><button class="btn btn-ghost btn-sm" style="color:var(--red)">Revoke</button></span></td>
+            </tr>
+            <tr style="opacity:.55">
+              <td><strong style="text-decoration:line-through">old-laptop</strong></td>
+              <td><code class="mono small muted">key_8pQw3Rt5</code></td>
+              <td><span class="scope-tag">read</span> <span class="scope-tag">write</span></td>
+              <td class="muted-2">web-app</td>
+              <td class="muted small">Jul 20</td>
+              <td><span class="pill">Revoked</span></td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small muted" data-view="default modal minted revoke" style="margin-top:10px">Key IDs (<code class="mono">key_…</code>) are identifiers, safe to display. The secret token (<code class="mono">tm_…</code>) is shown once at minting — we store only its hash.</p>
+
+      <!-- ===== 空态 ===== -->
+      <div data-view="empty" class="card">
+        <div class="empty" style="padding:64px 24px">
+          <div class="e-icon"><svg><use href="#i-key"/></svg></div>
+          <h3>No keys minted yet</h3>
+          <p>Mint one to connect an agent or run <code class="mono">teamem init</code>.</p>
+          <div class="e-actions">
+            <button class="btn btn-primary"><svg class="ic"><use href="#i-plus"/></svg>Mint your first key</button>
+          </div>
+        </div>
+      </div>
+      <!-- ===== 铸造弹窗 ===== -->
+      <div data-view="modal">
+        <div class="modal-veil">
+          <div class="modal" role="dialog" aria-modal="true">
+            <div class="modal-head">
+              <div><h3>Mint API key</h3>
+              <p class="m-sub">The secret is shown once, right after minting.</p></div>
+              <span class="modal-x"><svg class="ic"><use href="#i-x"/></svg></span>
+            </div>
+            <div class="modal-body">
+              <div class="field">
+                <label class="label" for="kname">Name</label>
+                <input class="input" id="kname" placeholder='e.g. "claude-code-laptop" or "ci-readonly"'>
+              </div>
+              <div class="field">
+                <label class="label" for="kproj">Project</label>
+                <select class="select" id="kproj"><option>web-app</option><option>api</option></select>
+                <label class="checkbox" style="margin-top:8px"><input type="checkbox"><span>All projects <span class="muted">(team-level key)</span></span></label>
+              </div>
+              <div class="field" style="margin-bottom:0">
+                <label class="label">Scopes</label>
+                <label class="checkbox"><input type="checkbox" checked><span><code class="mono">read</code> <span class="muted">— search and read pages</span></span></label>
+                <label class="checkbox"><input type="checkbox"><span><code class="mono">read:payload</code> <span class="muted">— includes read, plus event payloads (audited)</span></span></label>
+                <label class="checkbox"><input type="checkbox" checked><span><code class="mono">write</code> <span class="muted">— ingest events (CLI / MCP)</span></span></label>
+                <p class="hint">Keys never carry admin rights — they can't manage members, settings or other keys.</p>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-ghost">Cancel</button>
+              <button class="btn btn-primary">Mint key</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 一次性明文（铸造成功） ===== -->
+      <div data-view="minted">
+        <div class="modal-veil">
+          <div class="modal wide" role="dialog" aria-modal="true">
+            <div class="modal-head">
+              <div><h3>Key minted</h3>
+              <p class="m-sub"><strong>ci-readonly</strong> · key_9QwX7Rt2 · All projects · read</p></div>
+            </div>
+            <div class="modal-body">
+              <div class="keyreveal">
+                <svg class="ic lg" style="color:#fbbf24"><use href="#i-key"/></svg>
+                <code>tm_4kR8wQ2xB7nT1yV9zP3m</code>
+                <button class="copy-btn"><svg class="ic"><use href="#i-copy"/></svg>Copy</button>
+              </div>
+              <div class="banner warn" style="margin-top:12px">
+                <svg class="ic"><use href="#i-warn"/></svg>
+                <div><span class="b-title">Copy it now — you won't see this key again.</span> We store only a hash.</div>
+              </div>
+              <div style="margin-top:14px">
+                <div class="cmd-label">Plug team knowledge into Claude Code with this key:</div>
+                <div class="cmd"><code>claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer tm_4kR8wQ2xB7nT1yV9zP3m"</code>
+                  <button class="copy-btn"><svg class="ic"><use href="#i-copy"/></svg>Copy</button></div>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-primary">Done — I've saved the key</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 吊销确认 ===== -->
+      <div data-view="revoke">
+        <div class="modal-veil">
+          <div class="modal" role="alertdialog" aria-modal="true">
+            <div class="modal-head">
+              <div><h3>Revoke "claude-code-laptop"?</h3></div>
+              <span class="modal-x"><svg class="ic"><use href="#i-x"/></svg></span>
+            </div>
+            <div class="modal-body">
+              <p style="font-size:13.5px;line-height:1.6">Requests using this key will fail <strong>immediately</strong> with 401. This can't be undone — but you can mint a replacement anytime.</p>
+              <p class="small muted" style="margin-top:10px">key_7f3aB2cD · web-app · read, write · created Jul 28</p>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-ghost">Cancel</button>
+              <button class="btn btn-danger">Revoke now</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

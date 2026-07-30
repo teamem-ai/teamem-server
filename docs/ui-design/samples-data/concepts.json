@@ -1,0 +1,1758 @@
+[
+  {
+    "uuid": "2be37f11-cd36-4987-bfeb-85e80210211a",
+    "path": "concepts/app-error-class",
+    "projectId": "prj_df7f33c14c1e46358e926867d1212107",
+    "schemaVersion": 1,
+    "type": "concept",
+    "status": "active",
+    "confidence": "medium",
+    "title": "AppError class for machine-readable application errors",
+    "tags": [
+      "error-handling",
+      "app-error",
+      "javascript"
+    ],
+    "body": "The `AppError` class is used in our codebase to represent machine-readable application errors. It has specific conventions for its properties:\n\n- `code`: An UPPER_SNAKE_CASE identifier used for programmatic error handling.\n- `message`: A human-readable description that is safe for logging purposes.\n- `statusCode`: An HTTP status code applied for API responses.\n\nThis class extends the standard JavaScript `Error` object and includes methods that facilitate JSON representation of the error, ensuring consistent error handling across the application.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "45fbe4244007ca73b96f480c8558b49054d3140f",
+        "path": "src/utils/errors.ts",
+        "at": "2026-07-28T04:23:09.432+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:23:09.432+00:00",
+    "lastConfirmed": "2026-07-28T04:23:09.432+00:00",
+    "createdAt": "2026-07-28T04:23:34.53+00:00"
+  },
+  {
+    "uuid": "c9ee3c8f-c023-49f2-95e5-a5fe2f366e15",
+    "path": "concepts/app-error-conventions",
+    "projectId": "prj_fa1a7b61f26249e3bb0090f646fc9835",
+    "schemaVersion": 1,
+    "type": "concept",
+    "status": "active",
+    "confidence": "medium",
+    "title": "AppError class conventions",
+    "tags": [
+      "error-handling",
+      "code-conventions",
+      "app-error"
+    ],
+    "body": "The `AppError` class in our codebase represents a machine-readable application error. It follows specific conventions:\n\n- **code**: An UPPER_SNAKE_CASE identifier for programmatic handling of the error.\n- **message**: A human-readable description that is safe for logging purposes.\n- **statusCode**: The HTTP status code meant for API responses.\n\nThis class provides a structured way to manage errors within the application, ensuring that errors can be consistently handled, logged, and communicated in HTTP responses.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "b4d6da46d5a80a54261d81a10ae2b23508ba089c",
+        "path": "src/utils/errors.ts",
+        "at": "2026-07-28T04:26:40.659+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:26:40.659+00:00",
+    "lastConfirmed": "2026-07-28T04:26:40.659+00:00",
+    "createdAt": "2026-07-28T04:27:10.925+00:00"
+  },
+  {
+    "uuid": "83322c10-013a-4bb5-b19e-098ab9de627d",
+    "path": "concepts/concept-paths-format",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "concept",
+    "status": "active",
+    "confidence": "high",
+    "title": "Concept paths format and usage",
+    "tags": [
+      "concept",
+      "path",
+      "format",
+      "uuid",
+      "internal-links"
+    ],
+    "body": "# Concept Paths Format and Usage\n\nConcept paths are locators, not identities. The canonical identity of a concept page is its UUID, while the path serves only as a readable locator. Paths may be renamed; historical aliases and the current path share one namespace, with each concept having at most one current path.\n\nFormat rules for concept paths:\n- Use lowercase only.\n- Segments must match `[a-z0-9-]` and be joined by `/`.\n- Maximum length is 200 characters.\n- No leading slash.\n- No empty segments.\n- No \".\" or \"..\".\n- Exclude \".md\" suffix.\n\nTo maintain link stability when paths change, internal links in a concept body use the format `teamem://concept/<uuid>`. During export, these links are resolved to relative Markdown links, with the UUID preserved in the frontmatter to ensure that the export can be re-imported without issues.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/concept-path-format.md",
+        "at": "2026-07-28T05:13:28.386+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:13:28.386+00:00",
+    "lastConfirmed": "2026-07-28T05:13:28.386+00:00",
+    "createdAt": "2026-07-28T05:13:45.884+00:00"
+  },
+  {
+    "uuid": "80beb6ac-9735-4c72-b757-945983c9d532",
+    "path": "concepts/layered-architecture-task-tracker",
+    "projectId": "prj_df7f33c14c1e46358e926867d1212107",
+    "schemaVersion": 1,
+    "type": "concept",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Layered Architecture in Task Tracker Application",
+    "tags": [
+      "architecture",
+      "design-pattern",
+      "task-tracker",
+      "task",
+      "schema",
+      "validation",
+      "zod"
+    ],
+    "body": "The Task Tracker application follows a layered architecture pattern, providing clear separation of concerns within the application. In this architecture:\n\n- **Models** represent the database entity types and include validation schemas. These ensure that data structures are correctly defined and consistent. A specific model, the `taskSchema`, is a Zod object schema used to validate task objects within our system. This schema includes several properties that define the core attributes of a task:\n  - **id**: An optional UUID that uniquely identifies the task.\n  - **title**: A required string representing the task's title, with a minimum length of 1 and maximum length of 200 characters.\n  - **description**: An optional string with a maximum length of 5000 characters, used for a detailed description of the task.\n  - **status**: An enumerated type that can be one of `'todo'`, `'in_progress'`, `'review'`, `'done'`, or `'archived'`, defaulting to `'todo'`.\n  - **priority**: An enumerated type indicating priority, which can be `'low'`, `'medium'`, `'high'`, or `'critical'`, defaulting to `'medium'`.\n  - **assignedTo**: An optional string representing the user to whom the task is assigned.\n  - **createdAt** and **updatedAt**: Optional strings representing ISO 8601 formatted timestamps for when the task was created and last updated, respectively.\n  This schema ensures that tasks meet our data validation requirements and provides a standardized way to manage task attributes across the application, including valid status transitions to enforce a one-way lifecycle for tasks.\n- **Services** encapsulate the business logic, particularly for managing the lifecycle of tasks. This layer abstracts operations like task creation and status transitions.\n- **Utils** comprise shared utilities that provide common functionality, such as database connection pooling and logic for retrying operations.\n\nThis layered approach helps maintain organized code structure and enhances the testability and maintainability of the application.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "45fbe4244007ca73b96f480c8558b49054d3140f",
+        "path": "README.md",
+        "at": "2026-07-28T04:23:09.432+00:00"
+      },
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "45fbe4244007ca73b96f480c8558b49054d3140f",
+        "path": "src/models/task.ts",
+        "at": "2026-07-28T04:23:09.432+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:23:09.432+00:00",
+    "lastConfirmed": "2026-07-28T04:23:09.432+00:00",
+    "createdAt": "2026-07-28T04:23:21.738+00:00"
+  },
+  {
+    "uuid": "84181eb4-5cdb-458f-b8cb-205b6d93cee9",
+    "path": "concepts/layered-architecture-task-tracker",
+    "projectId": "prj_fa1a7b61f26249e3bb0090f646fc9835",
+    "schemaVersion": 1,
+    "type": "concept",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Layered Architecture in Task Tracker Application",
+    "tags": [
+      "layered architecture",
+      "task tracker",
+      "typescript",
+      "postgresql",
+      "design pattern"
+    ],
+    "body": "## Layered Architecture in Task Tracker Application\n\nThe Task Tracker application is built following a layered architecture. This design organizes code into defined segments for better separation of concerns.\n\n- **Models**: Responsible for database entity types and validation schemas.\n- **Services**: Contain business logic for task lifecycle management.\n- **Utils**: Implement shared utilities, including connection pooling and retry logic.\n\nThis architecture supports clear modular separation and improves maintainability by delineating specific roles and responsibilities within the application.\n",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "b4d6da46d5a80a54261d81a10ae2b23508ba089c",
+        "path": "README.md",
+        "at": "2026-07-28T04:26:40.659+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:26:40.659+00:00",
+    "lastConfirmed": "2026-07-28T04:26:40.659+00:00",
+    "createdAt": "2026-07-28T04:26:54.962+00:00"
+  },
+  {
+    "uuid": "a21d45f5-f0fb-4ece-bba0-c71959c87fc3",
+    "path": "concepts/path-format",
+    "projectId": "prj_dc4de2574cdd4293aa0225622a0ed89e",
+    "schemaVersion": 1,
+    "type": "concept",
+    "status": "active",
+    "confidence": "high",
+    "title": "Concept path formatting rules",
+    "tags": [
+      "concept",
+      "path",
+      "format",
+      "uuid"
+    ],
+    "body": "### Concept paths are locators, not identities\n\nConcept paths are used as readable locators, not unique identifiers; the UUID serves as the canonical identity. Paths may be renamed, with historical aliases sharing the same namespace. Each concept can have only one current path.\n\n#### Format Rules\n- **Lowercase only**\n- Segments match `[a-z0-9-]` joined by \"/\"\n- **Maximum 200 characters**\n- No leading slash, empty segments, or \".md\" suffix\n- Avoid \".\" or \"..\" as segment names\n\n#### Link Usage\nInternal links in concept bodies utilize `teamem://concept/<uuid>` to prevent broken links due to path renaming. During export, these are converted to relative Markdown links, retaining the UUID in frontmatter for round-trip importability.\n\nUnderstanding concept path rules is crucial when drafting prompts for model-generated output to ensure compliance with the team's schema.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/concept-path-format.md",
+        "at": "2026-07-28T03:05:11.077+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T03:05:11.077+00:00",
+    "lastConfirmed": "2026-07-28T03:05:11.077+00:00",
+    "createdAt": "2026-07-28T03:05:32.752+00:00"
+  },
+  {
+    "uuid": "3f15172b-71f3-4748-a8fa-3883920455b2",
+    "path": "concepts/provider-precedence",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "concept",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Provider Precedence and Semantic Recall Behavior",
+    "tags": [
+      "provider",
+      "embedding",
+      "configuration",
+      "precedence",
+      "semantic-recall"
+    ],
+    "body": "The provider precedence in the embedding configuration defines the behavior of semantic recall in the teamem system. The order in which providers are evaluated can lead to unexpected behavior where semantic recall falls back to full-text search if the primary provider does not support embeddings.\n\n### Key Points:\n\n- **Anthropic Limitation**: Anthropic does not have a public embedding API, resulting in `createEmbeddingClient()` returning null for a `claude` provider config, which in turn defaults to full-text search (FTS) silently if not logged carefully.\n\n- **Configuration Order**: Providers are prioritized in the following order in `config/env.ts`: Anthropic, OpenAI, OpenRouter, and a custom OpenAI-compatible endpoint. With this setup, if both an Anthropic key and an OpenRouter key are present, `llmProviders[0]` will default to Anthropic, limiting recallMode to FTS-only.\n\n- **OpenRouter Capability**: OpenRouter supports embedding via `POST /v1/embeddings`, which can generate real 1536-dimension vectors, offering a viable one-key solution for embedding and compilation.\n\n- **Constraint**: The current setup requires that a single provider configures both the LLM and embedding client. This means third-party providers like Claude cannot be used selectively for specific tasks like F2 merge decisions without also affecting embedding behavior.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/embedding-provider-precedence.md",
+        "at": "2026-07-28T05:13:28.386+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:13:28.386+00:00",
+    "lastConfirmed": "2026-07-28T05:13:28.386+00:00",
+    "createdAt": "2026-07-28T05:14:15.564+00:00"
+  },
+  {
+    "uuid": "f1fd85a2-64fe-407f-8af3-fe4f9255105d",
+    "path": "conventions/error-redaction",
+    "projectId": "prj_dc4de2574cdd4293aa0225622a0ed89e",
+    "schemaVersion": 1,
+    "type": "convention",
+    "status": "active",
+    "confidence": "high",
+    "title": "Error Redaction Convention for LLM Boundary",
+    "tags": [
+      "error-handling",
+      "llm",
+      "redaction",
+      "convention"
+    ],
+    "body": "## Error Redaction Convention\n\n**Convention:** Never attach a cause to an error that crosses the LLM boundary.\n\n### Scope\nThis convention applies to every error type that can escape the provider adapters.\n\n### Guidelines\n- Errors leaving the LLM port should only carry a fixed, kind-specific message plus at most the provider name, the request id, and an HTTP status.\n- Do not include sensitive information such as API keys, request body, model payload, or raw provider error text.\n- Specifically avoid attaching the original error as `cause`. Attaching a `cause` such as `ZodError` can leak the provider's raw payload into logs, audit rows, and persisted job snapshots.\n\n### Handling Provider Errors\n- When a provider returns a non-2xx status, drain the response body to release the socket and retain none of it.\n- Classify, then discard the body content.\n- If debugging requires provider text, reproduce the call independently; the port remains redacted.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/knowledge/error-redaction-convention.md",
+        "at": "2026-07-28T03:06:41.188+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T03:06:41.188+00:00",
+    "lastConfirmed": "2026-07-28T03:06:41.188+00:00",
+    "createdAt": "2026-07-28T03:07:02.01+00:00"
+  },
+  {
+    "uuid": "d2435617-23e9-4e8d-b9ae-b68989edcb60",
+    "path": "conventions/error-redaction-llm-boundary",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "convention",
+    "status": "active",
+    "confidence": "high",
+    "title": "Error Redaction Convention for LLM Boundary",
+    "tags": [
+      "error-handling",
+      "security",
+      "llm",
+      "convention",
+      "redaction"
+    ],
+    "body": "This convention outlines the rules for error handling related to the LLM boundary when dealing with provider adapters. Errors that can escape the provider adapters must follow these guidelines:\n\n- Errors leaving the LLM port should carry a fixed, kind-specific message and at most include the provider name, request ID, and HTTP status.\n- These errors must not include sensitive information such as API keys, request bodies, model payloads, or raw provider error text.\n- Specifically, do not attach the original error as a `cause`, as `Error.cause` is surfaced by logs and by `util.inspect`. Attaching a ZodError would leak the provider's raw payload into logs, audit rows, and persisted job snapshots.\n- When a provider returns a non-2xx status, drain the body to release the socket but do not retain the content. Classify the issue, then discard the body. For debugging, reproduce the call independently rather than relying on the redacted port.\n\nThis ensures that sensitive information is not leaked across boundaries, maintaining security and privacy standards.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/knowledge/error-redaction-convention.md",
+        "at": "2026-07-28T05:15:08.501+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:15:08.501+00:00",
+    "lastConfirmed": "2026-07-28T05:15:08.501+00:00",
+    "createdAt": "2026-07-28T05:15:26.297+00:00"
+  },
+  {
+    "uuid": "a4e052a1-cb50-4219-a90c-d970f9e7ff73",
+    "path": "decisions/api-rate-limiting",
+    "projectId": "prj_8d6122ca359848a0bcdb90953c0415c4",
+    "schemaVersion": 1,
+    "type": "decision",
+    "status": "active",
+    "confidence": "high",
+    "title": "API Rate Limiting Architecture Decision",
+    "tags": [
+      "api",
+      "rate-limiting",
+      "redis",
+      "architecture",
+      "decision"
+    ],
+    "body": "We implemented rate limiting across all public API endpoints to protect against abuse and ensure fair resource allocation between tenants.\n\n### Chosen Approach:\n- **Redis-backed token bucket algorithm**: Each API key gets a token bucket stored as a Redis hash with fields for tokens, last_refill_time, and capacity.\n- **Refill rate**: Configurable, default is 100 tokens/minute.\n- **Token consumption**: Every request consumes one token. Requests are rejected with HTTP 429 Too Many Requests if the bucket is empty.\n- **Atomicity**: Redis Lua scripts ensure the atomicity of the check-and-decrement operation, preventing race conditions under concurrent access.\n\n### Alternatives Considered:\n1. **Fixed window counters**: Simpler but cause burst-at-boundary problems.\n2. **Sliding window log**: More accurate but memory-heavy at scale.\n3. **Third-party gateway (Kong, Envoy)**: Adds operational complexity not needed yet for our scale.\n\n### Rationale:\nThe token bucket approach provides the best balance of accuracy, memory efficiency, and operational simplicity for our current traffic patterns (~10k requests/minute peak across all tenants).",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem/test-repo",
+        "commitSha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+        "path": "docs/architecture/rate-limiting.md",
+        "at": "2026-07-28T03:22:37.325+00:00"
+      }
+    ],
+    "contributors": [
+      {
+        "principalId": "pri_0f6d5a583eb54b398e82bf803ae7720e",
+        "kind": "service",
+        "provider": "external",
+        "displayLogin": "m1-semrecall-svc"
+      }
+    ],
+    "firstSeen": "2026-07-28T03:22:37.325+00:00",
+    "lastConfirmed": "2026-07-28T03:22:37.325+00:00",
+    "createdAt": "2026-07-28T03:22:42.887+00:00"
+  },
+  {
+    "uuid": "32705595-5140-44b2-a176-b94a4e17747f",
+    "path": "decisions/api-rate-limiting",
+    "projectId": "prj_4b819a78c8914c93bac7ffcb37b572ed",
+    "schemaVersion": 1,
+    "type": "decision",
+    "status": "active",
+    "confidence": "high",
+    "title": "Architecture Decision: API Rate Limiting",
+    "tags": [
+      "rate-limiting",
+      "api",
+      "architecture-decision",
+      "redis",
+      "token-bucket"
+    ],
+    "body": "We implemented rate limiting across all public API endpoints to protect against abuse and ensure fair resource allocation between tenants. The chosen approach uses a Redis-backed token bucket algorithm.\n\n### Chosen Approach\n- **Token Bucket Algorithm**: Each API key gets a token bucket stored as a Redis hash with fields for tokens, last_refill_time, and capacity.\n- **Refill Rate**: Buckets refill at a configurable rate (default: 100 tokens/minute).\n- **Request Handling**: Every request consumes one token. When the bucket is empty, the request is rejected with HTTP 429 Too Many Requests.\n- **Atomic Check and Decrement**: Redis Lua scripts ensure the operation is atomic, avoiding race conditions under concurrent access.\n\n### Alternatives Considered\n- **Fixed Window Counters**: Simpler but cause burst-at-boundary problems.\n- **Sliding Window Log**: More accurate but memory-heavy at scale.\n- **Third-party Gateway (Kong, Envoy)**: Adds operational complexity not needed for our scale.\n\n### Rationale\nThe token bucket approach provides the best balance of accuracy, memory efficiency, and operational simplicity for our current traffic patterns (~10k requests/minute peak across all tenants).",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem/test-repo",
+        "commitSha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+        "path": "docs/architecture/rate-limiting.md",
+        "at": "2026-07-28T03:23:14.459+00:00"
+      }
+    ],
+    "contributors": [
+      {
+        "principalId": "pri_ea13969b497c46ef930cb8cf62354cea",
+        "kind": "service",
+        "provider": "external",
+        "displayLogin": "m1-semrecall-svc"
+      }
+    ],
+    "firstSeen": "2026-07-28T03:23:14.459+00:00",
+    "lastConfirmed": "2026-07-28T03:23:14.459+00:00",
+    "createdAt": "2026-07-28T03:23:20.543+00:00"
+  },
+  {
+    "uuid": "d547f989-5d25-496b-8858-9f62d0a01b70",
+    "path": "decisions/api-rate-limiting",
+    "projectId": "prj_75f047c1d8354f51b6bc49d69cd49bb4",
+    "schemaVersion": 1,
+    "type": "decision",
+    "status": "active",
+    "confidence": "high",
+    "title": "Architecture Decision: API Rate Limiting Using Redis-backed Token Bucket Algorithm",
+    "tags": [
+      "architecture",
+      "rate-limiting",
+      "api",
+      "redis",
+      "decision",
+      "token-bucket"
+    ],
+    "body": "We implemented rate limiting across all public API endpoints using a Redis-backed token bucket algorithm. This decision protects against abuse and ensures fair resource allocation between tenants.\n\n**Chosen Approach:**\n- Each API key gets a token bucket, stored as a Redis hash with fields for tokens, last_refill_time, and capacity.\n- Buckets refill at a configurable rate (default: 100 tokens/minute).\n- Every request consumes one token. If the bucket is empty, the request receives HTTP 429 Too Many Requests.\n- Redis Lua scripts ensure atomic check-and-decrement operations, preventing race conditions under concurrent access.\n\n**Alternatives Considered:**\n- Fixed window counters: Simpler but result in burst-at-boundary problems.\n- Sliding window log: More accurate but memory-heavy at scale.\n- Third-party gateway (Kong, Envoy): Adds operational complexity we don't need yet at our current scale.\n\nThe token bucket approach provides the best balance of accuracy, memory efficiency, and operational simplicity given our current traffic patterns (~10k requests/minute peak across all tenants).",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem/test-repo",
+        "commitSha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+        "path": "docs/architecture/rate-limiting.md",
+        "at": "2026-07-28T03:23:48.676+00:00"
+      },
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem/test-repo",
+        "commitSha": "b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c",
+        "path": "docs/architecture/rate-limiting-v2.md",
+        "at": "2026-07-28T03:23:54.482+00:00"
+      }
+    ],
+    "contributors": [
+      {
+        "principalId": "pri_b85eddf14bf44b6aa10e34ce31f9d1d7",
+        "kind": "service",
+        "provider": "external",
+        "displayLogin": "m1-semrecall-svc"
+      }
+    ],
+    "firstSeen": "2026-07-28T03:23:48.676+00:00",
+    "lastConfirmed": "2026-07-28T03:24:02.072+00:00",
+    "createdAt": "2026-07-28T03:23:53.758+00:00"
+  },
+  {
+    "uuid": "fce64c25-83b5-4877-97dc-34b6feb27e8f",
+    "path": "decisions/codename-standardization-billing-rewrite",
+    "projectId": "prj_983ced33962b4cea839ac540d378b64f",
+    "schemaVersion": 1,
+    "type": "decision",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Codename Standardization for Billing Rewrite",
+    "tags": [
+      "codename",
+      "billing",
+      "zebrafish",
+      "standardization"
+    ],
+    "body": "The team decided to standardize on \"ZEBRAFISH\" as the codename for the billing rewrite project. This decision was made because the previous codename collided with a public product name, causing confusion in support tickets.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b1b2b3b4b5b6b7b8b9b0c1c2c3c4c5c6c7c8c9c0",
+        "path": "docs/tenant-b-only.md",
+        "at": "2026-07-28T12:17:10.158+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T12:17:10.158+00:00",
+    "lastConfirmed": "2026-07-28T12:17:10.158+00:00",
+    "createdAt": "2026-07-28T12:17:15.369+00:00"
+  },
+  {
+    "uuid": "4592956d-894a-4800-bc17-1d4e1fe14458",
+    "path": "decisions/queue-management-pg-boss-over-redis",
+    "projectId": "prj_4cd677d19c844a6a8c93ea50ef0de5fd",
+    "schemaVersion": 1,
+    "type": "decision",
+    "status": "active",
+    "confidence": "high",
+    "title": "Decision to Use pg-boss in Postgres for Compile Queue Instead of Redis",
+    "tags": [
+      "decision",
+      "pg-boss",
+      "postgres",
+      "redis",
+      "compile-queue",
+      "queue-management",
+      "deployment",
+      "architecture"
+    ],
+    "body": "### Decision: Use pg-boss with Postgres for Compile Queue\n\nThe team decided to run the compile queue using pg-boss inside Postgres. This was chosen over using a separate Redis instance to keep the self-hosted deployment at only three containers. \n\n### Rationale:\n- **Container Efficiency:** By using pg-boss with Postgres, we avoid introducing a separate Redis container, maintaining a more efficient and simpler deployment structure with only three containers.\n- **Resource Utilization:** Leveraging the existing Postgres instance reduces overhead and simplifies the stack.\n- **Trade-offs:** While Redis may offer high-speed capabilities, the decision favors simplicity and reduced operational complexity over potentially higher throughput. The chosen solution entails queue polling writes to the same Postgres database that handles concept reads, meaning queue churn and query traffic will share a connection pool and the Write Ahead Log (WAL). Despite this, the team judged the trade-off acceptable for the expected scale of a self-hosted team and plans to revisit the decision if any design partner encounters contention.\n\nFor further details, refer to the discussion in PR #107.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "pr",
+        "ref": "https://github.com/teamem-ai/teamem-server/pull/107",
+        "repo": null,
+        "commitSha": null,
+        "path": null,
+        "at": "2026-07-28T02:00:00+00:00"
+      },
+      {
+        "kind": "commit",
+        "ref": "https://github.com/teamem-ai/teamem-server/commit/4f3a91c27b6d8e50a1c4f9b2e7d3a6c8b0f5e214",
+        "repo": null,
+        "commitSha": null,
+        "path": null,
+        "at": "2026-07-28T02:00:00+00:00"
+      }
+    ],
+    "contributors": [
+      {
+        "principalId": "pri_d8676e2602004bd38c510a5dd6987393",
+        "kind": "human",
+        "provider": "github",
+        "displayLogin": "dli"
+      }
+    ],
+    "firstSeen": "2026-07-28T02:00:00+00:00",
+    "lastConfirmed": "2026-07-28T03:59:51.553+00:00",
+    "createdAt": "2026-07-28T03:58:50.171+00:00"
+  },
+  {
+    "uuid": "4f0a7a43-a238-4228-86c0-ec260a1adbf0",
+    "path": "decisions/use-pg-boss-for-compile-queue",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "decision",
+    "status": "disputed",
+    "confidence": "high",
+    "title": "Decision on Compile Queue: Redis vs. Postgres with pg-boss",
+    "tags": [
+      "postgres",
+      "pg-boss",
+      "queue",
+      "self-hosting",
+      "operational-decision",
+      "decision",
+      "redis",
+      "performance"
+    ],
+    "body": "## Decision on Compile Queue: Redis vs. Postgres with pg-boss\n\n### Initial Decision: Usage of pg-boss on Postgres  \nThe compile queue for the project is implemented using `pg-boss`, which resides inside Postgres. This decision was made to simplify the operational setup for teams that self-host the product. By using `pg-boss`, there is no need to run and back up an additional stateful service like Redis, reducing the complexity and potential misconfigurations during quick 30-minute self-hosting trials. The choice is operationally driven rather than being a technical preference. The decision explicitly discourages the introduction of Redis or Valkey for queueing, caching, or rate limiting unless this trade-off is reconsidered.\n\n### Updated Decision: Migration to Redis\nThe team has decided to migrate the compile queue from Postgres, where it is currently managed using pg-boss, to Redis. This decision was made because running the queue inside Postgres has led to contention issues. Specifically, job polling results in write operations that compete with concept read queries for the same connection pool and WAL (Write-Ahead Logging). These contentions have required the team to manage additional configurations like `expireInSeconds` and retention windows. In contrast, moving to Redis would enable the use of blocking pops, eliminating the need for polling and reducing queue churn impacts on the WAL. Moreover, Redis is already a common component in our intended operator environments, making its introduction as a required service more feasible. The team recommends porting the compile queue to Redis ahead of expanding with more connectors.\n\n### Rationale for Conflict\nThe initial decision to use pg-boss on Postgres was based on reducing operational complexity and avoiding additional stateful services. However, the new decision highlights performance issues and opportunities for optimization by switching to Redis, challenging the initial preference for operational simplicity. Both decisions have their merits: operational simplicity for self-hosting versus performance improvements and architectural alignment with Redis.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/queue-on-postgres.md",
+        "at": "2026-07-28T05:13:28.386+00:00"
+      },
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/proposals/move-queue-to-redis.md",
+        "at": "2026-07-28T05:15:08.501+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:13:28.386+00:00",
+    "lastConfirmed": "2026-07-28T05:13:28.386+00:00",
+    "createdAt": "2026-07-28T05:13:35.823+00:00"
+  },
+  {
+    "uuid": "70de6dde-2ab5-4917-97c2-2013ab91cf95",
+    "path": "decisions/use-pg-boss-on-postgres",
+    "projectId": "prj_dc4de2574cdd4293aa0225622a0ed89e",
+    "schemaVersion": 1,
+    "type": "decision",
+    "status": "disputed",
+    "confidence": "high",
+    "title": "Decision: Queue Technology Choice for Compile Queue (Postgres vs. Redis)",
+    "tags": [
+      "queue",
+      "postgres",
+      "pg-boss",
+      "decision",
+      "operational-tradeoff",
+      "redis",
+      "migration",
+      "performance"
+    ],
+    "body": "### Decision: Queue Technology Choice for Compile Queue (Postgres vs. Redis)\n\n#### Position 1: Use pg-boss on Postgres\nThe compile queue is implemented with pg-boss running inside Postgres rather than Redis. This choice is operational rather than based on a technical preference. The rationale is that for a self-hosted team evaluating the product, having one fewer stateful service to run and back up simplifies the deployment process. This simplicity reduces the risk of misconfiguration during a 30-minute self-hosting trial, which is a key milestone the team's efforts are measured against. As a consequence, Redis or Valkey should not be introduced for queueing, caching, or rate limiting without revisiting these trade-offs explicitly.\n\n#### Position 2: Move compile queue from Postgres to Redis\nThe team decided to migrate the compile queue from running inside Postgres using pg-boss to Redis. The rationale for this decision includes several reasons:\n\n- **Load Handling**: Running the compile queue inside Postgres results in contention on the connection pool and the Write-Ahead Logging (WAL), impacting both queue traffic and concept reads.\n- **Resource Optimization**: Redis can handle blocking pops, avoiding the need for continuous polling, which reduces the load on the primary datastore.\n- **Operational Consistency**: Every operator we would sell to already runs Redis, making it a familiar service.\n\n#### Trade-offs\n- **Simplicity vs. Performance**: Initially, using Postgres for the queue was considered simpler due to fewer services, but under load, this simplicity causes significant contention and performance issues.\n\n### Recommendation\n- Position 1: Maintain the use of Postgres to ensure simpler self-hosted trials.\n- Position 2: Introduce Redis as a required service and port the compile queue to it before scaling with more connectors.\n\nThe conflicting positions reflect differing priorities between deployment simplicity and system performance under load.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/queue-on-postgres.md",
+        "at": "2026-07-28T03:05:11.077+00:00"
+      },
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/proposals/move-queue-to-redis.md",
+        "at": "2026-07-28T03:06:41.188+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T03:05:11.077+00:00",
+    "lastConfirmed": "2026-07-28T03:05:11.077+00:00",
+    "createdAt": "2026-07-28T03:05:42.44+00:00"
+  },
+  {
+    "uuid": "51a79790-06ba-4b84-84bc-79c9b4c512eb",
+    "path": "decisions/use-postgresql-pgvector",
+    "projectId": "prj_a81296d463494175bf1a6d1398fa7961",
+    "schemaVersion": 1,
+    "type": "decision",
+    "status": "active",
+    "confidence": "high",
+    "title": "Use PostgreSQL with pgvector as the Primary Database",
+    "tags": [
+      "postgresql",
+      "pgvector",
+      "datastore",
+      "transactional-consistency",
+      "job-queue"
+    ],
+    "body": "## Decision: Use PostgreSQL with pgvector as the Primary Database\n\n### Context\n\nWe needed a primary datastore that supports:\n- Transactional semantics for event ingestion and idempotency enforcement\n- Vector similarity search for concept retrieval (F2 merge candidates)\n- Job queue semantics for the compilation pipeline\n- Strong consistency guarantees\n\n### Decision\n\nWe chose PostgreSQL with the pgvector extension as our single database,\nexplicitly rejecting a multi-database architecture.\n\n### Rationale\n\n1. **Single operational dependency.** PostgreSQL + pgvector handles\n   relational data, vector search, and (via pg-boss) job queuing in\n   one system. This eliminates Redis/Valkey, Qdrant, and Milvus as\n   separate stateful services, dramatically simplifying self-hosted\n   deployments.\n\n2. **Transactional consistency across domains.** Event ingestion,\n   idempotency checks, and compilation job creation happen in a single\n   Postgres transaction. With separate databases we would need\n   distributed transactions or outbox patterns.\n\n3. **Team operational experience.** The team already runs Postgres in\n   production. Adding pgvector is a simple extension, not a new\n   infrastructure skill.\n\n4. **pg-boss provides exactly-once job delivery** on top of Postgres\n   SKIP LOCKED, removing the need for a Redis-backed queue.\n\n### Alternatives Considered\n\n- **Redis/Valkey + Postgres (no pgvector).** Would require a separate\n  vector database (Qdrant, Milvus), three stateful services total.\n  Rejected due to operational complexity for self-hosted users.\n\n- **Postgres + separate vector DB (Qdrant).** Two databases, no\n  cross-domain transactions. Embedding and relational data could\n  drift independently.\n\n- **SQLite + pgvector.** Suitable for single-process workloads but\n  not for multi-process server deployments where the worker, API,\n  and MCP endpoints each need concurrent access.\n\n### Consequences\n\n- The default deployment is two containers (postgres + server/worker\n  all-in-one) instead of four or five.\n- Embedding dimension is fixed at 1536 (OpenAI text-embedding-3-small).\n- Semantic search gracefully degrades to full-text search when\n  embedding is unavailable — never pretends vector search succeeded.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+        "path": "docs/decisions/001-use-postgres-pgvector.md",
+        "at": "2026-07-28T04:01:49.946+00:00"
+      }
+    ],
+    "contributors": [
+      {
+        "principalId": "pri_a0a2ab9dd03942e589f45cca01207254",
+        "kind": "service",
+        "provider": "external",
+        "displayLogin": "why-demo-service"
+      }
+    ],
+    "firstSeen": "2026-07-28T04:01:49.946+00:00",
+    "lastConfirmed": "2026-07-28T04:01:49.946+00:00",
+    "createdAt": "2026-07-28T04:01:55.816+00:00"
+  },
+  {
+    "uuid": "13ee5d2e-6bfe-4406-ae91-153c4c0ea148",
+    "path": "decisions/use-postgresql-pgvector",
+    "projectId": "prj_dda2e3e3445c4c208892e000fb69673a",
+    "schemaVersion": 1,
+    "type": "decision",
+    "status": "active",
+    "confidence": "high",
+    "title": "Use PostgreSQL with pgvector and pg-boss for Queue Management as the Primary Database",
+    "tags": [
+      "postgresql",
+      "pgvector",
+      "decision",
+      "database",
+      "storage",
+      "postgres",
+      "pg-boss",
+      "redis",
+      "queue",
+      "deployment"
+    ],
+    "body": "## Decision: Use PostgreSQL with pgvector and pg-boss for Queue Management as the Primary Database\n\n### Context\nWe needed a primary datastore that supports:\n- Transactional semantics for event ingestion and idempotency enforcement\n- Vector similarity search for concept retrieval (F2 merge candidates)\n- Job queue semantics for the compilation pipeline\n- Strong consistency guarantees\n\n### Decision\nWe chose PostgreSQL with the pgvector extension as our single database, explicitly rejecting a multi-database architecture. Additionally, pg-boss is used for managing the compile queue directly within Postgres, thereby eliminating the need for a separate Redis instance.\n\n### Rationale\n\n1. **Single operational dependency.** PostgreSQL + pgvector handles relational data, vector search, and (via pg-boss) job queuing in one system, which eliminates the need for Redis/Valkey, Qdrant, and Milvus as separate stateful services, dramatically simplifying self-hosted deployments.\n\n2. **Transactional consistency across domains.** Event ingestion, idempotency checks, and compilation job creation happen in a single Postgres transaction. With separate databases, distributed transactions or outbox patterns would be necessary.\n\n3. **Team operational experience.** The team already runs Postgres in production. Adding pgvector is a simple extension and does not require new infrastructure skills.\n\n4. **pg-boss provides exactly-once job delivery** on top of Postgres SKIP LOCKED, eliminating the need for a Redis-backed queue. Using pg-boss also avoids the burden of running and maintaining Redis just for the compile loop when pg-boss can utilize the existing Postgres setup. This keeps the default deployment simpler by reducing the number of required stateful services. The team decided to run the compile queue on pg-boss inside Postgres instead of introducing Redis. This decision keeps the self-hosted deployment to three containers by reusing the Postgres database already required for the system.\n\n### Alternatives Considered\n- **Redis/Valkey + Postgres (no pgvector).** Would require a separate vector database (Qdrant, Milvus), totaling three stateful services, and was rejected due to operational complexity for self-hosted users.\n\n- **Postgres + separate vector DB (Qdrant).** Would involve two databases with no cross-domain transactions, which could lead to independent drift between embedding and relational data.\n\n- **SQLite + pgvector.** Suitable for single-process workloads but not for multi-process server deployments where concurrent access by the worker, API, and MCP endpoints is needed.\n\n### Consequences\n- The default deployment is two containers (postgres + server/worker all-in-one) instead of four or five.\n- Embedding dimension is fixed at 1536 (OpenAI text-embedding-3-small).\n- Semantic search gracefully degrades to full-text search when embedding is unavailable, never pretending that vector search succeeded.\n- The compile queue in the default deployment now requires only three containers, enhancing ease of self-hosting, sharing the connection pool, and Write-Ahead Logging (WAL). This setup is considered acceptable at the self-hosted scale but might need revisiting for larger partner deployments.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "pr",
+        "ref": "https://github.com/teamem-ai/teamem-server/pull/107",
+        "repo": null,
+        "commitSha": null,
+        "path": null,
+        "at": "2026-07-28T02:00:00+00:00"
+      },
+      {
+        "kind": "commit",
+        "ref": "https://github.com/teamem-ai/teamem-server/commit/4f3a91c27b6d8e50a1c4f9b2e7d3a6c8b0f5e214",
+        "repo": null,
+        "commitSha": null,
+        "path": null,
+        "at": "2026-07-28T02:00:00+00:00"
+      },
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+        "path": "docs/decisions/001-use-postgres-pgvector.md",
+        "at": "2026-07-28T04:02:17.218+00:00"
+      }
+    ],
+    "contributors": [
+      {
+        "principalId": "pri_bcd9a86463a14104beced114bf645ad5",
+        "kind": "service",
+        "provider": "external",
+        "displayLogin": "why-demo-service"
+      },
+      {
+        "principalId": "pri_ac57a5e07cd94af0aec6b08819cb7422",
+        "kind": "human",
+        "provider": "github",
+        "displayLogin": "why-moment-demo"
+      }
+    ],
+    "firstSeen": "2026-07-28T04:02:17.218+00:00",
+    "lastConfirmed": "2026-07-28T04:03:20.624+00:00",
+    "createdAt": "2026-07-28T04:02:22.374+00:00"
+  },
+  {
+    "uuid": "65c3b723-b1be-4995-918b-991ec3f34aab",
+    "path": "gotchas/api-key-plaintext",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "high",
+    "title": "API Key Plaintext Availability Policy",
+    "tags": [
+      "api-key",
+      "security",
+      "bootstrap"
+    ],
+    "body": "When using the bootstrap process, the plaintext of an API key is shown exactly once, at creation or key rotation. After that, only its SHA-256 hash is stored, and the plaintext never logs, stores, or includes in error messages. If you lose the token, reuse and re-reading from the database will not recover it — you must use the `--rotate` flag to generate a new key.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/api-key-plaintext-once.md",
+        "at": "2026-07-28T05:13:28.386+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:13:28.386+00:00",
+    "lastConfirmed": "2026-07-28T05:13:28.386+00:00",
+    "createdAt": "2026-07-28T05:13:49.517+00:00"
+  },
+  {
+    "uuid": "e4872ce7-148c-4276-8f0c-b3c5fc681110",
+    "path": "gotchas/api-key-plaintext-visibility",
+    "projectId": "prj_dc4de2574cdd4293aa0225622a0ed89e",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "high",
+    "title": "API Key Plaintext Visibility and Management",
+    "tags": [
+      "security",
+      "api-key",
+      "bootstrap",
+      "token"
+    ],
+    "body": "When an API key is created or rotated using the bootstrap process, the plaintext of the key is displayed exactly once on stdout. It is not logged or stored anywhere, so if lost, it cannot be recovered from logs or databases. This behavior is by design to enhance security. \n\nIf the API key is lost, you should not attempt to retrieve it. Instead, use the `--rotate` flag to revoke the old key and create a new one. The system ensures that once the key's SHA-256 hash is stored, the original key cannot be accessed again.\n\nRe-running the bootstrap with the same team and project name is idempotent and will report \"reused\" for existing resources without providing the plaintext key again. This emphasizes the importance of securely storing the API key upon initial creation or whenever it is rotated.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/api-key-plaintext-once.md",
+        "at": "2026-07-28T03:05:11.077+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T03:05:11.077+00:00",
+    "lastConfirmed": "2026-07-28T03:05:11.077+00:00",
+    "createdAt": "2026-07-28T03:05:54.321+00:00"
+  },
+  {
+    "uuid": "f8150ab0-3b45-4980-8354-60a879bac707",
+    "path": "gotchas/api-rate-limiting",
+    "projectId": "prj_df7f33c14c1e46358e926867d1212107",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Redis token bucket for API rate limiting",
+    "tags": [
+      "api",
+      "rate-limiting",
+      "redis",
+      "deployment",
+      "limit"
+    ],
+    "body": "### Redis token bucket for API rate limiting\n\nWe use a Redis token bucket to limit our public API to 100 requests per minute per API key. A pitfall we encountered with our initial implementation was that the in-process limiter reset its counters on every deploy. This allowed for a burst of requests immediately after a rollout, effectively bypassing the rate limit.\n\nThe consequence of this behavior is that the rate limiting mechanism becomes unreliable during deployments, potentially allowing excessive API usage that could lead to performance issues or service disruptions.\n\nTo mitigate this issue, implement rate limiting using a Redis token bucket that maintains state across deployments.\n",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "demorepo",
+        "commitSha": "f5c829351f92f45189e153653410ab38dcc0b871",
+        "path": "docs/rate-limiting.md",
+        "at": "2026-07-28T04:22:16.393+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:22:16.393+00:00",
+    "lastConfirmed": "2026-07-28T04:22:16.393+00:00",
+    "createdAt": "2026-07-28T04:22:21.295+00:00"
+  },
+  {
+    "uuid": "6ced398e-c8d5-402e-b2ae-6d3c2991c4b0",
+    "path": "gotchas/compose-does-not-migrate",
+    "projectId": "prj_dc4de2574cdd4293aa0225622a0ed89e",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "high",
+    "title": "Docker Compose does not run database migrations",
+    "tags": [
+      "docker",
+      "compose",
+      "migrations",
+      "drizzle-kit",
+      "database",
+      "gotcha",
+      "docker-compose",
+      "migration",
+      "setup"
+    ],
+    "body": "When using `docker compose up`, the database migrations are not automatically executed. This can lead to a fresh `pgdata` volume starting with zero tables and subsequent commands failing with a misleading error that appears to be a code bug:\n\n```\nbootstrap failed: Failed query: select \"id\" from \"teams\" where ...\n```\n\nThe Docker Compose file does not invoke the migration tool at startup, and neither the server nor the worker container automatically runs it. This behavior can manifest as your next command failing due to querying a non-existent table, making it appear like an application bug rather than a skipped setup step.\n\nThe migrations must be run from the host system instead of inside a container because `drizzle.config.ts` and `apps/server/drizzle/` are intentionally not included in the runtime image. To proceed with the migration, use the loopback port that is already published by the compose file:\n\n```\npnpm install --frozen-lockfile\nDATABASE_URL=postgres://teamem:PASSWORD@127.0.0.1:5432/teamem \\\n  pnpm --filter @teamem/server db:migrate\n```\n\nThis process should create twelve tables. The script `scripts/m0-compose-smoke.sh` performs the same migration step, which is why CI systems haven't detected the missing step in the documented runbook.\n\nTo resolve this if it occurs, you need to:\n- Start the containers.\n- Manually run the database migration from your workstation against the published loopback port.\n- Bootstrap the system.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/compose-does-not-migrate.md",
+        "at": "2026-07-28T03:05:11.077+00:00"
+      },
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/knowledge/fresh-volume-checklist.md",
+        "at": "2026-07-28T03:06:41.188+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T03:05:11.077+00:00",
+    "lastConfirmed": "2026-07-28T03:05:11.077+00:00",
+    "createdAt": "2026-07-28T03:05:24.301+00:00"
+  },
+  {
+    "uuid": "1b8ee59d-ae67-40bb-9694-f3ed460ff38c",
+    "path": "gotchas/exponential-backoff-retry-errors",
+    "projectId": "prj_df7f33c14c1e46358e926867d1212107",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Exponential Backoff Retry: Catches All Errors Including Non-retryable Ones",
+    "tags": [
+      "retry",
+      "backoff",
+      "error-handling",
+      "functions"
+    ],
+    "body": "The `withRetry` utility function implements a retry mechanism with exponential backoff for a given async function. However, it contains an important pitfall: **it catches all errors, including those that are non-retryable.** This means the function should only be used for idempotent operations where retries are safe.\n\n### Consequences\n- **Non-retryable errors** will also be caught and retried, which may lead to unintended behavior if the function is not idempotent.\n\n### Workaround\n- **Ensure** that any function passed to `withRetry` is idempotent or that retrying it won't cause negative side effects.\n",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "45fbe4244007ca73b96f480c8558b49054d3140f",
+        "path": "src/utils/retry.ts",
+        "at": "2026-07-28T04:23:09.432+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:23:09.432+00:00",
+    "lastConfirmed": "2026-07-28T04:23:09.432+00:00",
+    "createdAt": "2026-07-28T04:23:30.903+00:00"
+  },
+  {
+    "uuid": "b406bc5d-ef61-4526-b1fb-f9beda2a60df",
+    "path": "gotchas/in-process-rate-limiter-reset",
+    "projectId": "prj_4b3131db7b054582a4891dd7c43ebea4",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "medium",
+    "title": "In-process API rate limiter resets on deploy",
+    "tags": [
+      "rate-limiting",
+      "api",
+      "redis",
+      "deployment",
+      "burst"
+    ],
+    "body": "When using an in-process API rate limiter, be aware that it resets its counters on every deploy. This can lead to a burst of requests immediately after a rollout, effectively bypassing the rate limiting constraints. To avoid this pitfall, we implemented a Redis token bucket to persist the counters across deploys.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "demorepo",
+        "commitSha": "f5c829351f92f45189e153653410ab38dcc0b871",
+        "path": "docs/rate-limiting.md",
+        "at": "2026-07-28T04:56:52.948+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:56:52.948+00:00",
+    "lastConfirmed": "2026-07-28T04:56:52.948+00:00",
+    "createdAt": "2026-07-28T04:57:00.148+00:00"
+  },
+  {
+    "uuid": "446583b9-8f4e-43af-8796-f4a26a4723cc",
+    "path": "gotchas/migration-requires-pgvector",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "high",
+    "title": "pgvector extension missing causes migration failure",
+    "tags": [
+      "postgres",
+      "pgvector",
+      "migrations",
+      "gotcha",
+      "hnsw-indexing"
+    ],
+    "body": "When running migrations on a fresh volume, pay attention to the pgvector extension requirement. If the pgvector extension is not present, the migration will fail on the concepts table. This is because:\n\n- The `docker/initdb` script mounts into the PostgreSQL container and enables the pgvector extension **only** on the first boot of a volume. Existing volumes will not re-run this script.\n- Drizzle migrations attempt to create the extension using `CREATE EXTENSION IF NOT EXISTS vector`, which works for pre-existing volumes.\n\nIf the migration is targeting a PostgreSQL instance set up differently — such as a managed instance or a manually started container without the `initdb` script — ensure the pgvector extension is installed before running migrations. Failure to do so results in inability to create the embedding column and later retrieval operations falling back to full-text mode instead of HNSW indexing.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/knowledge/migration-requires-pgvector.md",
+        "at": "2026-07-28T05:15:08.501+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:15:08.501+00:00",
+    "lastConfirmed": "2026-07-28T05:15:08.501+00:00",
+    "createdAt": "2026-07-28T05:15:15.397+00:00"
+  },
+  {
+    "uuid": "57156e0b-eee5-4e6e-aeee-d300718b76b0",
+    "path": "gotchas/pg-connection-leaks",
+    "projectId": "prj_df7f33c14c1e46358e926867d1212107",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Ensure pool.end() is called during graceful shutdown to prevent connection leaks",
+    "tags": [
+      "postgres",
+      "connection-pool",
+      "shutdown",
+      "resource-management",
+      "leak-prevention"
+    ],
+    "body": "When using the `createPool` function to establish a PostgreSQL connection pool, it is crucial to always call `pool.end()` during graceful shutdown procedures. Failing to do so will result in connection leaks, which can degrade database performance and reliability over time. Additionally, the function configures numeric types to be parsed as numbers using `pgTypes.setTypeParser`, ensuring proper data handling.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "45fbe4244007ca73b96f480c8558b49054d3140f",
+        "path": "src/utils/db.ts",
+        "at": "2026-07-28T04:23:09.432+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:23:09.432+00:00",
+    "lastConfirmed": "2026-07-28T04:23:09.432+00:00",
+    "createdAt": "2026-07-28T04:23:26.482+00:00"
+  },
+  {
+    "uuid": "a237953d-9291-452b-af13-bfcd04ed5193",
+    "path": "gotchas/pgvector-extension-requirement",
+    "projectId": "prj_dc4de2574cdd4293aa0225622a0ed89e",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "high",
+    "title": "pgvector extension requirement for successful migration",
+    "tags": [
+      "pgvector",
+      "extension",
+      "migration",
+      "postgres"
+    ],
+    "body": "Running migrations against a fresh PostgreSQL volume requires the pgvector extension to be present, or the migration will fail on the concepts table. \n\n## Two Ways to Ensure pgvector Extension:\n\n1. **docker/initdb Setup**: When mounted into the postgres container, it enables the pgvector extension during the FIRST BOOT of a new volume only. Existing volumes won't trigger it again.\n2. **Drizzle Migrations**: These use `CREATE EXTENSION IF NOT EXISTS vector`, making it suitable for pre-existing volumes.\n\n### Important Consideration\n\nIf performing migrations on a PostgreSQL instance not configured as described — such as managed instances or manually started containers — verify the pgvector extension. Without it, the embedding column cannot be created, and the HNSW index isn't built. The consequence appears as retrieval operations silently defaulting to full-text mode instead of HNSW indexing later.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/knowledge/migration-requires-pgvector.md",
+        "at": "2026-07-28T03:06:41.188+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T03:06:41.188+00:00",
+    "lastConfirmed": "2026-07-28T03:06:41.188+00:00",
+    "createdAt": "2026-07-28T03:07:07.767+00:00"
+  },
+  {
+    "uuid": "b7660aac-4990-4e9a-bfde-8f854983c044",
+    "path": "gotchas/postgresql-pool-shutdown",
+    "projectId": "prj_fa1a7b61f26249e3bb0090f646fc9835",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "medium",
+    "title": "PostgreSQL Connection Pool Shutdown Must Call pool.end() to Prevent Leaks",
+    "tags": [
+      "postgresql",
+      "connection-pool",
+      "shutdown",
+      "resource-leak"
+    ],
+    "body": "When using the PostgreSQL connection pool, it is important to always call `pool.end()` during graceful shutdown to prevent connection leaks. Failing to do so can result in resource leakage that impacts application stability. This is crucial for maintaining a healthy database connection state, especially under load.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "b4d6da46d5a80a54261d81a10ae2b23508ba089c",
+        "path": "src/utils/db.ts",
+        "at": "2026-07-28T04:26:40.659+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:26:40.659+00:00",
+    "lastConfirmed": "2026-07-28T04:26:40.659+00:00",
+    "createdAt": "2026-07-28T04:27:15.44+00:00"
+  },
+  {
+    "uuid": "06cd0eef-416c-4aaf-bdf3-10a577fa7f42",
+    "path": "gotchas/provider-model-default-rot",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "high",
+    "title": "Pinned provider model defaults can rot silently",
+    "tags": [
+      "provider",
+      "model",
+      "defaults",
+      "rot",
+      "api"
+    ],
+    "body": "When using pinned provider model defaults, be aware that they can silently become obsolete over time. For instance, `DEFAULT_MODELS.claude` was previously set to `claude-3-5-sonnet-20241022`, which Anthropic has since retired. This led to every call returning a 404 error: `{\"type\":\"not_found_error\",\"message\":\"model: claude-3-5-sonnet-20241022\"}`.\n\nThis issue went unnoticed for months because an earlier schema-validation error (400) masked the 404. Two independent failures were happening on the same code path, and addressing only the visible error would have left the provider non-functional.\n\nTo avoid such pitfalls, when choosing a default model, always verify by checking `GET /v1/models` for a normal API account instead of relying on a model ID found in documentation. Remember, a default model ID has an expiry date and should not be treated as a constant.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/provider-model-defaults-rot.md",
+        "at": "2026-07-28T05:13:28.386+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:13:28.386+00:00",
+    "lastConfirmed": "2026-07-28T05:13:28.386+00:00",
+    "createdAt": "2026-07-28T05:13:40.713+00:00"
+  },
+  {
+    "uuid": "9db276b7-d7d8-4869-a0b6-9c5b910eeef8",
+    "path": "gotchas/provider-model-defaults-rot",
+    "projectId": "prj_dc4de2574cdd4293aa0225622a0ed89e",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "high",
+    "title": "Pinned Provider Model Defaults and Semantic Recall Gotchas",
+    "tags": [
+      "provider",
+      "model",
+      "defaults",
+      "failure",
+      "404",
+      "dependencies",
+      "configuration",
+      "fallback",
+      "embedding"
+    ],
+    "body": "### Pinned Provider Model Defaults and Semantic Recall Gotchas\n\nPinned provider model defaults can silently become outdated and cause failures when they expire or are retired by the provider. In the case of Anthropic's model `claude-3-5-sonnet-20241022`, it was retired and calls returned a '404 not_found_error'. This issue was masked by another failure (a schema-validation 400), which could lead to prolonged periods of invisibility. It reinforces the need to periodically check default model IDs using the API (`GET /v1/models`) rather than relying solely on the documentation, as defaults have expiration dates and can lead to hidden failures if not managed properly.\n\n### Additional Consideration: Provider Precedence Affects Semantic Recall\n\nWithin our system, provider precedence determines whether retrieval based on semantic embeddings is possible or if it defaults to full-text search.\n\n#### Important Details:\n\n- **Configuration Order:** Our configuration (`config/env.ts`) stipulates the order of providers as: Anthropic, OpenAI, OpenRouter, followed by a custom OpenAI-compatible endpoint.\n- **Fallback Behavior:** If a configuration contains keys for multiple providers, it resolves to the first (`llmProviders[0]`), pinning `recallMode` to full-text search only (`fts-only`) when Anthropic is first.\n- **Anthropic Limitation:** As Anthropic lacks public embedding APIs, `createEmbeddingClient()` returns `null` for Claude provider configurations, inadvertently falling back to full-text search.\n\nThis fallback mechanism is honest and logged, yet the trigger for this behavior can be easily overlooked.\n\n- **Constraint:** Currently, a single provider config must supply both the LLM and the embedding client, making the use of Claude for LLM decisions while embedding through another provider unachievable.\n\n### Consequence / Workaround:\n- Misconfigured .env files might lead to unintentional deployment of fallback mechanisms, adversely affecting semantic recall. Double-check provider configurations ensuring that embedding and LLM choices are expressible.\n\nEnsure configurations are reviewed if different functionalities are required from embedding and LLM clients.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/provider-model-defaults-rot.md",
+        "at": "2026-07-28T03:05:11.077+00:00"
+      },
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/embedding-provider-precedence.md",
+        "at": "2026-07-28T03:05:11.077+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T03:05:11.077+00:00",
+    "lastConfirmed": "2026-07-28T03:05:11.077+00:00",
+    "createdAt": "2026-07-28T03:05:37.524+00:00"
+  },
+  {
+    "uuid": "b6124ad2-72a1-40bd-8f12-9633db5f0a8f",
+    "path": "gotchas/retry-function-error-handling",
+    "projectId": "prj_fa1a7b61f26249e3bb0090f646fc9835",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Exponential backoff error handling warning",
+    "tags": [
+      "retry",
+      "exponential-backoff",
+      "error-handling",
+      "idempotency",
+      "gotcha"
+    ],
+    "body": "The `withRetry` utility function implements retry logic with exponential backoff for an async function. **WARNING**: This function catches all errors, including those that are non-retryable. It should only be used for idempotent operations or scenarios where retrying is safe.\n\n### Key Details:\n- **Parameters**:\n  - `fn`: The async function to be retried.\n  - `maxRetries`: Maximum number of retry attempts (default is 3).\n  - `baseMs`: Base delay in milliseconds, used to calculate exponential backoff (default is 100 ms).\n- **Retry Logic**:\n  - The retry mechanism catches all errors and retries up to `maxRetries` times.\n  - On each failure, it waits for a delay calculated as `baseMs * 2^attempt` before retrying.\n  - After all retry attempts are exhausted, it throws the last error encountered.\n\n### Consequences:\nIf you use this function for non-idempotent operations or where retries might cause issues, it could lead to unintended side effects, such as multiple transactions or states being altered incorrectly.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "b4d6da46d5a80a54261d81a10ae2b23508ba089c",
+        "path": "src/utils/retry.ts",
+        "at": "2026-07-28T04:26:40.659+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:26:40.659+00:00",
+    "lastConfirmed": "2026-07-28T04:26:40.659+00:00",
+    "createdAt": "2026-07-28T04:26:45.446+00:00"
+  },
+  {
+    "uuid": "71ed4cbd-dde0-41d4-9ab9-58f8f4b1f077",
+    "path": "gotchas/root-union-schema-rejection",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "high",
+    "title": "Root union schemas rejected by providers",
+    "tags": [
+      "schema",
+      "gotcha",
+      "provider-integration"
+    ],
+    "body": "When developing with structured-output schemas, it's critical to avoid using a root union schema directly. Both Anthropic and OpenAI providers reject schemas with a root-level union such as `oneOf`, `allOf`, or `anyOf` without explicit typing, leading to 400 errors. Specifically, Anthropic returns an error stating a \"Field required\" for `type`, and OpenAI expects a schema of `type: \"object\"`, making the union unacceptable as the root. Even without `strict` mode in OpenAI, the issue persists, contradicting previous assumptions. To fix this, any non-object root should be wrapped into a required \"result\" envelope prior to provider schema normalization, which preserves the model’s ability to interpret the schema with branch constraints as provider-native structured output.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/llm-root-union-schema.md",
+        "at": "2026-07-28T05:13:28.386+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:13:28.386+00:00",
+    "lastConfirmed": "2026-07-28T05:13:28.386+00:00",
+    "createdAt": "2026-07-28T05:14:07.831+00:00"
+  },
+  {
+    "uuid": "f5112aa9-dd91-48d3-9761-48de2f750b73",
+    "path": "gotchas/runtime-image-no-pnpm",
+    "projectId": "prj_dc4de2574cdd4293aa0225622a0ed89e",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "high",
+    "title": "Runtime image lacks pnpm, causing command failures",
+    "tags": [
+      "docker",
+      "runtime",
+      "pnpm",
+      "docker-compose",
+      "node"
+    ],
+    "body": "The runtime Docker image for the server, based on `node:22-alpine`, does not include `pnpm`, source files, or a workspace. This setup leads to command failures when trying to run `pnpm` within the runtime container using commands like:\n\n```bash\ndocker compose exec server pnpm --filter @teamem/server <script>\n```\n\nThese commands fail with the error: `exec: \"pnpm\": executable file not found in $PATH`. This is because `pnpm` and package scripts are not present in the runtime environment—they are a development convenience for the host-side environment.\n\n**Workaround:** To execute scripts inside the container, call the compiled entrypoint directly:\n\n```bash\ndocker compose exec server node apps/server/dist/index.js --bootstrap \\\n  --team-name \"...\" --project-name \"...\"\n```\n\n**Reasoning:** This decision is deliberate to avoid increasing the container's attack surface without any operational benefits by shipping a package manager and workspace in the runtime image.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/runtime-image-has-no-pnpm.md",
+        "at": "2026-07-28T03:05:11.077+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T03:05:11.077+00:00",
+    "lastConfirmed": "2026-07-28T03:05:11.077+00:00",
+    "createdAt": "2026-07-28T03:05:17.564+00:00"
+  },
+  {
+    "uuid": "509fc5d5-03f9-42eb-b4d9-cc28709510ae",
+    "path": "gotchas/runtime-image-no-pnpm",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Runtime Image Limitations: Package Managers and Migrations",
+    "tags": [
+      "docker",
+      "nodejs",
+      "container",
+      "compose",
+      "migration",
+      "gotcha",
+      "drizzle"
+    ],
+    "body": "### Gotcha: Runtime Image Limitations — Package Managers not Included\n\nThe runtime image for the server is built from a clean `node:22-alpine` Docker image and does not include `pnpm`, source files, or workspace setup. This means that any command attempting to use `pnpm` inside the container, such as:\n\n```\ndocker compose exec server pnpm --filter @teamem/server <script>\n```\n\nwould fail with the error: `exec: \"pnpm\": executable file not found in $PATH`.\n\nPackage scripts are designed to be used as a host-side convenience. Instead, when needing to run scripts inside the container, directly call the compiled entrypoint:\n\n```\ndocker compose exec server node apps/server/dist/index.js --bootstrap \\\n  --team-name \"...\" --project-name \"...\"\n```\n\nShipping package managers and workspace configuration into the runtime image would unnecessarily increase the attack surface without providing operational benefits.\n\n### Gotcha: Docker Compose Does Not Run Database Migrations Automatically\n\nWhen using Docker Compose, a fresh `pgdata` volume comes up with zero tables, leading to a confusing error that resembles a code bug:\n\n```\nbootstrap failed: Failed query: select \"id\" from \"teams\" where ...\n```\n\nThe key issue is that nothing in `docker-compose.yml` automatically runs `drizzle-kit migrate`. This can lead to misleading errors if not addressed.\n\n#### Workaround\n\nMigrations must be executed from the host system, not from within a container. This is because `drizzle.config.ts` and related files are not included in the runtime image. You should use the loopback address published by the compose file to run the migrations:\n\n1. Install dependencies with a frozen lockfile:\n   ```\n   pnpm install --frozen-lockfile\n   ```\n   \n2. Execute migrations using the following command:\n   ```\n   DATABASE_URL=postgres://teamem:PASSWORD@127.0.0.1:5432/teamem pnpm --filter @teamem/server db:migrate\n   ```\n\nOnce completed, there should be twelve tables present. Note that the CI process, which uses `scripts/m0-compose-smoke.sh`, runs this migration step, therefore does not reveal this gotcha during CI runs.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/runtime-image-has-no-pnpm.md",
+        "at": "2026-07-28T05:13:28.386+00:00"
+      },
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/compose-does-not-migrate.md",
+        "at": "2026-07-28T05:13:28.386+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:13:28.386+00:00",
+    "lastConfirmed": "2026-07-28T05:13:28.386+00:00",
+    "createdAt": "2026-07-28T05:13:54.518+00:00"
+  },
+  {
+    "uuid": "35bf25f4-d06b-43a6-bf53-a05bba1eadc8",
+    "path": "gotchas/schema-root-union-type",
+    "projectId": "prj_dc4de2574cdd4293aa0225622a0ed89e",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "high",
+    "title": "Avoid using union types at schema root in structured output for provider compatibility",
+    "tags": [
+      "schema",
+      "provider",
+      "zod",
+      "json-schema"
+    ],
+    "body": "When creating structured-output schemas, ensure that they have a plain object at the root. Using a union type, such as `z.discriminatedUnion`, at the root can lead to compile failures from providers like Anthropic and OpenAI, which require a root type of \"object\".\n\n### Problem\n- **Providers Rejection:** Union types rendered as a bare root `oneOf` with no `type` key were rejected.\n  - **Anthropic:** Error for missing `type` key and unsupported `oneOf` at top level.\n  - **OpenAI:** Error for invalid schema; expected `type: \"object\"` but got `type: \"None\"`.\n\n- **Unsuccessful Workaround:** Removing strict mode did not solve the issue.\n- **Misleading Code Comment:** An outdated comment suggested omitting strict mode would work but it did not, contributing to the defect going unnoticed during review.\n\n### Solution\n- **Root Object Wrapping:** A centralized fix normalized non-object roots into a required \"result\" envelope to comply with provider requirements before Zod's re-validation.\n- **Visible Branch Constraint:** Wrapping (rather than flattening) was used so that branch constraints remained visible to models as structured output.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "0c6d27fa69d3f16791a1f2aa619968e79bd4c466",
+        "path": "docs/knowledge/llm-root-union-schema.md",
+        "at": "2026-07-28T03:05:11.077+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T03:05:11.077+00:00",
+    "lastConfirmed": "2026-07-28T03:05:11.077+00:00",
+    "createdAt": "2026-07-28T03:05:49.256+00:00"
+  },
+  {
+    "uuid": "711d3989-06b8-46d2-9856-d05c2ab8b57e",
+    "path": "gotchas/stripe-webhook-retries",
+    "projectId": "prj_3277fc7acdd6425aa928b83d73737e71",
+    "schemaVersion": 1,
+    "type": "gotcha",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Stripe webhook retries and the risk of double charges",
+    "tags": [
+      "stripe",
+      "idempotency",
+      "webhooks",
+      "retries",
+      "double-charge"
+    ],
+    "body": "Stripe webhooks may retry delivery for up to three days if not acknowledged, leading to potential duplicate processing of events. To avoid double charges, handlers must be designed to be idempotent by keying operations on the Stripe event ID. It's crucial to store a processed marker BEFORE executing any irreversible side effects, as once a duplicate charge is settled, it becomes unrecoverable.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "mcp_write",
+        "ref": "evt_53014880b618482c94dc28ac167acee9",
+        "repo": null,
+        "commitSha": null,
+        "path": null,
+        "at": "2026-07-28T12:19:43.225+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T12:19:43.225+00:00",
+    "lastConfirmed": "2026-07-28T12:19:43.225+00:00",
+    "createdAt": "2026-07-28T12:19:48.238+00:00"
+  },
+  {
+    "uuid": "222ff6ff-3660-4ac6-b42c-77e0b2fd0404",
+    "path": "runbooks/bringing-up-a-new-environment",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "runbook",
+    "status": "active",
+    "confidence": "high",
+    "title": "Checklist for bringing up a brand new environment",
+    "tags": [
+      "docker",
+      "environment",
+      "migration",
+      "setup"
+    ],
+    "body": "# Checklist for bringing up a brand new environment\n\nWhen setting up a new environment using Docker Compose, ensure all steps are followed to avoid application errors due to missing database schemas.\n\n### When to use:\nUse this checklist when you need to bring up a completely fresh environment from scratch.\n\n### Steps:\n1. **Bring the containers up:** Use Docker Compose to spin up the environment. This will give you three healthy containers and an empty database.\n2. **Run the migration tool:** Run the migration from your workstation against the published loopback port. Without this, the database will have no schema, and subsequent commands will fail on queries against non-existent tables.\n3. **Bootstrap the environment:** After running the migration, bootstrap your environment.\n\nThis process was confirmed on 2026-07-28 with an empty `pgdata` volume.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/knowledge/fresh-volume-checklist.md",
+        "at": "2026-07-28T05:15:08.501+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:15:08.501+00:00",
+    "lastConfirmed": "2026-07-28T05:15:08.501+00:00",
+    "createdAt": "2026-07-28T05:15:20.69+00:00"
+  },
+  {
+    "uuid": "440665ec-b756-4561-9b43-b8e0989da8db",
+    "path": "runbooks/compile-job-stuck-in-queued",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "runbook",
+    "status": "active",
+    "confidence": "high",
+    "title": "Runbook for resolving compile job stuck in 'queued' state",
+    "tags": [
+      "runbook",
+      "compile-job",
+      "queued-state",
+      "troubleshooting",
+      "steps"
+    ],
+    "body": "## Runbook: a compile job is stuck in queued\n\n### Symptom:\n\n`POST /v1/events` returns a `jobId`, but the job row never leaves `queued` and no concept page appears. A CLI caller polling for a terminal status eventually times out.\n\n### Steps, in order:\n\n1. **Check the worker actually has a consumer attached:**  \n   Run `docker compose logs worker`.  \n   Expect \"teamem worker ready — pg-boss compile queue consumer attached\".\n\n2. **Look for a malformed-message line in the same log:**  \n   If the worker logged that it rejected the delivery, the producer sent an incomplete payload; the worker returns without claiming, so the row stays queued forever.\n\n3. **Compare the pg-boss row against the application row:**  \n   Execute `select id, name, state, data from pgboss.job order by created_on desc;`.  \n   The `data` column must carry `jobId`, `teamId`, `projectId`, and `kind`. A payload of just `{\"jobId\": ...}` is the failure signature.\n\n4. **If the job did get claimed but failed immediately, read jobs.error:**  \n   A code of `no_events_found` means the ingest path created the job without writing the job_events rows that tell the worker what to compile.\n\n5. **Check the worker has an LLM provider at all:**  \n   Without one, it logs that compile jobs will be acknowledged but not processed.\n",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/runbooks/compile-job-stuck-in-queued.md",
+        "at": "2026-07-28T05:15:08.501+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:15:08.501+00:00",
+    "lastConfirmed": "2026-07-28T05:15:08.501+00:00",
+    "createdAt": "2026-07-28T05:15:44.609+00:00"
+  },
+  {
+    "uuid": "0d406c63-dff7-433b-8c9d-9d83cb36305b",
+    "path": "runbooks/compile-job-stuck-in-queued",
+    "projectId": "prj_dc4de2574cdd4293aa0225622a0ed89e",
+    "schemaVersion": 1,
+    "type": "runbook",
+    "status": "active",
+    "confidence": "high",
+    "title": "Compile job stuck in queued status",
+    "tags": [
+      "runbook",
+      "compile-job",
+      "queued-status",
+      "troubleshooting"
+    ],
+    "body": "## Runbook: Resolving a Stuck Compile Job in 'Queued' Status\n\n### Symptom\nWhen `POST /v1/events` returns a `jobId` but the job row persists in `queued` status, and no concept page appears, the CLI caller may eventually time out waiting for a terminal status.\n\n### Steps to Resolve\n\n1. **Verify Worker Consumer Attachment**\n   - Use `docker compose logs worker`.\n   - Confirm it logs \"teamem worker ready — pg-boss compile queue consumer attached\".\n\n2. **Check for Malformed Message**\n   - Look for any `malformed-message` lines in the worker logs.\n   - A rejected delivery indicates the producer sent an incomplete payload, leading to the job row remaining queued.\n\n3. **Compare Database Rows**\n   - Execute `select id, name, state, data from pgboss.job order by created_on desc;`.\n   - Ensure the `data` column contains `jobId`, `teamId`, `projectId`, and `kind`. A payload with just `{ \"jobId\": ...}` indicates a malformed entry.\n\n4. **Check Job Claim and Failure Content**\n   - Inspect `jobs.error`. Code `no_events_found` suggests the job was created without writing `job_events` rows necessary for processing.\n\n5. **Validate LLM Provider Attachment**\n   - Confirm the worker logs whether an LLM provider is connected since compile jobs may be acknowledged but not processed without it.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/runbooks/compile-job-stuck-in-queued.md",
+        "at": "2026-07-28T03:06:41.188+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T03:06:41.188+00:00",
+    "lastConfirmed": "2026-07-28T03:06:41.188+00:00",
+    "createdAt": "2026-07-28T03:06:55.967+00:00"
+  },
+  {
+    "uuid": "af2efc80-2e42-4399-bdfb-20962001a5a7",
+    "path": "runbooks/restore-postgres-from-backup",
+    "projectId": "prj_e4b3b4840c9d4f41bd17197c333ab998",
+    "schemaVersion": 1,
+    "type": "runbook",
+    "status": "active",
+    "confidence": "high",
+    "title": "Restore Postgres from Nightly Backup",
+    "tags": [
+      "postgres",
+      "backup",
+      "restore",
+      "runbook"
+    ],
+    "body": "# How to restore Postgres from a nightly backup\n\nUse this for a full-cluster restore into a fresh volume. It does not cover single-table recovery.\n\n1. Stop the server and worker containers so nothing writes during the restore.\n2. Provision a new pgdata volume and start only the postgres container.\n3. Enable the pgvector extension on the fresh volume before loading anything.\n4. Load the dump with `pg_restore --clean --if-exists` against the new volume.\n5. Run `drizzle-kit migrate` from a workstation to bring the schema forward to the current release.\n6. Start the server, confirm `/healthz`, then start the worker.\n7. Re-run the most recent compile job and confirm it reaches a terminal state.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "ec316e3aa1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "path": "docs/runbooks/restore-postgres-from-backup.md",
+        "at": "2026-07-28T12:33:51.993+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T12:33:51.993+00:00",
+    "lastConfirmed": "2026-07-28T12:33:51.993+00:00",
+    "createdAt": "2026-07-28T12:34:08.977+00:00"
+  },
+  {
+    "uuid": "96e11af3-ea80-450c-a7cf-1c6484c814bd",
+    "path": "runbooks/roll-back-a-deployment",
+    "projectId": "prj_e4b3b4840c9d4f41bd17197c333ab998",
+    "schemaVersion": 1,
+    "type": "runbook",
+    "status": "active",
+    "confidence": "high",
+    "title": "How to Roll Back a Production Deployment",
+    "tags": [
+      "rollback",
+      "deployment",
+      "pipeline",
+      "operational"
+    ],
+    "body": "This runbook provides step-by-step instructions for rolling back a production deployment. This should be used when a release has shipped and the error budget is compromised, necessitating a reversal rather than an immediate fix. \n\nSteps:\n1. Identify the last known-good commit SHA from the release log.\n2. Trigger the rollback pipeline using that commit SHA as the input parameter.\n3. Monitor and wait for the pipeline to replace all replicas.\n4. Verify that the p95 latency and error-rate panels have returned to their baseline levels.\n5. Notify the on-call channel about the SHA rolled back to along with the reason.\n6. Open a follow-up issue to ensure that the problematic change is addressed and doesn't re-occur in the same form.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "ec316e3aa1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "path": "docs/runbooks/roll-back-a-deployment.md",
+        "at": "2026-07-28T12:33:51.993+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T12:33:51.993+00:00",
+    "lastConfirmed": "2026-07-28T12:33:51.993+00:00",
+    "createdAt": "2026-07-28T12:34:02.951+00:00"
+  },
+  {
+    "uuid": "f91917d7-16dd-4f10-8222-5b3cd3e04d95",
+    "path": "runbooks/rotate-database-credentials",
+    "projectId": "prj_e4b3b4840c9d4f41bd17197c333ab998",
+    "schemaVersion": 1,
+    "type": "runbook",
+    "status": "active",
+    "confidence": "high",
+    "title": "Runbook for rotating production database credentials",
+    "tags": [
+      "database",
+      "credentials",
+      "rotation",
+      "vault",
+      "deployments",
+      "ops-log"
+    ],
+    "body": "# How to rotate the production database credentials\n\nRun this on the first Monday of each quarter, and immediately after any suspected credential exposure.\n\n1. Generate a new credential pair in Vault under `db/teamem/prod` and note the lease id.\n2. Add the new credential to the deploy secret store as `DATABASE_URL_NEXT`; do not remove the current one yet.\n3. Roll the worker deployment first: set `DATABASE_URL=$DATABASE_URL_NEXT` and wait for all replicas to report healthy.\n4. Roll the server deployment the same way.\n5. Watch the connection-error rate for ten minutes. If it rises above the baseline, roll both deployments back to the previous secret and stop.\n6. Revoke the old Vault lease.\n7. Delete `DATABASE_URL_NEXT` and record the rotation date in the ops log.\n",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "ec316e3aa1b2c3d4e5f60718293a4b5c6d7e8f90",
+        "path": "docs/runbooks/rotate-database-credentials.md",
+        "at": "2026-07-28T12:33:51.993+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T12:33:51.993+00:00",
+    "lastConfirmed": "2026-07-28T12:33:51.993+00:00",
+    "createdAt": "2026-07-28T12:33:56.609+00:00"
+  },
+  {
+    "uuid": "f8390115-76c6-4d38-97d8-edc95301838f",
+    "path": "services/compile-worker",
+    "projectId": "prj_3a0aa93d3eee46a2ade46994f8039380",
+    "schemaVersion": 1,
+    "type": "service",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Compile Worker Service",
+    "tags": [
+      "service",
+      "pg-boss",
+      "worker",
+      "docker-compose",
+      "scaling"
+    ],
+    "body": "## Compile Worker\n\nThe compile worker is a service that acts as the pg-boss consumer responsible for turning ingested events into concept pages.\n\n### Architecture\n- **Image Sharing**: It shares the server image, but differs in its entrypoint by using `node apps/server/dist/worker.js`.\n\n### Responsibilities\n- **Claiming Jobs**: It claims a compile job atomically to ensure only one worker wins under contention.\n- **Event Resolution**: Resolves the job's events via `job_events`.\n- **Typed Extraction & Merge Decision**: Performs F1 typed extraction per event, recalls candidates for F2, applies the merge decision.\n- **Writing Concept Pages**: Writes the resulting concept page including its evidence and embedding.\n\n### Database and Scope\n- Holds its own database handle throughout its lifespan.\n- Inherits the initiating credential's scope from the queue message, bypassing unscoped queries.\n\n### Scaling\nYou can scale this service horizontally by using `docker-compose up -d --scale worker=3`. Setting `TEAMEM_ALL_IN_ONE=true` embeds a single worker inside the server process as an alternative configuration (two-container topology); do not run both configurations concurrently.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/services/compile-worker.md",
+        "at": "2026-07-28T05:15:08.501+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T05:15:08.501+00:00",
+    "lastConfirmed": "2026-07-28T05:15:08.501+00:00",
+    "createdAt": "2026-07-28T05:15:31.8+00:00"
+  },
+  {
+    "uuid": "b9026f90-771e-495e-833f-a9091f2e4c56",
+    "path": "services/compile-worker",
+    "projectId": "prj_dc4de2574cdd4293aa0225622a0ed89e",
+    "schemaVersion": 1,
+    "type": "service",
+    "status": "active",
+    "confidence": "high",
+    "title": "Compile Worker Service",
+    "tags": [
+      "compile-worker",
+      "pg-boss",
+      "worker-service",
+      "event-processing"
+    ],
+    "body": "The Compile Worker is a component of the teamem-server system that serves as a pg-boss consumer responsible for transforming ingested events into concept pages. It operates by sharing the server image and has a different entrypoint: running `node apps/server/dist/worker.js`. Key responsibilities include: atomically claiming compile jobs to prevent contention, resolving job events, executing F1 typed extraction per event, recalling candidates for F2, applying merge decisions, and finally, writing concept pages with their associated evidence and embeddings.\n\nThe Compile Worker maintains its own database handle throughout its lifecycle and relies on the scope of the initiating credential from the queue message, without performing unscoped queries. For scaling, it can be horizontally scaled using `docker compose up -d --scale worker=3`. Alternatively, setting `TEAMEM_ALL_IN_ONE=true` allows embedding a single worker inside the server process, forming a two-container topology, but it is advised not to operate both setups simultaneously.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/teamem-server",
+        "commitSha": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c",
+        "path": "docs/services/compile-worker.md",
+        "at": "2026-07-28T03:06:41.188+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T03:06:41.188+00:00",
+    "lastConfirmed": "2026-07-28T03:06:41.188+00:00",
+    "createdAt": "2026-07-28T03:07:20.057+00:00"
+  },
+  {
+    "uuid": "f8cc5e86-5580-44f4-a886-7bcf70cd0efc",
+    "path": "services/payments-service",
+    "projectId": "prj_4b3131db7b054582a4891dd7c43ebea4",
+    "schemaVersion": 1,
+    "type": "service",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Payments Service with Stripe Webhook Handling and Retry Pitfall",
+    "tags": [
+      "payments",
+      "stripe",
+      "billing",
+      "webhooks",
+      "reconciliation",
+      "webhook",
+      "idempotency",
+      "retries"
+    ],
+    "body": "The Payments service handles Stripe webhook delivery and reconciliation for the billing pipeline. This service plays a crucial role in managing billing operations by ensuring that webhook notifications from Stripe are appropriately received and processed within our system.\n\n### Stripe Webhook Retry Pitfall\nIt is crucial that Stripe webhook handlers are idempotent because Stripe retries a delivery for up to three days. To handle this effectively, we use the Stripe event ID as a key and store a processed marker before performing any side effects. This prevents duplicate charges, which are unrecoverable unless managed properly.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "demorepo",
+        "commitSha": "f5c829351f92f45189e153653410ab38dcc0b871",
+        "path": "README.md",
+        "at": "2026-07-28T04:56:52.948+00:00"
+      },
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "demorepo",
+        "commitSha": "f5c829351f92f45189e153653410ab38dcc0b871",
+        "path": "docs/retries.md",
+        "at": "2026-07-28T04:56:52.948+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:56:52.948+00:00",
+    "lastConfirmed": "2026-07-28T04:56:52.948+00:00",
+    "createdAt": "2026-07-28T04:56:55.99+00:00"
+  },
+  {
+    "uuid": "681519f9-e09f-4d43-a0b2-c5e1299796e0",
+    "path": "services/payments-service",
+    "projectId": "prj_df7f33c14c1e46358e926867d1212107",
+    "schemaVersion": 1,
+    "type": "service",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Payments Service and Stripe Webhook Idempotency",
+    "tags": [
+      "payments",
+      "stripe",
+      "webhooks",
+      "billing",
+      "webhook",
+      "idempotency",
+      "duplicate-charges",
+      "retries"
+    ],
+    "body": "### Payments Service and Stripe Webhook Idempotency\n\nThe Payments service handles Stripe webhook delivery and reconciliation for the billing pipeline. This service is crucial for ensuring that payment events are processed correctly and efficiently within our architecture.\n\nAn important aspect of processing Stripe webhooks is ensuring idempotency to avoid processing the same event multiple times, potentially leading to duplicate charges. Stripe retries a delivery for up to three days, which necessitates idempotent handlers.\n\nTo implement idempotency, key on the Stripe event ID and store a processed marker before performing any side effects. This approach guarantees that even if a webhook event is redelivered, it will not cause unintended duplicate transactions.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "demorepo",
+        "commitSha": "f5c829351f92f45189e153653410ab38dcc0b871",
+        "path": "README.md",
+        "at": "2026-07-28T04:22:16.393+00:00"
+      },
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "demorepo",
+        "commitSha": "f5c829351f92f45189e153653410ab38dcc0b871",
+        "path": "docs/retries.md",
+        "at": "2026-07-28T04:22:16.393+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:22:16.393+00:00",
+    "lastConfirmed": "2026-07-28T04:22:16.393+00:00",
+    "createdAt": "2026-07-28T04:22:24.119+00:00"
+  },
+  {
+    "uuid": "7b327fc6-a4ce-4ab4-9357-5566e7349c41",
+    "path": "services/task-service",
+    "projectId": "prj_fa1a7b61f26249e3bb0090f646fc9835",
+    "schemaVersion": 1,
+    "type": "service",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Task Service and Task Schema Definition in TypeScript",
+    "tags": [
+      "postgres",
+      "task-service",
+      "crud",
+      "transition",
+      "app-error",
+      "retry",
+      "typescript",
+      "schema",
+      "validation",
+      "task",
+      "zod",
+      "lifecycle"
+    ],
+    "body": "The Task Service is a class responsible for handling operations related to tasks in the application. It interacts with a Postgres database using a connection pool to perform CRUD operations for tasks.\n\n### Key Methods:\n- `create(task)`: Creates a new task in the database. It generates a unique ID and timestamps, and inserts the task record.\n- `transitionStatus(taskId, newStatus)`: Changes the status of a task if the transition is valid according to predefined rules (i.e., valid state transitions).\n- `findById(id)`: Retrieves a task by its ID.\n- `listByStatus(status)`: Lists tasks filtered by status and ordered by creation date.\n\n### Dependencies:\n- Postgres connection pool for database queries.\n- Utility functions and models are leveraged for error handling (`AppError`) and retry logic.\n\nThis service facilitates task management operations by providing structured methods that ensure valid status transitions and data integrity.\n\n## Task Schema Definition\nThis module defines a task modeling schema using TypeScript and the Zod library for validation. It includes concepts for task status and priority, along with constraints on valid status transitions.\n\n### TaskStatus and TaskPriority\nThese are enumerations that represent the statuses and priorities a task can have:\n- **TaskStatus** includes `TODO`, `IN_PROGRESS`, `REVIEW`, `DONE`, and `ARCHIVED`.\n- **TaskPriority** includes `LOW`, `MEDIUM`, `HIGH`, and `CRITICAL`.\n\n### TaskSchema\nDefines the properties of a Task object, using Zod for validation:\n- **id**: UUID string, optional.\n- **title**: String with minimum length 1 and maximum length 200.\n- **description**: Optional string up to 5000 characters.\n- **status** and **priority**: Enumerated types with default values `todo` and `medium`, respectively.\n- **assignedTo**, **createdAt**, **updatedAt**: Optional strings.\n\n### VALID_TRANSITIONS\nDefines valid transitions between task statuses to enforce lifecycle constraints that prevent backward movement of tasks. For example:\n- Tasks in `TODO` can transition to `IN_PROGRESS`.\n- Tasks `IN_PROGRESS` can move to `REVIEW`.\n- Tasks in `REVIEW` can move to `DONE` or back to `TODO` in case of rejection.\n\nThis concept captures how tasks are structured and validated for the project team.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "b4d6da46d5a80a54261d81a10ae2b23508ba089c",
+        "path": "src/services/task-service.ts",
+        "at": "2026-07-28T04:26:40.659+00:00"
+      },
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "b4d6da46d5a80a54261d81a10ae2b23508ba089c",
+        "path": "src/models/task.ts",
+        "at": "2026-07-28T04:26:40.659+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:26:40.659+00:00",
+    "lastConfirmed": "2026-07-28T04:26:40.659+00:00",
+    "createdAt": "2026-07-28T04:26:50.656+00:00"
+  },
+  {
+    "uuid": "c866b835-b27f-443f-b2c5-676f142c653c",
+    "path": "services/task-service",
+    "projectId": "prj_df7f33c14c1e46358e926867d1212107",
+    "schemaVersion": 1,
+    "type": "service",
+    "status": "active",
+    "confidence": "medium",
+    "title": "Task Service - Manages Task CRUD Operations",
+    "tags": [
+      "task",
+      "service",
+      "database",
+      "crud",
+      "postgres"
+    ],
+    "body": "The Task Service is a software component responsible for managing Create, Read, Update, and Delete (CRUD) operations on tasks within the system. This service handles interactions with the PostgreSQL database via the `pg` library Pool, providing methods to create tasks, transition task statuses, find tasks by ID, and list tasks by status. The service ensures data consistency and integrity by enforcing valid state transitions and retrying database operations to handle transient failures. Its methods include `create`, `transitionStatus`, `findById`, and `listByStatus`, each performing specific operations on the `tasks` table.",
+    "aliases": [],
+    "evidence": [
+      {
+        "kind": "repo_file",
+        "ref": null,
+        "repo": "teamem-ai/e2e-sample",
+        "commitSha": "45fbe4244007ca73b96f480c8558b49054d3140f",
+        "path": "src/services/task-service.ts",
+        "at": "2026-07-28T04:23:09.432+00:00"
+      }
+    ],
+    "contributors": [],
+    "firstSeen": "2026-07-28T04:23:09.432+00:00",
+    "lastConfirmed": "2026-07-28T04:23:09.432+00:00",
+    "createdAt": "2026-07-28T04:23:15.089+00:00"
+  }
+]

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ingestion · Settings · teamem</title>
+<link rel="stylesheet" href="assets/main.css">
+<script src="assets/mock.js"></script>
+<style>
+  .deliv{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:7px 0;border-bottom:1px solid var(--border)}
+  .deliv:last-child{border-bottom:0}
+  .deliv .mono{font-size:11.5px}
+</style>
+</head>
+<body data-state="default">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="logo" viewBox="0 0 32 32"><rect fill="var(--accent)" x="1.5" y="1.5" width="29" height="29" rx="7.5"/><path d="M9 11h14M9 16h10.5M9 21h12.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></g></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></g></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></g></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></g></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></g></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M18 6 6 18M6 6l12 12"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></g></symbol>
+<symbol id="i-term" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m4 17 6-6-6-6M12 19h8"/></symbol>
+<symbol id="i-ext" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6M10 14 21 3"/></g></symbol>
+<symbol id="i-gh" viewBox="0 0 24 24"><path fill="currentColor" d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.17-.02-2.12-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 5.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.76.11 3.05.74.81 1.18 1.83 1.18 3.09 0 4.42-2.7 5.39-5.26 5.68.41.35.77 1.05.77 2.12 0 1.53-.01 2.76-.01 3.14 0 .31.21.68.8.56A10.52 10.52 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z"/></symbol>
+</defs></svg>
+<div class="mockbar">
+  <span class="mock-tag">PREVIEW</span>
+  <a class="mock-link" href="index.html">← 总览</a>
+  <span class="mock-label">State</span>
+  <button class="mock-pill on" data-set="default">默认</button>
+  <span class="mock-spacer"></span>
+  <button class="mock-pill" data-theme-btn="light">Light</button>
+  <button class="mock-pill" data-theme-btn="dark">Dark</button>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-brand"><svg class="logo-mark"><use href="#logo"/></svg>teamem</div>
+    <nav class="side-scroll">
+      <div class="side-sec">Knowledge</div>
+      <a class="side-item" href="knowledge.html"><svg class="ic"><use href="#i-book"/></svg>Knowledge</a>
+      <a class="side-item" href="context-preview.html"><svg class="ic"><use href="#i-sparkle"/></svg>Context preview</a>
+      <div class="side-sec">Activity</div>
+      <a class="side-item" href="events.html"><svg class="ic"><use href="#i-act"/></svg>Events</a>
+      <a class="side-item" href="jobs.html"><svg class="ic"><use href="#i-cpu"/></svg>Jobs</a>
+      <div class="side-sec">Team</div>
+      <a class="side-item" href="members.html"><svg class="ic"><use href="#i-users"/></svg>Members</a>
+      <a class="side-item" href="audit.html"><svg class="ic"><use href="#i-shield"/></svg>Audit</a>
+      <a class="side-item" href="soon.html"><svg class="ic"><use href="#i-mail"/></svg>Team digest<span class="pill soon">SOON</span></a>
+      <div class="side-sec">Settings</div>
+      <a class="side-item active" href="settings-keys.html"><svg class="ic"><use href="#i-sliders"/></svg>Settings</a>
+    </nav>
+    <div class="side-foot"><span style="width:7px;height:7px;border-radius:99px;background:var(--green)"></span>portal v0.2.0 · self-hosted</div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="switcher"><span class="avatar" style="background:var(--accent)">A</span>Acme Corp<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="topbar-sep">/</span>
+      <button class="switcher">web-app<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="spacer"></span>
+      <button class="search-btn"><svg class="ic"><use href="#i-search"/></svg>Search knowledge…<kbd>⌘K</kbd></button>
+      <span class="avatar" style="background:var(--emerald);cursor:pointer" title="dli · owner">DL</span>
+    </header>
+
+    <div class="content">
+      <nav class="tabs">
+        <a class="tab" href="settings-keys.html">API keys</a>
+        <a class="tab active" href="settings-sources.html">Ingestion</a>
+        <a class="tab" href="settings-llm.html">LLM &amp; retrieval</a>
+        <a class="tab" href="settings-project.html">Project</a>
+        <a class="tab" href="settings-team.html">Team</a>
+      </nav>
+
+      <div class="page-head">
+        <div class="ph-text">
+          <h1>Ingestion sources</h1>
+          <p class="sub">Where events come from. Three ways feed the compiler — use any combination.</p>
+        </div>
+      </div>
+      <div class="stack">
+        <!-- ===== GitHub App ===== -->
+        <div class="card">
+          <div class="card-head">
+            <span class="avatar" style="width:32px;height:32px;background:var(--surface-2);border:1px solid var(--border)"><svg class="ic" style="color:var(--text)"><use href="#i-gh"/></svg></span>
+            <div>
+              <h3>GitHub App</h3>
+              <div class="sub">Push, PRs, issues and comments flow in via webhooks — verified by signature</div>
+            </div>
+            <div class="ch-actions"><span class="pill green"><svg class="ic"><use href="#i-check"/></svg>Connected</span></div>
+          </div>
+          <div class="card-body">
+            <dl class="kv">
+              <dt>App</dt><dd>teamem-portal <span class="muted small">· the same app used for sign-in — this page manages its installation scope</span></dd>
+              <dt>Installed on</dt><dd>acme organization</dd>
+              <dt>Repositories</dt><dd>
+                <span class="row" style="gap:6px;flex-wrap:wrap">
+                  <code class="mono small tag">acme/web-app</code>
+                  <code class="mono small tag">acme/api</code>
+                  <code class="mono small tag">acme/infra</code>
+                </span>
+              </dd>
+              <dt>Webhook secret</dt><dd><span class="row"><span class="pill green"><svg class="ic"><use href="#i-check"/></svg>Configured</span>
+                <button class="btn btn-ghost btn-sm" title="Regenerating invalidates the current secret — GitHub App settings must be updated too">Regenerate…</button></span></dd>
+            </dl>
+            <a class="btn btn-outline btn-sm" style="margin-top:14px" href="#"><svg class="ic"><use href="#i-ext"/></svg>Manage repository access on GitHub</a>
+          </div>
+          <hr class="divider" style="margin:0">
+          <div class="card-body" style="padding-top:14px">
+            <div class="small" style="font-weight:600;margin-bottom:4px">Recent deliveries</div>
+            <div class="deliv"><svg class="ic sm" style="color:var(--green)"><use href="#i-check"/></svg><code class="mono">push</code><span class="muted">main · 3 commits</span><span class="muted" style="margin-left:auto">2m ago</span></div>
+            <div class="deliv"><svg class="ic sm" style="color:var(--green)"><use href="#i-check"/></svg><code class="mono">pull_request</code><span class="muted">#107 merged</span><span class="muted" style="margin-left:auto">1h ago</span></div>
+            <div class="deliv"><svg class="ic sm" style="color:var(--green)"><use href="#i-check"/></svg><code class="mono">issue_comment</code><span class="muted">PR #107 review</span><span class="muted" style="margin-left:auto">3h ago</span></div>
+            <div class="deliv"><svg class="ic sm" style="color:var(--red)"><use href="#i-x"/></svg><code class="mono">issues</code><span class="muted">#98 — signature mismatch, rejected</span><span class="muted" style="margin-left:auto">5h ago</span></div>
+            <div class="deliv"><svg class="ic sm" style="color:var(--green)"><use href="#i-check"/></svg><code class="mono">push</code><span class="muted">main · 1 commit</span><span class="muted" style="margin-left:auto">7h ago</span></div>
+          </div>
+        </div>
+        <!-- ===== CLI + MCP ===== -->
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head">
+              <span class="avatar" style="width:32px;height:32px;background:var(--surface-2);border:1px solid var(--border)"><svg class="ic" style="color:var(--text)"><use href="#i-term"/></svg></span>
+              <div><h3>CLI · teamem init</h3>
+              <div class="sub">Scan an existing repo — solves cold start</div></div>
+            </div>
+            <div class="card-body">
+              <div class="field">
+                <label class="label">Sign the scan with key</label>
+                <select class="select"><option>claude-code-laptop (read, write)</option><option>ci-readonly (read only — can't ingest)</option></select>
+              </div>
+              <div class="cmd-label">Run in your repo root:</div>
+              <div class="cmd"><code>teamem init --url http://localhost:8080 --token &lt;paste-key&gt; --project web-app</code>
+                <button class="copy-btn"><svg class="ic"><use href="#i-copy"/></svg>Copy</button></div>
+              <hr class="divider">
+              <div class="small muted">Last init · Jul 28, 04:02 UTC — <strong class="muted-2">3 events → 2 pages</strong> · sample-task-tracker @ 9b8c7d6</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <span class="avatar" style="width:32px;height:32px;background:var(--surface-2);border:1px solid var(--border)"><svg class="ic" style="color:var(--text)"><use href="#i-sparkle"/></svg></span>
+              <div><h3>MCP · agent writes</h3>
+              <div class="sub">Agents search pages and write events over MCP</div></div>
+            </div>
+            <div class="card-body">
+              <div class="cmd-label">Connect Claude Code:</div>
+              <div class="cmd"><code>claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer &lt;token&gt;"</code>
+                <button class="copy-btn"><svg class="ic"><use href="#i-copy"/></svg>Copy</button></div>
+              <hr class="divider">
+              <div class="row small">
+                <span class="pill green"><svg class="ic"><use href="#i-check"/></svg>Endpoint healthy</span>
+                <span class="muted">1 active key with <code class="mono">write</code> scope</span>
+              </div>
+              <p class="hint" style="margin-top:10px">Agent searches and writes via MCP are logged in the audit log, separately from web UI activity.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

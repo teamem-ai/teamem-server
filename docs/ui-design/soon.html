@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team digest · Soon · teamem</title>
+<link rel="stylesheet" href="assets/main.css">
+<script src="assets/mock.js"></script>
+<style>
+  .ghost-card{border:1.5px dashed var(--border-strong);border-radius:var(--r-lg);padding:18px 20px;background:var(--surface)}
+  .ghost-card .g-row{display:flex;gap:10px;align-items:center;padding:8px 0;color:var(--text-3);font-size:13px}
+  .ghost-card .g-row .skeleton{flex:1;max-width:300px;height:10px}
+</style>
+</head>
+<body data-state="default">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="logo" viewBox="0 0 32 32"><rect fill="var(--accent)" x="1.5" y="1.5" width="29" height="29" rx="7.5"/><path d="M9 11h14M9 16h10.5M9 21h12.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></g></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></g></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></g></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></g></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></g></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></g></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10.29 3.86-8.47 14.14a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></g></symbol>
+</defs></svg>
+<div class="mockbar">
+  <span class="mock-tag">PREVIEW</span>
+  <a class="mock-link" href="index.html">← 总览</a>
+  <span class="mock-spacer"></span>
+  <button class="mock-pill" data-theme-btn="light">Light</button>
+  <button class="mock-pill" data-theme-btn="dark">Dark</button>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-brand"><svg class="logo-mark"><use href="#logo"/></svg>teamem</div>
+    <nav class="side-scroll">
+      <div class="side-sec">Knowledge</div>
+      <a class="side-item" href="knowledge.html"><svg class="ic"><use href="#i-book"/></svg>Knowledge</a>
+      <a class="side-item" href="context-preview.html"><svg class="ic"><use href="#i-sparkle"/></svg>Context preview</a>
+      <div class="side-sec">Activity</div>
+      <a class="side-item" href="events.html"><svg class="ic"><use href="#i-act"/></svg>Events</a>
+      <a class="side-item" href="jobs.html"><svg class="ic"><use href="#i-cpu"/></svg>Jobs</a>
+      <div class="side-sec">Team</div>
+      <a class="side-item" href="members.html"><svg class="ic"><use href="#i-users"/></svg>Members</a>
+      <a class="side-item" href="audit.html"><svg class="ic"><use href="#i-shield"/></svg>Audit</a>
+      <a class="side-item active" href="soon.html"><svg class="ic"><use href="#i-mail"/></svg>Team digest<span class="pill soon">SOON</span></a>
+      <div class="side-sec">Settings</div>
+      <a class="side-item" href="settings-keys.html"><svg class="ic"><use href="#i-sliders"/></svg>Settings</a>
+    </nav>
+    <div class="side-foot"><span style="width:7px;height:7px;border-radius:99px;background:var(--green)"></span>portal v0.2.0 · self-hosted</div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="switcher"><span class="avatar" style="background:var(--accent)">A</span>Acme Corp<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="topbar-sep">/</span>
+      <button class="switcher">web-app<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="spacer"></span>
+      <button class="search-btn"><svg class="ic"><use href="#i-search"/></svg>Search knowledge…<kbd>⌘K</kbd></button>
+      <span class="avatar" style="background:var(--emerald);cursor:pointer" title="dli · owner">DL</span>
+    </header>
+
+    <div class="content narrow">
+      <div style="text-align:center;padding:44px 0 28px">
+        <span class="pill soon" style="font-size:11px;padding:5px 10px">COMING IN V1.5</span>
+        <h1 style="font-size:24px;margin-top:14px">Team digest</h1>
+        <p style="color:var(--text-2);max-width:520px;margin:10px auto 0;line-height:1.65">
+          A weekly brief, auto-compiled from your team's own activity:
+          new decisions, gotchas that bit someone, and disputes that need a human call.</p>
+      </div>
+
+      <div class="ghost-card">
+        <div class="small" style="font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">What it will look like — example, not live data</div>
+        <div class="g-row"><span class="tbadge decision"><svg class="ic"><use href="#i-branch"/></svg>Decision</span><span class="skeleton"></span><span class="muted small mono">×3 this week</span></div>
+        <div class="g-row"><span class="tbadge gotcha"><svg class="ic"><use href="#i-warn"/></svg>Gotcha</span><span class="skeleton" style="max-width:240px"></span><span class="muted small mono">×7 this week</span></div>
+        <div class="g-row"><span class="sbadge disputed"><svg class="ic"><use href="#i-warn"/></svg>Disputed</span><span class="skeleton" style="max-width:200px"></span><span class="muted small mono">needs a call</span></div>
+      </div>
+
+      <div class="banner info" style="margin-top:18px">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+        <div>This page is a placeholder — the digest isn't built yet, and nothing on it is live.
+        Knowledge compiles continuously in the meantime.</div>
+        <div class="b-actions"><a class="btn btn-sm btn-outline" href="knowledge.html">Browse knowledge</a></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

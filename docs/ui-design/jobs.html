@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jobs · teamem</title>
+<link rel="stylesheet" href="assets/main.css">
+<script src="assets/mock.js"></script>
+</head>
+<body data-state="default">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="logo" viewBox="0 0 32 32"><rect fill="var(--accent)" x="1.5" y="1.5" width="29" height="29" rx="7.5"/><path d="M9 11h14M9 16h10.5M9 21h12.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></g></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></g></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></g></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></g></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></g></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></symbol>
+</defs></svg>
+<div class="mockbar">
+  <span class="mock-tag">PREVIEW</span>
+  <a class="mock-link" href="index.html">← 总览</a>
+  <span class="mock-label">State</span>
+  <button class="mock-pill on" data-set="default">默认</button>
+  <button class="mock-pill" data-set="empty">空态</button>
+  <span class="mock-spacer"></span>
+  <button class="mock-pill" data-theme-btn="light">Light</button>
+  <button class="mock-pill" data-theme-btn="dark">Dark</button>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-brand"><svg class="logo-mark"><use href="#logo"/></svg>teamem</div>
+    <nav class="side-scroll">
+      <div class="side-sec">Knowledge</div>
+      <a class="side-item" href="knowledge.html"><svg class="ic"><use href="#i-book"/></svg>Knowledge</a>
+      <a class="side-item" href="context-preview.html"><svg class="ic"><use href="#i-sparkle"/></svg>Context preview</a>
+      <div class="side-sec">Activity</div>
+      <a class="side-item" href="events.html"><svg class="ic"><use href="#i-act"/></svg>Events</a>
+      <a class="side-item active" href="jobs.html"><svg class="ic"><use href="#i-cpu"/></svg>Jobs</a>
+      <div class="side-sec">Team</div>
+      <a class="side-item" href="members.html"><svg class="ic"><use href="#i-users"/></svg>Members</a>
+      <a class="side-item" href="audit.html"><svg class="ic"><use href="#i-shield"/></svg>Audit</a>
+      <a class="side-item" href="soon.html"><svg class="ic"><use href="#i-mail"/></svg>Team digest<span class="pill soon">SOON</span></a>
+      <div class="side-sec">Settings</div>
+      <a class="side-item" href="settings-keys.html"><svg class="ic"><use href="#i-sliders"/></svg>Settings</a>
+    </nav>
+    <div class="side-foot"><span style="width:7px;height:7px;border-radius:99px;background:var(--green)"></span>portal v0.2.0 · self-hosted</div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="switcher"><span class="avatar" style="background:var(--accent)">A</span>Acme Corp<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="topbar-sep">/</span>
+      <button class="switcher">web-app<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="spacer"></span>
+      <button class="search-btn"><svg class="ic"><use href="#i-search"/></svg>Search knowledge…<kbd>⌘K</kbd></button>
+      <span class="avatar" style="background:var(--emerald);cursor:pointer" title="dli · owner">DL</span>
+    </header>
+
+    <div class="content">
+      <div class="page-head">
+        <div class="ph-text">
+          <h1>Jobs</h1>
+          <p class="sub">Ingest and compilation work units. When events don't become pages, the answer is here.</p>
+        </div>
+      </div>
+
+      <!-- ===== 默认 ===== -->
+      <div data-view="default">
+        <div class="filter-row" style="margin-top:0">
+          <button class="filter-chip on">All</button>
+          <button class="filter-chip">Queued</button>
+          <button class="filter-chip">Processing</button>
+          <button class="filter-chip">Completed</button>
+          <button class="filter-chip">Failed</button>
+          <button class="filter-chip">Cancelled</button>
+        </div>
+
+        <div class="table-card">
+          <table class="table">
+            <thead><tr>
+              <th style="width:160px">Kind</th><th style="width:150px">Status</th>
+              <th style="width:90px" class="num">Events</th><th style="width:190px">Initiated by</th>
+              <th style="width:130px">Created</th><th style="width:110px" class="num">Duration</th>
+            </tr></thead>
+            <tbody>
+              <tr class="clickable" onclick="location.href='job-detail.html'">
+                <td><code class="mono small">compilation</code></td>
+                <td><span class="pill red">Failed</span></td>
+                <td class="num">3</td>
+                <td class="muted-2"><code class="mono small">teamem init</code></td>
+                <td class="muted small" title="2026-07-28T02:05:00Z">2h ago</td>
+                <td class="num muted small">2.3s</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='job-detail.html'">
+                <td><code class="mono small">compilation</code></td>
+                <td><span class="pill blue"><span class="pulse-dot"></span>Processing</span></td>
+                <td class="num">5</td>
+                <td class="muted-2">GitHub webhook</td>
+                <td class="muted small" title="2026-07-28T03:45:00Z">20m ago</td>
+                <td class="num muted small">running…</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='job-detail.html'">
+                <td><code class="mono small">compilation</code></td>
+                <td><span class="pill green">Completed</span></td>
+                <td class="num">3</td>
+                <td class="muted-2"><code class="mono small">teamem init</code></td>
+                <td class="muted small" title="2026-07-28T01:02:00Z">3h ago</td>
+                <td class="num muted small">41s</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='job-detail.html'">
+                <td><code class="mono small">ingest_batch</code></td>
+                <td><span class="pill">Queued</span></td>
+                <td class="num">12</td>
+                <td class="muted-2">GitHub webhook</td>
+                <td class="muted small" title="2026-07-28T03:59:00Z">6m ago</td>
+                <td class="num muted small">—</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='job-detail.html'">
+                <td><code class="mono small">ingest_batch</code></td>
+                <td><span class="pill green">Completed</span></td>
+                <td class="num">8</td>
+                <td class="muted-2">GitHub webhook</td>
+                <td class="muted small" title="2026-07-28T03:05:00Z">1h ago</td>
+                <td class="num muted small">1.2s</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='job-detail.html'">
+                <td><code class="mono small">ingest_event</code></td>
+                <td><span class="pill green">Completed</span></td>
+                <td class="num">1</td>
+                <td class="muted-2">MCP write</td>
+                <td class="muted small" title="2026-07-27T23:19:00Z">5h ago</td>
+                <td class="num muted small">0.4s</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='job-detail.html'">
+                <td><code class="mono small">ingest_event</code></td>
+                <td><span class="pill">Cancelled</span></td>
+                <td class="num">1</td>
+                <td class="muted-2">GitHub webhook</td>
+                <td class="muted small" title="2026-07-27T10:00:00Z">1d ago</td>
+                <td class="num muted small">—</td>
+              </tr>
+              <tr class="clickable" onclick="location.href='job-detail.html'">
+                <td><code class="mono small">compilation</code></td>
+                <td><span class="pill green">Completed</span></td>
+                <td class="num">2</td>
+                <td class="muted-2">MCP write</td>
+                <td class="muted small" title="2026-07-27T08:30:00Z">1d ago</td>
+                <td class="num muted small">18s</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pager"><button class="btn btn-outline">Load more</button></div>
+      </div>
+
+      <!-- ===== 空态 ===== -->
+      <div data-view="empty" class="card">
+        <div class="empty" style="padding:64px 24px">
+          <div class="e-icon"><svg><use href="#i-cpu"/></svg></div>
+          <h3>No compile jobs yet</h3>
+          <p>Jobs appear when events are queued for compilation. Ingest some events and they'll show up here.</p>
+          <div class="e-actions">
+            <a class="btn btn-outline" href="events.html">View events</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM &amp; retrieval · Settings · teamem</title>
+<link rel="stylesheet" href="assets/main.css">
+<script src="assets/mock.js"></script>
+<style>
+  .provider-pick{grid-template-columns:repeat(4,1fr)}
+  @media (max-width:1100px){.provider-pick{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body data-state="default">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="logo" viewBox="0 0 32 32"><rect fill="var(--accent)" x="1.5" y="1.5" width="29" height="29" rx="7.5"/><path d="M9 11h14M9 16h10.5M9 21h12.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></g></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></g></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></g></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></g></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></g></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="i-zap" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10.29 3.86-8.47 14.14a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></g></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></g></symbol>
+</defs></svg>
+<div class="mockbar">
+  <span class="mock-tag">PREVIEW</span>
+  <a class="mock-link" href="index.html">← 总览</a>
+  <span class="mock-label">State</span>
+  <button class="mock-pill on" data-set="default">vector（语义可用）</button>
+  <button class="mock-pill" data-set="fts">fts-only（降级）</button>
+  <span class="mock-spacer"></span>
+  <button class="mock-pill" data-theme-btn="light">Light</button>
+  <button class="mock-pill" data-theme-btn="dark">Dark</button>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-brand"><svg class="logo-mark"><use href="#logo"/></svg>teamem</div>
+    <nav class="side-scroll">
+      <div class="side-sec">Knowledge</div>
+      <a class="side-item" href="knowledge.html"><svg class="ic"><use href="#i-book"/></svg>Knowledge</a>
+      <a class="side-item" href="context-preview.html"><svg class="ic"><use href="#i-sparkle"/></svg>Context preview</a>
+      <div class="side-sec">Activity</div>
+      <a class="side-item" href="events.html"><svg class="ic"><use href="#i-act"/></svg>Events</a>
+      <a class="side-item" href="jobs.html"><svg class="ic"><use href="#i-cpu"/></svg>Jobs</a>
+      <div class="side-sec">Team</div>
+      <a class="side-item" href="members.html"><svg class="ic"><use href="#i-users"/></svg>Members</a>
+      <a class="side-item" href="audit.html"><svg class="ic"><use href="#i-shield"/></svg>Audit</a>
+      <a class="side-item" href="soon.html"><svg class="ic"><use href="#i-mail"/></svg>Team digest<span class="pill soon">SOON</span></a>
+      <div class="side-sec">Settings</div>
+      <a class="side-item active" href="settings-keys.html"><svg class="ic"><use href="#i-sliders"/></svg>Settings</a>
+    </nav>
+    <div class="side-foot"><span style="width:7px;height:7px;border-radius:99px;background:var(--green)"></span>portal v0.2.0 · self-hosted</div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="switcher"><span class="avatar" style="background:var(--accent)">A</span>Acme Corp<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="topbar-sep">/</span>
+      <button class="switcher">web-app<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="spacer"></span>
+      <button class="search-btn"><svg class="ic"><use href="#i-search"/></svg>Search knowledge…<kbd>⌘K</kbd></button>
+      <span class="avatar" style="background:var(--emerald);cursor:pointer" title="dli · owner">DL</span>
+    </header>
+
+    <div class="content">
+      <nav class="tabs">
+        <a class="tab" href="settings-keys.html">API keys</a>
+        <a class="tab" href="settings-sources.html">Ingestion</a>
+        <a class="tab active" href="settings-llm.html">LLM &amp; retrieval</a>
+        <a class="tab" href="settings-project.html">Project</a>
+        <a class="tab" href="settings-team.html">Team</a>
+      </nav>
+
+      <div class="page-head">
+        <div class="ph-text">
+          <h1>LLM &amp; retrieval</h1>
+          <p class="sub">The model that compiles events into knowledge, and the retrieval mode it enables.</p>
+        </div>
+      </div>
+      <div class="stack">
+        <!-- ===== Provider ===== -->
+        <div class="card">
+          <div class="card-head"><h3>LLM provider</h3>
+            <div class="ch-actions"><span class="pill green"><svg class="ic"><use href="#i-check"/></svg>Connected · OpenRouter</span></div></div>
+          <div class="card-body">
+            <div class="provider-pick">
+              <div class="provider-opt"><span class="radio"></span>
+                <div><div class="po-name">Anthropic</div><div class="po-sub">Claude models · no embedding API</div></div></div>
+              <div class="provider-opt"><span class="radio"></span>
+                <div><div class="po-name">OpenAI</div><div class="po-sub">GPT models + embeddings</div></div></div>
+              <div class="provider-opt sel"><span class="radio"></span>
+                <div><div class="po-name">OpenRouter</div><div class="po-sub">Many models + embeddings via one key</div></div></div>
+              <div class="provider-opt"><span class="radio"></span>
+                <div><div class="po-name">Custom endpoint</div><div class="po-sub">Any OpenAI-compatible base URL</div></div></div>
+            </div>
+            <div class="grid-2" style="margin-top:16px">
+              <div class="field" style="margin-bottom:0">
+                <label class="label" for="llmkey">API key</label>
+                <div class="row">
+                  <input class="input mono" id="llmkey" type="password" value="sk-or-v1-xxxxxxxxxxxxxxxx">
+                  <button class="btn btn-ghost btn-sm" title="Show key"><svg class="ic"><use href="#i-eye"/></svg></button>
+                </div>
+              </div>
+              <div class="field" style="margin-bottom:0">
+                <label class="label">&nbsp;</label>
+                <div class="row">
+                  <button class="btn btn-outline btn-sm"><svg class="ic"><use href="#i-zap"/></svg>Test connection</button>
+                  <span class="pill green"><svg class="ic"><use href="#i-check"/></svg>Connection OK · 214ms</span>
+                </div>
+                <p class="hint">Replacing the key takes effect on the next compile job.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 语义能力常驻状态：vector ===== -->
+        <div data-view="default" class="card">
+          <div class="card-head"><h3>Semantic retrieval</h3>
+            <div class="ch-actions"><span class="pill green">Active</span></div></div>
+          <div class="card-body">
+            <div class="row" style="align-items:flex-start;gap:12px">
+              <svg class="ic lg" style="color:var(--green);margin-top:2px"><use href="#i-sparkle"/></svg>
+              <div>
+                <p style="font-size:13.5px"><strong>Vector mode</strong> — 1536-dim embeddings, cosine similarity.
+                Search matches paraphrases and other languages, and cross-language merging works.</p>
+                <p class="hint">If the embedding API becomes unreachable, search degrades to keyword (FTS) mode automatically — and says so, here and next to the search box.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===== 语义能力常驻状态：fts-only ===== -->
+        <div data-view="fts" class="card" style="border-color:var(--amber)">
+          <div class="card-head"><h3>Semantic retrieval</h3>
+            <div class="ch-actions"><span class="pill amber">Unavailable — keyword (FTS) mode</span></div></div>
+          <div class="card-body">
+            <div class="banner warn" style="margin-bottom:12px">
+              <svg class="ic"><use href="#i-warn"/></svg>
+              <div><span class="b-title">Your LLM provider has no embedding API.</span>
+              Search runs in keyword (FTS) mode: results won't match paraphrases or other languages, and cross-language merging is off. Compilation itself is unaffected.</div>
+            </div>
+            <p class="small muted-2" style="line-height:1.65">To enable vector mode, pick a provider with an embedding API (OpenAI, OpenRouter, or a compatible endpoint).
+            Until then, the search page shows the same notice — degradation is always explicit, never silent.</p>
+          </div>
+        </div>
+
+        <!-- ===== 编译节奏（占位，选项待定 Q5） ===== -->
+        <div class="card">
+          <div class="card-head"><h3>Compilation</h3>
+            <div class="ch-actions"><span class="pill">Event-driven</span></div></div>
+          <div class="card-body">
+            <p class="small muted-2" style="line-height:1.65">Compilation currently runs per event, as they arrive. Scheduling options
+            (batching windows, quiet hours) are being designed — this section will hold them.</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

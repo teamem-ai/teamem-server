@@ -1,0 +1,210 @@
+{
+  "eventsBySource": [
+    {
+      "channel": "github",
+      "kind": "github_commit",
+      "actor_provenance": "webhook_verified",
+      "count": 2
+    },
+    {
+      "channel": "github",
+      "kind": "github_pr",
+      "actor_provenance": "webhook_verified",
+      "count": 2
+    },
+    {
+      "channel": "cli",
+      "kind": "cli_init",
+      "actor_provenance": "unknown",
+      "count": 77
+    },
+    {
+      "channel": "mcp",
+      "kind": "mcp_write",
+      "actor_provenance": "unknown",
+      "count": 1
+    }
+  ],
+  "sampleActors": [
+    {
+      "kind": "human",
+      "provider": "github",
+      "displayLogin": "dli",
+      "providerUserId": "1880754"
+    },
+    {
+      "kind": "human",
+      "provider": "github",
+      "displayLogin": "why-moment-demo",
+      "providerUserId": "1"
+    }
+  ],
+  "sampleEventRows": [
+    {
+      "kind": "cli_init",
+      "externalId": "ec316e3aa1b2c3d4e5f60718293a4b5c6d7e8f90:docs/runbooks/roll-back-a-deployment.md",
+      "url": null,
+      "occurredAt": "2026-07-28T12:33:51.993+00:00",
+      "occurredAtProvenance": "server",
+      "payloadPath": "docs/runbooks/roll-back-a-deployment.md"
+    },
+    {
+      "kind": "cli_init",
+      "externalId": "ec316e3aa1b2c3d4e5f60718293a4b5c6d7e8f90:docs/runbooks/restore-postgres-from-backup.md",
+      "url": null,
+      "occurredAt": "2026-07-28T12:33:51.993+00:00",
+      "occurredAtProvenance": "server",
+      "payloadPath": "docs/runbooks/restore-postgres-from-backup.md"
+    },
+    {
+      "kind": "cli_init",
+      "externalId": "ec316e3aa1b2c3d4e5f60718293a4b5c6d7e8f90:docs/runbooks/rotate-database-credentials.md",
+      "url": null,
+      "occurredAt": "2026-07-28T12:33:51.993+00:00",
+      "occurredAtProvenance": "server",
+      "payloadPath": "docs/runbooks/rotate-database-credentials.md"
+    },
+    {
+      "kind": "mcp_write",
+      "externalId": "mcp:Stripe webhook retries can double-charge",
+      "url": null,
+      "occurredAt": "2026-07-28T12:19:43.225+00:00",
+      "occurredAtProvenance": "server",
+      "payloadPath": null
+    },
+    {
+      "kind": "cli_init",
+      "externalId": "exit-b-secret",
+      "url": null,
+      "occurredAt": "2026-07-28T12:17:10.158+00:00",
+      "occurredAtProvenance": "server",
+      "payloadPath": "docs/tenant-b-only.md"
+    },
+    {
+      "kind": "cli_init",
+      "externalId": "b960dbe4cf4abeaacb319d88d90e6d3ed0ac8c5c:docs/knowledge/error-redaction-convention.md",
+      "url": null,
+      "occurredAt": "2026-07-28T05:15:08.501+00:00",
+      "occurredAtProvenance": "server",
+      "payloadPath": "docs/knowledge/error-redaction-convention.md"
+    }
+  ],
+  "jobsByKindStatus": [
+    {
+      "kind": "ingest_event",
+      "status": "completed",
+      "count": 12
+    },
+    {
+      "kind": "ingest_batch",
+      "status": "queued",
+      "count": 6
+    },
+    {
+      "kind": "ingest_batch",
+      "status": "completed",
+      "count": 6
+    },
+    {
+      "kind": "compilation",
+      "status": "completed",
+      "count": 5
+    },
+    {
+      "kind": "compilation",
+      "status": "failed",
+      "count": 2
+    }
+  ],
+  "jobErrors": [
+    {
+      "code": "no_llm_provider",
+      "message": "No LLM provider is configured, so this job could not be compiled. Set TEAMEM_ANTHROPIC_API_KEY, TEAMEM_OPENAI_API_KEY, TEAMEM_OPENROUTER_API_KEY, or the OpenAI-compatible pair, then re-submit the events."
+    }
+  ],
+  "jobEventOutcomes": [
+    {
+      "status": "pending",
+      "count": 9
+    },
+    {
+      "status": "compiled",
+      "count": 61
+    },
+    {
+      "status": "skipped",
+      "count": 10
+    }
+  ],
+  "skipReasonsInDb": [
+    {
+      "reason": "Pure mechanical / cosmetic changes: modification of .gitignore with no team decision or context provided.",
+      "count": 1
+    },
+    {
+      "reason": "Event contains code implementation details without any substantive team knowledge about decisions, runbooks, conventions, or services. No context or rationale provided.",
+      "count": 1
+    },
+    {
+      "reason": "no_knowledge",
+      "count": 5
+    },
+    {
+      "reason": "Purely mechanical change in configuration file with no explanation or reasoning.",
+      "count": 1
+    },
+    {
+      "reason": "Package.json file content with basic setup information, but no decision, rationale, or team-specific knowledge provided.",
+      "count": 1
+    },
+    {
+      "reason": "Meaningless or placeholder messages without substantive team knowledge",
+      "count": 1
+    }
+  ],
+  "auditActions": [
+    {
+      "action": "concept.read",
+      "outcome": "success",
+      "count": 10
+    },
+    {
+      "action": "event.payload_read",
+      "outcome": "success",
+      "count": 2
+    },
+    {
+      "action": "mcp.search",
+      "outcome": "success",
+      "count": 8
+    },
+    {
+      "action": "mcp.timeline",
+      "outcome": "success",
+      "count": 2
+    },
+    {
+      "action": "search.query",
+      "outcome": "denied",
+      "count": 2
+    },
+    {
+      "action": "search.query",
+      "outcome": "success",
+      "count": 15
+    }
+  ],
+  "auditColumns": [
+    "id",
+    "created_at",
+    "request_id",
+    "principal_id",
+    "credential_id",
+    "action",
+    "resource_type",
+    "resource_id",
+    "team_id",
+    "project_id",
+    "outcome"
+  ]
+}

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>teamem portal — M2 UI 设计稿总览</title>
+<link rel="stylesheet" href="assets/main.css">
+<script src="assets/mock.js"></script>
+<style>
+  .hero{padding:56px 32px 36px;max-width:1080px;margin:0 auto}
+  .hero .logo-mark{width:52px;height:52px}
+  .hero h1{font-size:30px;letter-spacing:-.03em;margin-top:18px}
+  .hero p{color:var(--text-2);margin-top:10px;max-width:640px;font-size:15px;line-height:1.7}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 32px 80px}
+  .pg-group{margin-top:36px}
+  .pg-group h2{font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:12px}
+  .pg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+  .pg-card{display:flex;flex-direction:column;gap:4px;padding:14px 16px;background:var(--surface);
+    border:1px solid var(--border);border-radius:var(--r);transition:border-color .15s,box-shadow .15s}
+  .pg-card:hover{border-color:var(--accent);box-shadow:var(--shadow);text-decoration:none}
+  .pg-card .pg-name{font-weight:600;color:var(--text);font-size:14px;display:flex;align-items:center;gap:8px}
+  .pg-card .pg-file{font:400 11.5px var(--font-mono);color:var(--text-3)}
+  .pg-card .pg-desc{font-size:12.5px;color:var(--text-2);line-height:1.5}
+  .pg-states{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+  .pg-states i{font:500 10.5px var(--font-mono);font-style:normal;background:var(--surface-2);
+    border:1px solid var(--border);color:var(--text-3);padding:2px 6px;border-radius:4px}
+  .prio{font:700 10px var(--font-mono);padding:2px 6px;border-radius:4px;letter-spacing:.05em}
+  .prio.p0{background:var(--accent-soft);color:var(--accent)}
+  .prio.p1{background:var(--blue-soft);color:var(--blue)}
+  .prio.p2{background:var(--surface-2);color:var(--text-3);border:1px dashed var(--border-strong)}
+  .showcase{margin-top:44px}
+  .showcase h2{font-size:13px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);margin-bottom:12px}
+  .sc-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px 0;border-bottom:1px solid var(--border)}
+  .sc-row:last-child{border-bottom:0}
+  .sc-label{width:170px;flex:none;font-size:12.5px;color:var(--text-3)}
+</style>
+</head>
+<body data-state="default">
+
+<div class="mockbar">
+  <span class="mock-tag">PREVIEW</span>
+  <span style="color:#a1a1aa">teamem portal · M2 设计稿总览</span>
+  <span class="mock-spacer"></span>
+  <span style="color:#a1a1aa;font-size:12px">Theme</span>
+  <button class="mock-pill" data-theme-btn="light">Light</button>
+  <button class="mock-pill" data-theme-btn="dark">Dark</button>
+</div>
+
+<header class="hero">
+  <svg class="logo-mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="teamem logo">
+    <rect class="lm-a" x="1.5" y="1.5" width="29" height="29" rx="7.5"/>
+    <path d="M9 11h14M9 16h10.5M9 21h12.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+  </svg>
+  <h1>teamem portal — Web UI 设计稿</h1>
+  <p>M2 里程碑全页面设计。产品核心叙事：<strong>知识从真实开发活动中"编译"而来，每一条都带可回溯的证据</strong>——
+  本套设计围绕证据、溯源、可信度展开，而非普通 wiki。点击任意页面预览；
+  页面顶部的 PREVIEW 工具条可切换状态（空态/错误态/降级态等）与明暗主题。</p>
+</header>
+
+<div class="wrap">
+<div class="pg-group">
+  <h2>认证与进入</h2>
+  <div class="pg-grid">
+    <a class="pg-card" href="login.html">
+      <span class="pg-name">登录页 <span class="prio p0">P0</span></span>
+      <span class="pg-file">login.html · A1</span>
+      <span class="pg-desc">唯一身份入口（Sign in with GitHub）。评估者看到的第一屏。</span>
+      <span class="pg-states"><i>默认</i><i>OAuth 失败</i><i>未受邀</i><i>App 未配置</i></span>
+    </a>
+    <a class="pg-card" href="invite.html">
+      <span class="pg-name">邀请接受页 <span class="prio p0">P0</span></span>
+      <span class="pg-file">invite.html · A2</span>
+      <span class="pg-desc">受邀成员经 GitHub OAuth 加入团队；失效链接的明确态。</span>
+      <span class="pg-states"><i>默认</i><i>链接失效</i></span>
+    </a>
+  </div>
+</div>
+
+<div class="pg-group">
+  <h2>首次引导向导（M2 的灵魂）</h2>
+  <div class="pg-grid">
+    <a class="pg-card" href="onboarding.html">
+      <span class="pg-name">Onboarding 5 步 <span class="prio p0">P0</span></span>
+      <span class="pg-file">onboarding.html · B</span>
+      <span class="pg-desc">建团队 → 配 LLM → 确认仓库范围 → 铸 key + 接入命令 → 等第一页知识。</span>
+      <span class="pg-states"><i>Step 1–5</i><i>fts 降级提示</i><i>等待编译</i></span>
+    </a>
+  </div>
+</div>
+
+<div class="pg-group">
+  <h2>知识区（日常使用核心）</h2>
+  <div class="pg-grid">
+    <a class="pg-card" href="knowledge.html">
+      <span class="pg-name">概念页列表 <span class="prio p0">P0</span></span>
+      <span class="pg-file">knowledge.html · C1 · 默认落地页</span>
+      <span class="pg-desc">浏览 + 语义检索；六类型徽章 / 置信度 / 证据数 / last confirmed。</span>
+      <span class="pg-states"><i>默认</i><i>检索结果</i><i>降级横幅</i><i>空库</i><i>无结果</i><i>viewer</i><i>骨架</i></span>
+    </a>
+    <a class="pg-card" href="concept-detail.html">
+      <span class="pg-name">概念页详情 <span class="prio p0">P0</span></span>
+      <span class="pg-file">concept-detail.html · C2 · 价值落点</span>
+      <span class="pg-desc">"为什么"时刻的最终画面：正文 + 证据 + 贡献者 + 时间线。</span>
+      <span class="pg-states"><i>决策页(3类证据)</i><i>disputed</i><i>mcp 证据</i></span>
+    </a>
+    <a class="pg-card" href="context-preview.html">
+      <span class="pg-name">上下文预览 <span class="prio p0">P0</span></span>
+      <span class="pg-file">context-preview.html · C3</span>
+      <span class="pg-desc">SessionStart 自动注入内容预览 + token 预算指示。</span>
+      <span class="pg-states"><i>默认</i><i>空库</i></span>
+    </a>
+  </div>
+</div>
+<div class="pg-group">
+  <h2>活动区（摄取与编译的可观测性）</h2>
+  <div class="pg-grid">
+    <a class="pg-card" href="events.html">
+      <span class="pg-name">事件列表 <span class="prio p1">P1</span></span>
+      <span class="pg-file">events.html · D1</span>
+      <span class="pg-desc">"我的数据进来了吗"。actor 多为 Unknown 的真实形态。</span>
+      <span class="pg-states"><i>默认</i><i>空态</i></span>
+    </a>
+    <a class="pg-card" href="event-detail.html">
+      <span class="pg-name">事件详情 <span class="prio p1">P1</span></span>
+      <span class="pg-file">event-detail.html · D2</span>
+      <span class="pg-desc">脱敏 payload JSON 查看器；审计提示条 + fail-closed 错误态。</span>
+      <span class="pg-states"><i>默认</i><i>fail-closed</i></span>
+    </a>
+    <a class="pg-card" href="jobs.html">
+      <span class="pg-name">编译任务列表 <span class="prio p1">P1</span></span>
+      <span class="pg-file">jobs.html · D3</span>
+      <span class="pg-desc">三种 kind × 五态徽章；按状态筛选。</span>
+      <span class="pg-states"><i>默认</i><i>空态</i></span>
+    </a>
+    <a class="pg-card" href="job-detail.html">
+      <span class="pg-name">任务详情 <span class="prio p1">P1</span></span>
+      <span class="pg-file">job-detail.html · D4</span>
+      <span class="pg-desc">逐事件结果：compiled / skipped / failed / pending 四态同框。</span>
+      <span class="pg-states"><i>默认(含失败)</i></span>
+    </a>
+  </div>
+</div>
+
+<div class="pg-group">
+  <h2>成员区</h2>
+  <div class="pg-grid">
+    <a class="pg-card" href="members.html">
+      <span class="pg-name">成员与角色 <span class="prio p0">P0</span></span>
+      <span class="pg-file">members.html · E1</span>
+      <span class="pg-desc">邀请（角色→链接）、改角色、移除；单人空态。</span>
+      <span class="pg-states"><i>默认</i><i>邀请弹窗</i><i>空态</i></span>
+    </a>
+    <a class="pg-card" href="member-profile.html">
+      <span class="pg-name">成员资料页 <span class="prio p1">P1</span></span>
+      <span class="pg-file">member-profile.html · E2</span>
+      <span class="pg-desc">贡献者链接的落点：TA 贡献过的概念页列表。</span>
+      <span class="pg-states"><i>默认</i></span>
+    </a>
+  </div>
+</div>
+
+<div class="pg-group">
+  <h2>设置与治理</h2>
+  <div class="pg-grid">
+    <a class="pg-card" href="settings-keys.html">
+      <span class="pg-name">API keys <span class="prio p0">P0</span></span>
+      <span class="pg-file">settings-keys.html · F1</span>
+      <span class="pg-desc">铸造（一次性明文）/ 吊销（立即 401）/ 轮换警告。</span>
+      <span class="pg-states"><i>列表</i><i>铸造弹窗</i><i>明文展示</i><i>吊销确认</i><i>空态</i></span>
+    </a>
+    <a class="pg-card" href="settings-sources.html">
+      <span class="pg-name">摄取源 <span class="prio p0">P0</span></span>
+      <span class="pg-file">settings-sources.html · F2</span>
+      <span class="pg-desc">GitHub App（installation 范围/webhook/投递）· CLI · MCP 三卡。</span>
+      <span class="pg-states"><i>默认</i></span>
+    </a>
+    <a class="pg-card" href="settings-llm.html">
+      <span class="pg-name">LLM 与检索 <span class="prio p0">P0</span></span>
+      <span class="pg-file">settings-llm.html · F3</span>
+      <span class="pg-desc">四家 provider、测试连接、语义能力常驻状态、编译节奏占位。</span>
+      <span class="pg-states"><i>vector</i><i>fts-only</i></span>
+    </a>
+    <a class="pg-card" href="settings-project.html">
+      <span class="pg-name">项目设置 <span class="prio p0">P0</span></span>
+      <span class="pg-file">settings-project.html · F4</span>
+      <span class="pg-desc">危险区：Purge（输名确认 → 删除计数 + 审计保留）。</span>
+      <span class="pg-states"><i>默认</i><i>purge 确认</i><i>purge 成功</i></span>
+    </a>
+    <a class="pg-card" href="settings-team.html">
+      <span class="pg-name">团队设置 <span class="prio p0">P0</span></span>
+      <span class="pg-file">settings-team.html · F5</span>
+      <span class="pg-desc">团队名、新建团队、删除团队（双重确认）。</span>
+      <span class="pg-states"><i>默认</i><i>删除确认</i></span>
+    </a>
+    <a class="pg-card" href="audit.html">
+      <span class="pg-name">审计日志 <span class="prio p0">P0</span></span>
+      <span class="pg-file">audit.html · F6 · admin+</span>
+      <span class="pg-desc">"谁在何时读了什么"；六个真实动作；denied 也留痕；无内容列。</span>
+      <span class="pg-states"><i>默认</i><i>空态</i></span>
+    </a>
+  </div>
+</div>
+
+<div class="pg-group">
+  <h2>系统页与占位</h2>
+  <div class="pg-grid">
+    <a class="pg-card" href="404.html">
+      <span class="pg-name">统一 404 <span class="prio p0">P0</span></span>
+      <span class="pg-file">404.html</span>
+      <span class="pg-desc">跨团队与不存在不可区分：只有一种 404，文案中性。</span>
+      <span class="pg-states"><i>默认</i></span>
+    </a>
+    <a class="pg-card" href="soon.html">
+      <span class="pg-name">P2 占位（团队简报） <span class="prio p2">P2</span></span>
+      <span class="pg-file">soon.html · G</span>
+      <span class="pg-desc">统一 "Soon" 视觉语言：讲方向，但绝不像已实现。</span>
+      <span class="pg-states"><i>默认</i></span>
+    </a>
+  </div>
+</div>
+<div class="showcase">
+  <h2>徽章系统（六类型 / 四状态 / 三置信度）</h2>
+  <div class="card card-pad">
+    <div class="sc-row">
+      <span class="sc-label">类型 · decision</span>
+      <span class="tbadge decision"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>Decision</span>
+      <span class="sc-label" style="width:auto">类型 · gotcha</span>
+      <span class="tbadge gotcha"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10.29 3.86-8.47 14.14a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>Gotcha</span>
+      <span class="sc-label" style="width:auto">类型 · convention</span>
+      <span class="tbadge convention"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h12a2 2 0 0 0 2-2v-2H10v2a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v3h4"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/></svg>Convention</span>
+    </div>
+    <div class="sc-row">
+      <span class="sc-label">类型 · runbook</span>
+      <span class="tbadge runbook"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8"/></svg>Runbook</span>
+      <span class="sc-label" style="width:auto">类型 · service</span>
+      <span class="tbadge service"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/></svg>Service</span>
+      <span class="sc-label" style="width:auto">类型 · concept</span>
+      <span class="tbadge concept"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0 0 12 2z"/></svg>Concept</span>
+    </div>
+    <div class="sc-row">
+      <span class="sc-label">状态（4）</span>
+      <span class="sbadge active"><span class="dot"></span>Active</span>
+      <span class="sbadge superseded"><span class="dot"></span>Superseded</span>
+      <span class="sbadge needs-review"><span class="dot"></span>Needs review</span>
+      <span class="sbadge disputed"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10.29 3.86-8.47 14.14a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>Disputed</span>
+    </div>
+    <div class="sc-row">
+      <span class="sc-label">置信度（3，弱视觉）</span>
+      <span class="conf high"><span class="bars"><i></i><i></i><i></i></span><span class="clabel">High</span></span>
+      <span class="conf medium"><span class="bars"><i></i><i></i><i></i></span><span class="clabel">Medium</span></span>
+      <span class="conf low"><span class="bars"><i></i><i></i><i></i></span><span class="clabel">Low</span></span>
+    </div>
+    <div class="sc-row">
+      <span class="sc-label">角色（4）</span>
+      <span class="role owner">Owner</span><span class="role admin">Admin</span>
+      <span class="role member">Member</span><span class="role viewer">Viewer</span>
+      <span class="sc-label" style="width:auto">占位</span>
+      <span class="pill soon">SOON</span>
+    </div>
+    <div class="sc-row">
+      <span class="sc-label">任务状态（5）</span>
+      <span class="pill">Queued</span>
+      <span class="pill blue"><span class="pulse-dot"></span>Processing</span>
+      <span class="pill green">Completed</span>
+      <span class="pill red">Failed</span>
+      <span class="pill">Cancelled</span>
+    </div>
+    <div class="sc-row">
+      <span class="sc-label">主按钮 / 次按钮</span>
+      <button class="btn btn-primary">Primary（墨黑）</button>
+      <button class="btn btn-outline">Outline</button>
+      <button class="btn btn-ghost">Ghost</button>
+      <button class="btn btn-danger-outline">Danger outline</button>
+    </div>
+  </div>
+  <p class="small muted" style="margin-top:16px">详细设计决策见 <code>DESIGN.md</code>；页面需求见 <code>../UI-BRIEF.md</code>；文案红线见 <code>../UI-GLOSSARY.md</code>。</p>
+</div>
+</div>
+</body>
+</html>

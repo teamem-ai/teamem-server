@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Members · teamem</title>
+<link rel="stylesheet" href="assets/main.css">
+<script src="assets/mock.js"></script>
+<style>
+  .role-opt{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;border:1.5px solid var(--border);border-radius:var(--r);cursor:pointer;margin-bottom:8px;transition:border-color .15s,background .15s}
+  .role-opt:hover{border-color:var(--border-strong)}
+  .role-opt.sel{border-color:var(--accent);background:var(--accent-soft)}
+  .role-opt .radio{width:16px;height:16px;border-radius:99px;border:1.5px solid var(--border-strong);flex:none;margin-top:2px;position:relative}
+  .role-opt.sel .radio{border-color:var(--accent)}
+  .role-opt.sel .radio::after{content:"";position:absolute;inset:3px;border-radius:99px;background:var(--accent)}
+  .role-opt .ro-desc{font-size:12px;color:var(--text-3);margin-top:2px}
+</style>
+</head>
+<body data-state="default">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="logo" viewBox="0 0 32 32"><rect fill="var(--accent)" x="1.5" y="1.5" width="29" height="29" rx="7.5"/><path d="M9 11h14M9 16h10.5M9 21h12.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" fill="none"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></g></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3z"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></g></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></g></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></g></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></g></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></g></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M18 6 6 18M6 6l12 12"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M20 6 9 17l-5-5"/></symbol>
+</defs></svg>
+<div class="mockbar">
+  <span class="mock-tag">PREVIEW</span>
+  <a class="mock-link" href="index.html">← 总览</a>
+  <span class="mock-label">State</span>
+  <button class="mock-pill on" data-set="default">列表</button>
+  <button class="mock-pill" data-set="modal">邀请弹窗</button>
+  <button class="mock-pill" data-set="minted">链接已生成</button>
+  <button class="mock-pill" data-set="empty">单人空态</button>
+  <span class="mock-spacer"></span>
+  <button class="mock-pill" data-theme-btn="light">Light</button>
+  <button class="mock-pill" data-theme-btn="dark">Dark</button>
+</div>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="side-brand"><svg class="logo-mark"><use href="#logo"/></svg>teamem</div>
+    <nav class="side-scroll">
+      <div class="side-sec">Knowledge</div>
+      <a class="side-item" href="knowledge.html"><svg class="ic"><use href="#i-book"/></svg>Knowledge</a>
+      <a class="side-item" href="context-preview.html"><svg class="ic"><use href="#i-sparkle"/></svg>Context preview</a>
+      <div class="side-sec">Activity</div>
+      <a class="side-item" href="events.html"><svg class="ic"><use href="#i-act"/></svg>Events</a>
+      <a class="side-item" href="jobs.html"><svg class="ic"><use href="#i-cpu"/></svg>Jobs</a>
+      <div class="side-sec">Team</div>
+      <a class="side-item active" href="members.html"><svg class="ic"><use href="#i-users"/></svg>Members</a>
+      <a class="side-item" href="audit.html"><svg class="ic"><use href="#i-shield"/></svg>Audit</a>
+      <a class="side-item" href="soon.html"><svg class="ic"><use href="#i-mail"/></svg>Team digest<span class="pill soon">SOON</span></a>
+      <div class="side-sec">Settings</div>
+      <a class="side-item" href="settings-keys.html"><svg class="ic"><use href="#i-sliders"/></svg>Settings</a>
+    </nav>
+    <div class="side-foot"><span style="width:7px;height:7px;border-radius:99px;background:var(--green)"></span>portal v0.2.0 · self-hosted</div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="switcher"><span class="avatar" style="background:var(--accent)">A</span>Acme Corp<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="topbar-sep">/</span>
+      <button class="switcher">web-app<svg class="ic"><use href="#i-chev"/></svg></button>
+      <span class="spacer"></span>
+      <button class="search-btn"><svg class="ic"><use href="#i-search"/></svg>Search knowledge…<kbd>⌘K</kbd></button>
+      <span class="avatar" style="background:var(--emerald);cursor:pointer" title="dli · owner">DL</span>
+    </header>
+
+    <div class="content">
+      <div class="page-head">
+        <div class="ph-text">
+          <h1>Members</h1>
+          <p class="sub">People who can sign in to this portal. Roles are per team — a user can belong to multiple teams with different roles.</p>
+        </div>
+        <div class="ph-actions">
+          <button class="btn btn-primary"><svg class="ic"><use href="#i-plus"/></svg>Invite member</button>
+        </div>
+      </div>
+
+      <!-- ===== 列表 ===== -->
+      <div data-view="default modal minted" class="table-card">
+        <table class="table">
+          <thead><tr>
+            <th>Member</th><th style="width:200px">Role</th><th style="width:140px">Joined</th><th style="width:110px"></th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="row" style="gap:10px"><span class="avatar" style="background:var(--emerald)">DL</span><span><strong>dli</strong><span class="pill" style="margin-left:8px">You</span><br><span class="small muted">D Li · github.com/dli</span></span></span></td>
+              <td><span class="role owner">Owner</span></td>
+              <td class="muted small">Jul 28, 2026</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td><span class="row" style="gap:10px"><span class="avatar" style="background:var(--violet)">KZ</span><span><strong>k.zhang</strong><br><span class="small muted">Kai Zhang · github.com/kzhang</span></span></span></td>
+              <td><button class="filter-chip" style="padding:4px 9px"><span class="role admin" style="border:0;background:transparent;padding:0">Admin</span><svg class="ic"><use href="#i-chev"/></svg></button></td>
+              <td class="muted small">Jul 28, 2026</td>
+              <td><button class="btn btn-ghost btn-sm" style="color:var(--red)">Remove</button></td>
+            </tr>
+            <tr>
+              <td><span class="row" style="gap:10px"><span class="avatar" style="background:var(--sky)">W</span><span><strong>why-moment-demo</strong><br><span class="small muted">github.com/why-moment-demo</span></span></span></td>
+              <td><button class="filter-chip" style="padding:4px 9px"><span class="role member" style="border:0;background:transparent;padding:0">Member</span><svg class="ic"><use href="#i-chev"/></svg></button></td>
+              <td class="muted small">Jul 29, 2026</td>
+              <td><button class="btn btn-ghost btn-sm" style="color:var(--red)">Remove</button></td>
+            </tr>
+            <tr>
+              <td><span class="row" style="gap:10px"><span class="avatar" style="background:var(--rose)">JR</span><span><strong>j.rivera</strong><br><span class="small muted">Jamie Rivera · github.com/jrivera</span></span></span></td>
+              <td><button class="filter-chip" style="padding:4px 9px"><span class="role viewer" style="border:0;background:transparent;padding:0">Viewer</span><svg class="ic"><use href="#i-chev"/></svg></button></td>
+              <td class="muted small">Jul 29, 2026</td>
+              <td><button class="btn btn-ghost btn-sm" style="color:var(--red)">Remove</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="small muted" data-view="default modal minted" style="margin-top:10px">Only owners can change roles or remove members. The last remaining owner can't be demoted or removed.</p>
+
+      <!-- ===== 单人空态 ===== -->
+      <div data-view="empty" class="card">
+        <div class="empty" style="padding:64px 24px">
+          <div class="e-icon"><svg><use href="#i-users"/></svg></div>
+          <h3>It's just you so far</h3>
+          <p>Invite a teammate to share what your team knows — their agent gets the same memory as yours.</p>
+          <div class="e-actions">
+            <button class="btn btn-primary"><svg class="ic"><use href="#i-plus"/></svg>Invite your first teammate</button>
+          </div>
+        </div>
+      </div>
+      <!-- ===== 邀请弹窗：选角色 ===== -->
+      <div data-view="modal">
+        <div class="modal-veil">
+          <div class="modal" role="dialog" aria-modal="true" aria-labelledby="inv-t">
+            <div class="modal-head">
+              <div>
+                <h3 id="inv-t">Invite member</h3>
+                <p class="m-sub">Pick a role — you'll get a single-use link to share. They join with GitHub sign-in.</p>
+              </div>
+              <span class="modal-x"><svg class="ic"><use href="#i-x"/></svg></span>
+            </div>
+            <div class="modal-body">
+              <div class="role-opt">
+                <span class="radio"></span>
+                <div style="flex:1"><div class="row" style="gap:8px"><span class="role viewer">Viewer</span></div>
+                <div class="ro-desc">Browse knowledge and job activity, read-only</div></div>
+              </div>
+              <div class="role-opt sel">
+                <span class="radio"></span>
+                <div style="flex:1"><div class="row" style="gap:8px"><span class="role member">Member</span><span class="pill">Default</span></div>
+                <div class="ro-desc">Search, read payloads, preview agent context</div></div>
+              </div>
+              <div class="role-opt">
+                <span class="radio"></span>
+                <div style="flex:1"><div class="row" style="gap:8px"><span class="role admin">Admin</span></div>
+                <div class="ro-desc">Manage keys, connectors, LLM settings and audit</div></div>
+              </div>
+              <div class="role-opt">
+                <span class="radio"></span>
+                <div style="flex:1"><div class="row" style="gap:8px"><span class="role owner">Owner</span></div>
+                <div class="ro-desc">Full control, including destructive actions and role management</div></div>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-ghost">Cancel</button>
+              <button class="btn btn-primary">Create invite link</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 链接已生成 ===== -->
+      <div data-view="minted">
+        <div class="modal-veil">
+          <div class="modal" role="dialog" aria-modal="true">
+            <div class="modal-head">
+              <div>
+                <h3>Invite link ready</h3>
+                <p class="m-sub">Share it with your teammate — it joins them as <span class="role member" style="vertical-align:1px">Member</span>.</p>
+              </div>
+              <span class="modal-x"><svg class="ic"><use href="#i-x"/></svg></span>
+            </div>
+            <div class="modal-body">
+              <div class="cmd"><code>http://localhost:8080/invite/inv_8f3kQ2xR9wT1yB7n</code>
+                <button class="copy-btn"><svg class="ic"><use href="#i-copy"/></svg>Copy</button></div>
+              <div class="banner info" style="margin-top:12px">
+                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                <div>Expires in <strong>7 days</strong> · <strong>single use</strong>. You can revoke it anytime from this page.</div>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-primary">Done</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+
+    </div>
+  </div>
+</div>
+</body>
+</html>
