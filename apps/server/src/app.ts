@@ -41,6 +41,9 @@ import { buildSearchRoutes, type SearchRoutesDeps } from './http/routes/search.j
 import { buildContextRoutes } from './http/routes/context.js';
 import { buildPurgeRoutes } from './http/routes/purge.js';
 import { buildAuthRoutes } from './http/routes/auth.js';
+import { buildTeamsRoutes } from './http/routes/teams.js';
+import { buildProjectsRoutes } from './http/routes/projects.js';
+import { buildKeysRoutes } from './http/routes/keys.js';
 import { buildAuditRoutes } from './http/routes/audit.js';
 import { buildMembersRoutes } from './http/routes/members.js';
 import { buildInvitesRoutes } from './http/routes/invites.js';
@@ -106,6 +109,19 @@ export function buildApp(deps: AppDeps = {}) {
     // Purge route — project-level data deletion (DUA-228).
     // Owner-only; requires web session + team membership.
     app.route('/', buildPurgeRoutes({ db: deps.db }));
+  }
+
+  // Governance routes (teams, projects, keys) — wired when db is available.
+  // These are web-session-authenticated and require a valid OAuth session cookie.
+  if (deps.db) {
+    // Read host/port from env for the MCP command formatter; defaults
+    // match the standard Compose development topology.
+    const mcpHost = process.env['TEAMEM_HOST'] ?? '0.0.0.0';
+    const mcpPort = Number(process.env['TEAMEM_PORT'] ?? 8080);
+    const mcpConfig = { host: mcpHost, port: mcpPort };
+    app.route('/', buildTeamsRoutes({ db: deps.db, mcpConfig }));
+    app.route('/', buildProjectsRoutes({ db: deps.db }));
+    app.route('/', buildKeysRoutes({ db: deps.db, mcpConfig }));
   }
 
   // Ingestion routes — wired only when db is available.

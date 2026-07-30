@@ -123,6 +123,33 @@ export const CONTRACT_ADDITIVE_CHANGES = [
     },
   },
   {
+    change: 'DUA-230: team/project governance + web-side key minting DTOs',
+    summary:
+      'New governance DTOs: createTeam, myTeam, createProject, renameProject, ' +
+      'projectEntry, mintKey (with one-time plaintext token + claude mcp add ' +
+      'command). All endpoints are web-session-authenticated (admin+ for ' +
+      'project management and key minting). Key minting stores only SHA-256 ' +
+      'hash; plaintext token is returned exactly once.',
+    impact: {
+      database: 'None — governance operations use existing teams, projects, ' +
+        'memberships, and api_keys tables. No schema changes needed.',
+      api: 'New web-session-authenticated endpoints: POST /v1/teams, ' +
+        'GET /v1/teams/mine, POST /v1/teams/:teamId/projects, ' +
+        'PATCH /v1/teams/:teamId/projects/:projectId, ' +
+        'GET /v1/teams/:teamId/projects, POST /v1/teams/:teamId/keys.',
+      cli: 'None — the CLI does not manage teams or projects.',
+      mcp: 'None — the MCP endpoint does not consume these DTOs directly. ' +
+        'The claude mcp add command formatter is reused from commands/format-mcp-command.ts.',
+      ui: 'The web UI (apps/web) will consume these DTOs for onboarding and settings flows.',
+      compiler: 'None — governance operations are an auth-layer concern.',
+      export: 'None — OKF export is an M3 concern.',
+      externalTsConsumers:
+        'Fully additive: new file (governance.ts), new exports alongside ' +
+        'existing ones. No existing types changed or removed. No published ' +
+        'npm release of @teamem/schema exists yet.',
+    },
+  },
+  {
     change: 'DUA-228: project-level purge response DTO',
     summary:
       'New purgeResponse DTO for POST /teams/:teamId/projects/:projectId/purge ' +
@@ -187,4 +214,5 @@ export * from './job.js';
 export * from './audit.js';
 export * from './search.js';
 export * from './context.js';
+export * from './governance.js';
 export * from './purge.js';
