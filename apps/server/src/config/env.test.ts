@@ -16,6 +16,7 @@ describe('parseServerEnv', () => {
       port: DEFAULT_SERVER_PORT,
       allInOne: false,
       github: undefined,
+      githubAppConfigured: false,
       llmProviders: [],
     });
   });
@@ -31,6 +32,8 @@ describe('parseServerEnv', () => {
         TEAMEM_GITHUB_APP_ID: '123456',
         TEAMEM_GITHUB_INSTALLATION_ID: '9876543210',
         TEAMEM_GITHUB_PRIVATE_KEY: '-----BEGIN RSA PRIVATE KEY-----\ntest-key\n-----END RSA PRIVATE KEY-----',
+        TEAMEM_GITHUB_OAUTH_CLIENT_ID: 'Iv1.abcdef12345678',
+        TEAMEM_GITHUB_OAUTH_CLIENT_SECRET: 'github_oauth_secret_hex_value',
         TEAMEM_ANTHROPIC_API_KEY: 'anthropic-key',
         TEAMEM_OPENAI_API_KEY: 'openai-key',
         TEAMEM_OPENROUTER_API_KEY: 'openrouter-key',
@@ -47,7 +50,10 @@ describe('parseServerEnv', () => {
         appId: '123456',
         installationId: '9876543210',
         privateKey: '-----BEGIN RSA PRIVATE KEY-----\ntest-key\n-----END RSA PRIVATE KEY-----',
+        oauthClientId: 'Iv1.abcdef12345678',
+        oauthClientSecret: 'github_oauth_secret_hex_value',
       },
+      githubAppConfigured: true,
       llmProviders: [
         { kind: 'claude', apiKey: 'anthropic-key' },
         { kind: 'openai', apiKey: 'openai-key' },
@@ -173,8 +179,114 @@ describe('parseServerEnv', () => {
       port: DEFAULT_SERVER_PORT,
       allInOne: false,
       github: undefined,
+      githubAppConfigured: false,
       llmProviders: [],
     });
+  });
+
+  // ── GitHub OAuth co-requirement validation ────────────────────────────
+
+  it('accepts the full GitHub App (webhook + OAuth) configuration', () => {
+    const env = parseServerEnv({
+      DATABASE_URL,
+      TEAMEM_GITHUB_APP_ID: '123456',
+      TEAMEM_GITHUB_PRIVATE_KEY: '-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----',
+      TEAMEM_GITHUB_WEBHOOK_SECRET: 'webhook-secret',
+      TEAMEM_GITHUB_OAUTH_CLIENT_ID: 'Iv1.abcdef12345678',
+      TEAMEM_GITHUB_OAUTH_CLIENT_SECRET: 'github_oauth_secret',
+    });
+    expect(env.githubAppConfigured).toBe(true);
+    expect(env.github?.oauthClientId).toBe('Iv1.abcdef12345678');
+    expect(env.github?.oauthClientSecret).toBe('github_oauth_secret');
+  });
+
+  it('reports githubAppConfigured as false when only webhook credentials are set', () => {
+    const env = parseServerEnv({
+      DATABASE_URL,
+      TEAMEM_GITHUB_APP_ID: '123456',
+      TEAMEM_GITHUB_PRIVATE_KEY: '-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----',
+      TEAMEM_GITHUB_WEBHOOK_SECRET: 'webhook-secret',
+    });
+    expect(env.githubAppConfigured).toBe(false);
+    expect(env.github).toBeDefined();
+  });
+
+  it('reports githubAppConfigured as false when only OAuth credentials are set', () => {
+    const env = parseServerEnv({
+      DATABASE_URL,
+      TEAMEM_GITHUB_OAUTH_CLIENT_ID: 'Iv1.abcdef12345678',
+      TEAMEM_GITHUB_OAUTH_CLIENT_SECRET: 'github_oauth_secret',
+    });
+    expect(env.githubAppConfigured).toBe(false);
+    expect(env.github).toBeDefined();
+  });
+
+  it('reports githubAppConfigured as false with no GitHub config at all', () => {
+    const env = parseServerEnv({ DATABASE_URL });
+    expect(env.githubAppConfigured).toBe(false);
+    expect(env.github).toBeUndefined();
+  });
+
+  it.each([
+    { clientId: 'Iv1.abc', clientSecret: undefined, missing: 'TEAMEM_GITHUB_OAUTH_CLIENT_SECRET' },
+    { clientId: undefined, clientSecret: 'secret', missing: 'TEAMEM_GITHUB_OAUTH_CLIENT_ID' },
+  ])('rejects when only half of the OAuth pair is configured ($missing missing)', ({ clientId, clientSecret }) => {
+    expect(() =>
+      parseServerEnv({
+        DATABASE_URL,
+        TEAMEM_GITHUB_OAUTH_CLIENT_ID: clientId,
+        TEAMEM_GITHUB_OAUTH_CLIENT_SECRET: clientSecret,
+      }),
+    ).toThrow('must be configured together');
+  });
+
+  it('accepts OAuth credentials alongside partial webhook config (still not fully configured)', () => {
+    const env = parseServerEnv({
+      DATABASE_URL,
+      TEAMEM_GITHUB_OAUTH_CLIENT_ID: 'Iv1.abcdef12345678',
+      TEAMEM_GITHUB_OAUTH_CLIENT_SECRET: 'github_oauth_secret',
+      TEAMEM_GITHUB_APP_ID: '123456',
+    });
+    // OAuth pair is valid, webhook parts are individually optional.
+    // githubAppConfigured is false because the full App isn't wired.
+    expect(env.githubAppConfigured).toBe(false);
+    expect(env.github?.oauthClientId).toBe('Iv1.abcdef12345678');
+    expect(env.github?.oauthClientSecret).toBe('github_oauth_secret');
+    expect(env.github?.appId).toBe('123456');
+  });
+
+  // OAuth values are secrets; must never appear in error messages.
+  it('does not leak OAuth secret values in validation error messages', () => {
+    expect(() =>
+      parseServerEnv({
+        DATABASE_URL,
+        TEAMEM_GITHUB_OAUTH_CLIENT_ID: 'Iv1.sensitive',
+      }),
+    ).toThrow();
+    try {
+      parseServerEnv({
+        DATABASE_URL,
+        TEAMEM_GITHUB_OAUTH_CLIENT_ID: 'Iv1.sensitive',
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      // The OAuth secret value should not appear; only the key name.
+      expect(message).not.toContain('sensitive');
+      // Must mention the missing companion key.
+      expect(message).toContain('TEAMEM_GITHUB_OAUTH_CLIENT_SECRET');
+    }
+  });
+
+  // ── Blank-handling for OAuth fields ───────────────────────────────────
+
+  it('treats blank OAuth values as unconfigured (no half-pair error)', () => {
+    const env = parseServerEnv({
+      DATABASE_URL,
+      TEAMEM_GITHUB_OAUTH_CLIENT_ID: '',
+      TEAMEM_GITHUB_OAUTH_CLIENT_SECRET: '  ',
+    });
+    expect(env.githubAppConfigured).toBe(false);
+    expect(env.github).toBeUndefined();
   });
 
   it('never reads bare provider API key variables', () => {

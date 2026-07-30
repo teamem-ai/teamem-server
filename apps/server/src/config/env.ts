@@ -66,6 +66,14 @@ const optionalPrivateKey = z.preprocess(
   blankToUndefined,
   z.string().trim().min(1).optional(),
 );
+const optionalGithubClientId = z.preprocess(
+  blankToUndefined,
+  z.string().trim().min(1).optional(),
+);
+const optionalGithubClientSecret = z.preprocess(
+  blankToUndefined,
+  z.string().trim().min(1).optional(),
+);
 const optionalHttpUrl = z.preprocess(
   blankToUndefined,
   z
@@ -108,6 +116,8 @@ const rawServerEnvSchema = z
     TEAMEM_GITHUB_APP_ID: optionalGithubId,
     TEAMEM_GITHUB_INSTALLATION_ID: optionalGithubId,
     TEAMEM_GITHUB_PRIVATE_KEY: optionalPrivateKey,
+    TEAMEM_GITHUB_OAUTH_CLIENT_ID: optionalGithubClientId,
+    TEAMEM_GITHUB_OAUTH_CLIENT_SECRET: optionalGithubClientSecret,
     TEAMEM_ANTHROPIC_API_KEY: optionalSecret,
     TEAMEM_OPENAI_API_KEY: optionalSecret,
     TEAMEM_OPENROUTER_API_KEY: optionalSecret,
@@ -130,6 +140,22 @@ const rawServerEnvSchema = z
           'TEAMEM_OPENAI_COMPAT_BASE_URL and TEAMEM_OPENAI_COMPAT_API_KEY must be configured together',
       });
     }
+
+    const hasOauthClientId = env.TEAMEM_GITHUB_OAUTH_CLIENT_ID !== undefined;
+    const hasOauthClientSecret = env.TEAMEM_GITHUB_OAUTH_CLIENT_SECRET !== undefined;
+
+    if (hasOauthClientId !== hasOauthClientSecret) {
+      context.addIssue({
+        code: 'custom',
+        path: [
+          hasOauthClientId
+            ? 'TEAMEM_GITHUB_OAUTH_CLIENT_SECRET'
+            : 'TEAMEM_GITHUB_OAUTH_CLIENT_ID',
+        ],
+        message:
+          'TEAMEM_GITHUB_OAUTH_CLIENT_ID and TEAMEM_GITHUB_OAUTH_CLIENT_SECRET must be configured together (they belong to the same GitHub App)',
+      });
+    }
   });
 
 export interface GithubEnvironment {
@@ -138,6 +164,10 @@ export interface GithubEnvironment {
   installationId?: string;
   /** RSA private key in PEM format for GitHub App authentication. */
   privateKey?: string;
+  /** OAuth Client ID from the same GitHub App (used for user login). */
+  oauthClientId?: string;
+  /** OAuth Client Secret from the same GitHub App (used for user login). */
+  oauthClientSecret?: string;
 }
 
 export interface ServerEnvironment {
@@ -146,6 +176,12 @@ export interface ServerEnvironment {
   port: number;
   allInOne: boolean;
   github?: GithubEnvironment;
+  /**
+   * True when the single GitHub App is fully configured for both
+   * OAuth login AND webhook/installation ingestion. Used by health
+   * checks and the frontend to signal whether GitHub login is available.
+   */
+  githubAppConfigured: boolean;
   llmProviders: ResolvedLlmConfig[];
 }
 
@@ -160,7 +196,23 @@ export function parseServerEnv(environment: Environment = process.env): ServerEn
     env.TEAMEM_GITHUB_WEBHOOK_SECRET !== undefined ||
     env.TEAMEM_GITHUB_APP_ID !== undefined ||
     env.TEAMEM_GITHUB_INSTALLATION_ID !== undefined ||
-    env.TEAMEM_GITHUB_PRIVATE_KEY !== undefined;
+    env.TEAMEM_GITHUB_PRIVATE_KEY !== undefined ||
+    env.TEAMEM_GITHUB_OAUTH_CLIENT_ID !== undefined ||
+    env.TEAMEM_GITHUB_OAUTH_CLIENT_SECRET !== undefined;
+
+  /**
+   * The GitHub App is considered fully configured when all five
+   * credentials are present: App ID, private key, webhook secret,
+   * OAuth client ID, and OAuth client secret. Installation ID can be
+   * provided later (it is derivable from the webhook event).
+   */
+  const githubAppConfigured =
+    env.TEAMEM_GITHUB_APP_ID !== undefined &&
+    env.TEAMEM_GITHUB_PRIVATE_KEY !== undefined &&
+    env.TEAMEM_GITHUB_WEBHOOK_SECRET !== undefined &&
+    env.TEAMEM_GITHUB_OAUTH_CLIENT_ID !== undefined &&
+    env.TEAMEM_GITHUB_OAUTH_CLIENT_SECRET !== undefined;
+
   const llmProviders: ResolvedLlmConfig[] = [];
 
   if (env.TEAMEM_ANTHROPIC_API_KEY !== undefined) {
@@ -194,8 +246,11 @@ export function parseServerEnv(environment: Environment = process.env): ServerEn
           appId: env.TEAMEM_GITHUB_APP_ID,
           installationId: env.TEAMEM_GITHUB_INSTALLATION_ID,
           privateKey: env.TEAMEM_GITHUB_PRIVATE_KEY,
+          oauthClientId: env.TEAMEM_GITHUB_OAUTH_CLIENT_ID,
+          oauthClientSecret: env.TEAMEM_GITHUB_OAUTH_CLIENT_SECRET,
         }
       : undefined,
+    githubAppConfigured,
     llmProviders,
   };
 }
