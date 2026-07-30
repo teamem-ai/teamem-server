@@ -216,6 +216,10 @@ describe.skipIf(!url)('enqueue compilation (live Postgres)', () => {
     await db.delete(schema.events);
     try { await db.delete(schema.apiKeys); } catch { /* table may not exist */ }
     await db.delete(schema.principals);
+    await db.delete(schema.memberships);
+    await db.delete(schema.invites);
+    await db.delete(schema.webSessions);
+    await db.delete(schema.users);
     await db.delete(schema.projects);
     await db.delete(schema.teams);
   });

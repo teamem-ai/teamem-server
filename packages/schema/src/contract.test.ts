@@ -15,12 +15,16 @@ import {
   eventSummary,
   evidence,
   ingestEventRequest,
+  invite,
   jobEventResult,
+  membership,
   principalId,
   searchRequest,
   searchResponse,
   source,
   teamRole,
+  user as userDto,
+  webSession,
   CONTRACT_ADDITIVE_CHANGES,
   CONTRACT_STATUS,
   KNOWN_AUDIT_ACTIONS,
@@ -429,5 +433,110 @@ describe('audit (N7 — open action registry)', () => {
     expect(
       auditItem.safeParse({ ...baseAudit, action: 'future.new_action' }).success,
     ).toBe(true);
+  });
+});
+
+describe('auth identity DTOs (v0.3 — DUA-222)', () => {
+  const validUser = {
+    id: 'usr_abc123',
+    githubId: 42,
+    githubLogin: 'octocat',
+    avatarUrl: 'https://avatars.githubusercontent.com/u/42',
+    createdAt: '2026-07-17T00:00:00.000Z',
+  } as const;
+
+  const validMembership = {
+    userId: 'usr_abc123',
+    teamId: 'team_abc',
+    role: 'member',
+    createdAt: '2026-07-17T00:00:00.000Z',
+  } as const;
+
+  const validInvite = {
+    id: 'inv_abc123',
+    teamId: 'team_abc',
+    targetRole: 'viewer',
+    invitedByUserId: 'usr_admin',
+    expiresAt: '2026-07-24T00:00:00.000Z',
+    usedAt: null,
+    createdAt: '2026-07-17T00:00:00.000Z',
+  } as const;
+
+  const validSession = {
+    id: 'ses_abc123',
+    userId: 'usr_abc123',
+    issuedAt: '2026-07-17T00:00:00.000Z',
+    expiresAt: '2026-07-24T00:00:00.000Z',
+    revokedAt: null,
+    createdAt: '2026-07-17T00:00:00.000Z',
+  } as const;
+
+  it('accepts a valid user record', () => {
+    expect(userDto.safeParse(validUser).success).toBe(true);
+  });
+
+  it('accepts user with null avatarUrl', () => {
+    expect(userDto.safeParse({ ...validUser, avatarUrl: null }).success).toBe(true);
+  });
+
+  it('rejects user with invalid id prefix', () => {
+    expect(userDto.safeParse({ ...validUser, id: 'bad_123' }).success).toBe(false);
+    expect(userDto.safeParse({ ...validUser, id: 'pri_123' }).success).toBe(false);
+  });
+
+  it('rejects user with non-integer githubId', () => {
+    expect(userDto.safeParse({ ...validUser, githubId: '42' }).success).toBe(false);
+    expect(userDto.safeParse({ ...validUser, githubId: 0 }).success).toBe(false);
+  });
+
+  it('rejects user with empty githubLogin', () => {
+    expect(userDto.safeParse({ ...validUser, githubLogin: '' }).success).toBe(false);
+  });
+
+  it('accepts a valid membership with each teamRole value', () => {
+    for (const role of ['viewer', 'member', 'admin', 'owner'] as const) {
+      expect(membership.safeParse({ ...validMembership, role }).success).toBe(true);
+    }
+  });
+
+  it('rejects membership with invalid role', () => {
+    expect(membership.safeParse({ ...validMembership, role: 'superadmin' }).success).toBe(false);
+    expect(membership.safeParse({ ...validMembership, role: '' }).success).toBe(false);
+  });
+
+  it('accepts a valid invite with null usedAt (not yet used)', () => {
+    expect(invite.safeParse(validInvite).success).toBe(true);
+  });
+
+  it('accepts a valid invite with usedAt set (already consumed)', () => {
+    expect(
+      invite.safeParse({ ...validInvite, usedAt: '2026-07-18T00:00:00.000Z' }).success,
+    ).toBe(true);
+  });
+
+  it('rejects invite with invalid targetRole', () => {
+    expect(invite.safeParse({ ...validInvite, targetRole: 'superadmin' }).success).toBe(false);
+  });
+
+  it('rejects invite with invalid id prefix', () => {
+    expect(invite.safeParse({ ...validInvite, id: 'invite_1' }).success).toBe(false);
+  });
+
+  it('accepts a valid web session record', () => {
+    expect(webSession.safeParse(validSession).success).toBe(true);
+  });
+
+  it('accepts a revoked session', () => {
+    expect(
+      webSession.safeParse({ ...validSession, revokedAt: '2026-07-18T00:00:00.000Z' }).success,
+    ).toBe(true);
+  });
+
+  it('rejects session with invalid id prefix', () => {
+    expect(webSession.safeParse({ ...validSession, id: 'session_1' }).success).toBe(false);
+  });
+
+  it('CONTRACT_ADDITIVE_CHANGES includes DUA-222', () => {
+    expect(CONTRACT_ADDITIVE_CHANGES.some((c) => c.change.includes('DUA-222'))).toBe(true);
   });
 });

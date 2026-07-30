@@ -65,6 +65,10 @@ describe.skipIf(!url)('jobs repository (live Postgres)', () => {
     await db.delete(schema.events); // events referenced by job_events FK
     await db.delete(schema.apiKeys);
     await db.delete(schema.principals);
+    await db.delete(schema.memberships);
+    await db.delete(schema.invites);
+    await db.delete(schema.webSessions);
+    await db.delete(schema.users);
     await db.delete(schema.projects);
     await db.delete(schema.teams);
   });

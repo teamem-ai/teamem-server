@@ -28,6 +28,27 @@ export const CONTRACT_STATUS = 'v0.3-additive' as const;
  */
 export const CONTRACT_ADDITIVE_CHANGES = [
   {
+    change: 'DUA-229: SessionStart context injection DTOs',
+    summary:
+      'New GET /v1/context endpoint DTOs: contextRequest (projectId) ' +
+      'and contextResponse (markdown, budgetUsed, conceptsIncluded, ' +
+      'conceptsAvailable). Provides token-budget-controlled markdown ' +
+      'summaries for agent SessionStart auto-injection.',
+    impact: {
+      database: 'None — context reads existing concepts; no schema changes needed.',
+      api: 'New GET /v1/context endpoint. Uses existing auth/scope middleware. ' +
+        'No existing endpoint behavior changed.',
+      cli: 'The CLI (teamem-ai/cli, M2) will call this endpoint via SessionStart hook.',
+      mcp: 'None — MCP context injection is a separate mechanism.',
+      ui: 'None — apps/web does not consume this DTO yet.',
+      compiler: 'None — context is a read path; F1/F2 compilation is unaffected.',
+      export: 'None — OKF export is an M3 concern.',
+      externalTsConsumers:
+        'Fully additive: new file, new exports. Existing imports and runtime ' +
+        'behavior are unaffected. No published npm release of @teamem/schema exists yet.',
+    },
+  },
+  {
     change: 'DUA-129: generic connector persistence seam',
     summary:
       "source.channel gains 'external' and source.kind gains 'external_event' " +
@@ -73,6 +94,35 @@ export const CONTRACT_ADDITIVE_CHANGES = [
     },
   },
   {
+    change: 'DUA-222: users/sessions/invites/memberships DTOs (M2 auth identity)',
+    summary:
+      'New auth identity DTOs: user (GitHub-authenticated user record), ' +
+      'membership (user↔team role binding, unique per user+team), ' +
+      'invite (team invitation with token hash, target role, single-use), ' +
+      'webSession (session record with irreversible token hash). ' +
+      'New ID schemas: userId (usr_), sessionId (ses_), inviteId (inv_). ' +
+      'All DTOs are fully additive — no existing type changed or removed.',
+    impact: {
+      database:
+        'New tables (users, web_sessions, invites, memberships) added via ' +
+        'Drizzle migration in apps/server; team_role pgEnum mirrors the ' +
+        'already-frozen teamRole Zod enum. Composite FKs and unique ' +
+        'constraints enforce tenant consistency.',
+      api: 'No HTTP routes exist yet for these DTOs (AUTH-02/03 will build ' +
+        'login, session, invite, and membership endpoints). Response ' +
+        'shapes in GET /v1/memberships etc. will use these DTOs when built.',
+      cli: 'None — the CLI does not manage users, sessions, invites, or memberships.',
+      mcp: 'None — the MCP endpoint does not consume these DTOs directly.',
+      ui: 'None — apps/web does not consume these DTOs yet (M2 onboarding will).',
+      compiler: 'None — users/memberships are auth-layer concerns, not compiler input.',
+      export: 'None — OKF export is an M3 concern.',
+      externalTsConsumers:
+        'Fully additive: new exports (user, membership, invite, webSession, ' +
+        'userId, sessionId, inviteId) alongside existing auth exports. ' +
+        'No published npm release of @teamem/schema exists yet.',
+    },
+  },
+  {
     change: 'DUA-203: search request/response DTOs',
     summary:
       'New POST /v1/search endpoint DTOs: searchRequest (projectId, query, ' +
@@ -108,3 +158,4 @@ export * from './event.js';
 export * from './job.js';
 export * from './audit.js';
 export * from './search.js';
+export * from './context.js';

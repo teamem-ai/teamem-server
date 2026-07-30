@@ -38,6 +38,7 @@ import { getPageTool, getPageHandler } from './mcp/tools/get_page.js';
 import { timelineTool, timelineHandler } from './mcp/tools/timeline.js';
 import { searchTool, searchHandler } from './mcp/tools/search.js';
 import { buildSearchRoutes, type SearchRoutesDeps } from './http/routes/search.js';
+import { buildContextRoutes } from './http/routes/context.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
 
 export interface AppDeps extends HealthDeps {
@@ -137,6 +138,12 @@ export function buildApp(deps: AppDeps = {}) {
     app.route(
       '/',
       buildSearchRoutes(searchDeps),
+    );
+
+    // Context injection endpoint — GET /v1/context (DUA-229 M2-GOV-03).
+    app.route(
+      '/',
+      buildContextRoutes({ db: deps.db }),
     );
 
     // MCP streamable HTTP endpoint (M1-MCP-01 scaffold, extended DUA-210).
