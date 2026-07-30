@@ -40,6 +40,7 @@ import { searchTool, searchHandler } from './mcp/tools/search.js';
 import { buildSearchRoutes, type SearchRoutesDeps } from './http/routes/search.js';
 import { buildContextRoutes } from './http/routes/context.js';
 import { buildAuthRoutes } from './http/routes/auth.js';
+import { buildAuditRoutes } from './http/routes/audit.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
 
@@ -82,6 +83,16 @@ export function buildApp(deps: AppDeps = {}) {
   // Auth routes — wired when OAuth config and db are both available.
   if (deps.githubOAuth && deps.db) {
     app.route('/', buildAuthRoutes(deps.githubOAuth, deps.db));
+
+    // Audit query routes (DUA-227 M2-GOV-01) — management capability;
+    // web session + admin/owner role required.
+    app.route(
+      '/',
+      buildAuditRoutes({
+        db: deps.db,
+        oauthConfig: deps.githubOAuth,
+      }),
+    );
   }
 
   // Ingestion routes — wired only when db is available.
