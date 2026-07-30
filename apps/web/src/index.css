@@ -1,0 +1,511 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   teamem portal — Design tokens (Light theme)
+   Mirrors docs/ui-design/assets/main.css design system
+   ============================================================ */
+:root {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --surface-2: #f4f4f5;
+  --surface-3: #e9e9ec;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #18181b;
+  --text-2: #52525b;
+  --text-3: #a1a1aa;
+
+  --accent: #4f46e5;
+  --accent-strong: #4338ca;
+  --accent-soft: rgba(79, 70, 229, 0.09);
+  --accent-soft-2: rgba(79, 70, 229, 0.16);
+  --ring: rgba(79, 70, 229, 0.45);
+
+  --btn-bg: #18181b;
+  --btn-bg-hover: #3f3f46;
+  --btn-fg: #fafafa;
+
+  --green: #16a34a;
+  --green-soft: rgba(22, 163, 74, 0.11);
+  --amber: #d97706;
+  --amber-soft: rgba(217, 119, 6, 0.12);
+  --red: #dc2626;
+  --red-soft: rgba(220, 38, 38, 0.1);
+  --blue: #2563eb;
+  --blue-soft: rgba(37, 99, 235, 0.11);
+  --violet: #7c3aed;
+  --violet-soft: rgba(124, 58, 237, 0.11);
+  --sky: #0284c7;
+  --sky-soft: rgba(2, 132, 199, 0.11);
+  --emerald: #059669;
+  --emerald-soft: rgba(5, 150, 105, 0.11);
+  --rose: #e11d48;
+  --rose-soft: rgba(225, 29, 72, 0.1);
+  --slate: #475569;
+  --slate-soft: rgba(71, 85, 105, 0.12);
+  --zinc: #52525b;
+  --zinc-soft: rgba(82, 82, 91, 0.1);
+
+  --r-sm: 6px;
+  --r: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 12px 32px -8px rgba(0, 0, 0, 0.18),
+    0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* ============================================================
+   Dark theme
+   ============================================================ */
+.dark {
+  --bg: #0b0b0d;
+  --surface: #141417;
+  --surface-2: #1c1c21;
+  --surface-3: #26262c;
+  --border: #26262b;
+  --border-strong: #3a3a41;
+  --text: #f4f4f5;
+  --text-2: #a1a1aa;
+  --text-3: #63636b;
+
+  --accent: #818cf8;
+  --accent-strong: #a5b4fc;
+  --accent-soft: rgba(129, 140, 248, 0.12);
+  --accent-soft-2: rgba(129, 140, 248, 0.22);
+  --ring: rgba(129, 140, 248, 0.5);
+
+  --btn-bg: #fafafa;
+  --btn-bg-hover: #d4d4d8;
+  --btn-fg: #18181b;
+
+  --green: #4ade80;
+  --green-soft: rgba(74, 222, 128, 0.13);
+  --amber: #fbbf24;
+  --amber-soft: rgba(251, 191, 36, 0.13);
+  --red: #f87171;
+  --red-soft: rgba(248, 113, 113, 0.13);
+  --blue: #60a5fa;
+  --blue-soft: rgba(96, 165, 250, 0.14);
+  --violet: #a78bfa;
+  --violet-soft: rgba(167, 139, 250, 0.14);
+  --sky: #38bdf8;
+  --sky-soft: rgba(56, 189, 248, 0.14);
+  --emerald: #34d399;
+  --emerald-soft: rgba(52, 211, 153, 0.14);
+  --rose: #fb7185;
+  --rose-soft: rgba(251, 113, 133, 0.13);
+  --slate: #94a3b8;
+  --slate-soft: rgba(148, 163, 184, 0.15);
+  --zinc: #a1a1aa;
+  --zinc-soft: rgba(161, 161, 170, 0.14);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px -8px rgba(0, 0, 0, 0.6),
+    0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* ============================================================
+   Base layer
+   ============================================================ */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  a:hover {
+    text-decoration: underline;
+  }
+
+  ::selection {
+    background: var(--accent-soft-2);
+  }
+}
+
+/* ============================================================
+   Component layer — badges, banners, empty states, etc.
+   Mirrors the CSS component classes from the design system.
+   ============================================================ */
+@layer components {
+  /* ---------- type badges (6) ---------- */
+  .tbadge {
+    @apply inline-flex items-center gap-[5px] font-semibold text-[11.5px] leading-none px-2 py-1 rounded-full whitespace-nowrap tracking-[0.01em];
+  }
+  .tbadge svg {
+    width: 12px;
+    height: 12px;
+    flex: none;
+  }
+  .tbadge.decision {
+    color: var(--violet);
+    background: var(--violet-soft);
+  }
+  .tbadge.gotcha {
+    color: var(--amber);
+    background: var(--amber-soft);
+  }
+  .tbadge.convention {
+    color: var(--sky);
+    background: var(--sky-soft);
+  }
+  .tbadge.runbook {
+    color: var(--emerald);
+    background: var(--emerald-soft);
+  }
+  .tbadge.service {
+    color: var(--slate);
+    background: var(--slate-soft);
+  }
+  .tbadge.concept {
+    color: var(--rose);
+    background: var(--rose-soft);
+  }
+
+  /* ---------- status badges (4) — dot-style ---------- */
+  .sbadge {
+    @apply inline-flex items-center gap-[6px] font-medium text-xs leading-none whitespace-nowrap;
+  }
+  .sbadge .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 99px;
+    flex: none;
+  }
+  .sbadge.active {
+    color: var(--text-3);
+  }
+  .sbadge.active .dot {
+    background: var(--green);
+  }
+  .sbadge.superseded {
+    color: var(--text-3);
+  }
+  .sbadge.superseded .dot {
+    background: var(--zinc);
+  }
+  .sbadge.needs-review {
+    color: var(--blue);
+  }
+  .sbadge.needs-review .dot {
+    background: var(--blue);
+  }
+  .sbadge.disputed {
+    color: var(--amber);
+    font-weight: 600;
+    background: var(--amber-soft);
+    padding: 4px 8px;
+    border-radius: 99px;
+    gap: 5px;
+  }
+  .sbadge.disputed svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  /* ---------- confidence meter (3 bars) ---------- */
+  .conf-meter {
+    @apply inline-flex items-center gap-[6px];
+  }
+  .conf-meter .bars {
+    @apply inline-flex gap-[2.5px] items-end;
+  }
+  .conf-meter .bars i {
+    width: 4px;
+    border-radius: 2px;
+    background: var(--surface-3);
+  }
+  .conf-meter .bars i:nth-child(1) {
+    height: 5px;
+  }
+  .conf-meter .bars i:nth-child(2) {
+    height: 9px;
+  }
+  .conf-meter .bars i:nth-child(3) {
+    height: 13px;
+  }
+  .conf-meter.high .bars i {
+    background: var(--green);
+  }
+  .conf-meter.medium .bars i:nth-child(-n + 2) {
+    background: var(--amber);
+  }
+  .conf-meter.low .bars i:nth-child(-n + 1) {
+    background: var(--red);
+  }
+  .conf-meter .clabel {
+    font-size: 11.5px;
+    color: var(--text-3);
+  }
+
+  /* ---------- pills (generic, colored, soon) ---------- */
+  .pill {
+    @apply inline-flex items-center gap-[5px] font-medium text-xs leading-none px-[9px] py-1 rounded-full border whitespace-nowrap;
+    background: var(--surface-2);
+    color: var(--text-2);
+    border-color: var(--border);
+  }
+  .pill svg {
+    width: 12px;
+    height: 12px;
+  }
+  .pill.green {
+    color: var(--green);
+    background: var(--green-soft);
+    border-color: transparent;
+  }
+  .pill.red {
+    color: var(--red);
+    background: var(--red-soft);
+    border-color: transparent;
+  }
+  .pill.blue {
+    color: var(--blue);
+    background: var(--blue-soft);
+    border-color: transparent;
+  }
+  .pill.amber {
+    color: var(--amber);
+    background: var(--amber-soft);
+    border-color: transparent;
+  }
+  .pill.violet {
+    color: var(--violet);
+    background: var(--violet-soft);
+    border-color: transparent;
+  }
+  .pill.soon {
+    font: 700 9.5px/1 var(--font-mono);
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px dashed var(--accent);
+    padding: 3px 6px;
+    border-radius: 4px;
+  }
+
+  /* ---------- role badges ---------- */
+  .role-badge {
+    @apply font-semibold text-[11.5px] leading-none px-2 py-1 rounded-sm whitespace-nowrap;
+  }
+  .role-badge.owner {
+    color: var(--violet);
+    background: var(--violet-soft);
+  }
+  .role-badge.admin {
+    color: var(--blue);
+    background: var(--blue-soft);
+  }
+  .role-badge.member {
+    color: var(--green);
+    background: var(--green-soft);
+  }
+  .role-badge.viewer {
+    color: var(--text-2);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+  }
+
+  /* ---------- banners ---------- */
+  .banner {
+    @apply flex gap-[10px] items-start p-3 rounded text-[13px] leading-[1.5] border;
+  }
+  .banner svg.ic {
+    width: 16px;
+    height: 16px;
+    margin-top: 1px;
+  }
+  .banner .b-title {
+    font-weight: 600;
+  }
+  .banner.info {
+    background: var(--blue-soft);
+    border-color: transparent;
+    color: var(--text);
+  }
+  .banner.info svg.ic {
+    color: var(--blue);
+  }
+  .banner.warn {
+    background: var(--amber-soft);
+    border-color: transparent;
+    color: var(--text);
+  }
+  .banner.warn svg.ic {
+    color: var(--amber);
+  }
+  .banner.error {
+    background: var(--red-soft);
+    border-color: transparent;
+    color: var(--text);
+  }
+  .banner.error svg.ic {
+    color: var(--red);
+  }
+  .banner.success {
+    background: var(--green-soft);
+    border-color: transparent;
+    color: var(--text);
+  }
+  .banner.success svg.ic {
+    color: var(--green);
+  }
+
+  /* ---------- empty state ---------- */
+  .empty-state {
+    @apply flex flex-col items-center text-center py-14 px-6;
+  }
+  .empty-state .e-icon {
+    @apply w-12 h-12 rounded-lg flex items-center justify-center mb-[14px];
+    background: var(--surface-2);
+    color: var(--text-3);
+  }
+  .empty-state .e-icon svg {
+    width: 22px;
+    height: 22px;
+  }
+  .empty-state h3 {
+    @apply text-[15px] mb-[6px];
+  }
+  .empty-state p {
+    color: var(--text-2);
+    font-size: 13.5px;
+    max-width: 460px;
+    line-height: 1.6;
+  }
+  .empty-state .e-actions {
+    @apply flex gap-2 mt-[18px] flex-wrap justify-center;
+  }
+
+  /* ---------- command block ---------- */
+  .cmd-block {
+    @apply flex items-center gap-[10px] rounded px-[14px] py-[11px];
+    background: #18181b;
+    border: 1px solid #27272a;
+  }
+  .dark .cmd-block {
+    background: #0b0b0d;
+    border-color: #26262b;
+  }
+  .cmd-block code {
+    @apply flex-1 min-w-0 whitespace-pre-wrap break-all;
+    font: 400 12.5px/1.6 var(--font-mono);
+    color: #e4e4e7;
+  }
+  .cmd-block .copy-btn {
+    @apply inline-flex items-center gap-[5px] rounded-md px-[9px] py-[5px] cursor-pointer flex-none;
+    font: 500 11.5px var(--font-sans);
+    color: #a1a1aa;
+    background: #27272a;
+    border: 1px solid #3f3f46;
+  }
+  .cmd-block .copy-btn:hover {
+    background: #3f3f46;
+    color: #fafafa;
+  }
+
+  /* ---------- key reveal block ---------- */
+  .key-reveal {
+    @apply flex items-center gap-3 rounded px-[18px] py-4;
+    background: #18181b;
+    border: 1px solid #3f3f46;
+  }
+  .dark .key-reveal {
+    background: #0b0b0d;
+  }
+  .key-reveal code {
+    @apply flex-1 break-all;
+    font: 600 15px/1.4 var(--font-mono);
+    color: #fbbf24;
+    letter-spacing: 0.02em;
+  }
+
+  /* ---------- skeleton ---------- */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--surface-2);
+    border-radius: 6px;
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.5),
+      transparent
+    );
+    animation: sk 1.4s infinite;
+    transform: translateX(-100%);
+  }
+  .dark .skeleton::after {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.08),
+      transparent
+    );
+  }
+  @keyframes sk {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton::after {
+      animation: none;
+    }
+  }
+
+  /* ---------- copy chip ---------- */
+  .copy-chip {
+    @apply inline-flex items-center gap-[6px] rounded-sm px-2 py-1 cursor-pointer max-w-full;
+    font: 400 12px/1.5 var(--font-mono);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    transition: border-color 0.15s;
+  }
+  .copy-chip:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .copy-chip svg {
+    width: 12px;
+    height: 12px;
+    color: var(--text-3);
+  }
+}
