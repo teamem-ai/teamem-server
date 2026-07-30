@@ -45,14 +45,16 @@ export function buildTeamsRoutes(deps: TeamsDeps): Hono {
   const { db } = deps;
   const routes = new Hono();
 
-  // ── Session middleware — all routes require a valid web session ─────────
-  routes.use('*', requireWebSession(db));
+  // ── Session middleware applied per-route (NOT use('*') — that would ──
+  // leak to every other route in the combined app when mounted at '/').
+  // These two routes only need requireWebSession (no team membership
+  // check: create-team is the onboarding path, mine crosses all teams).
 
   // ── POST /v1/teams ─────────────────────────────────────────────────────
   // Create a new team. The session user automatically becomes the owner.
   // No team membership check is needed here — the user may have no team yet
   // (this is the onboarding path).
-  routes.post('/v1/teams', async (c: Context) => {
+  routes.post('/v1/teams', requireWebSession(db), async (c: Context) => {
     const requestId = c.get(REQUEST_ID_KEY) as string;
     const sessionUser = getSessionUser(c);
 
@@ -112,7 +114,7 @@ export function buildTeamsRoutes(deps: TeamsDeps): Hono {
 
   // ── GET /v1/teams/mine ─────────────────────────────────────────────────
   // List all teams the session user is a member of.
-  routes.get('/v1/teams/mine', async (c: Context) => {
+  routes.get('/v1/teams/mine', requireWebSession(db), async (c: Context) => {
     const requestId = c.get(REQUEST_ID_KEY) as string;
     const sessionUser = getSessionUser(c);
 
