@@ -41,6 +41,8 @@ import { buildSearchRoutes, type SearchRoutesDeps } from './http/routes/search.j
 import { buildContextRoutes } from './http/routes/context.js';
 import { buildAuthRoutes } from './http/routes/auth.js';
 import { buildAuditRoutes } from './http/routes/audit.js';
+import { buildMembersRoutes } from './http/routes/members.js';
+import { buildInvitesRoutes } from './http/routes/invites.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
 
@@ -93,6 +95,12 @@ export function buildApp(deps: AppDeps = {}) {
         oauthConfig: deps.githubOAuth,
       }),
     );
+
+    // Membership routes — team member listing and role management (admin+).
+    app.route('/', buildMembersRoutes(deps.githubOAuth, deps.db));
+
+    // Invite routes — team invitation generation (admin+) and acceptance.
+    app.route('/', buildInvitesRoutes(deps.db, deps.githubOAuth.serverBaseUrl));
   }
 
   // Ingestion routes — wired only when db is available.
