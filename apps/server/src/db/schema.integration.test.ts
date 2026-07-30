@@ -40,6 +40,8 @@ describe.skipIf(!url)('schema tenant & idempotency invariants (live Postgres)', 
       DELETE FROM concept_paths; DELETE FROM concept_evidence;
       DELETE FROM concept_contributors; DELETE FROM concepts;
       DELETE FROM events; DELETE FROM api_keys; DELETE FROM principals;
+      DELETE FROM memberships; DELETE FROM invites;
+      DELETE FROM web_sessions; DELETE FROM users;
       DELETE FROM projects; DELETE FROM teams;
     `);
     await db.end();
@@ -253,5 +255,182 @@ describe.skipIf(!url)('schema tenant & idempotency invariants (live Postgres)', 
       WHERE tablename = 'concepts' AND indexname = 'concepts_search_fts_gin'
     `);
     expect(rows).toHaveLength(1);
+  });
+
+  // ── DUA-222: M2 auth tables — users, sessions, invites, memberships ──
+
+  it('DUA-222: users table has expected columns and unique github_id', async () => {
+    // Insert a user.
+    await exec(`
+      INSERT INTO users (id, github_id, github_login, avatar_url)
+      VALUES ('usr_test', 12345, 'testuser', 'https://avatars.githubusercontent.com/u/12345')
+    `);
+    const { rows } = await db.query(
+      `SELECT * FROM users WHERE id = 'usr_test'`,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].github_id).toBe(12345);
+    expect(rows[0].github_login).toBe('testuser');
+  });
+
+  it('DUA-222: duplicate github_id is rejected (unique constraint)', async () => {
+    await exec(`
+      INSERT INTO users (id, github_id, github_login)
+      VALUES ('usr_a', 99991, 'user_a')
+    `);
+    await expectViolation(
+      `INSERT INTO users (id, github_id, github_login)
+       VALUES ('usr_b', 99991, 'user_b')`,
+      'users_github_id_unique',
+    );
+  });
+
+  it('DUA-222: duplicate (user_id, team_id) membership is rejected (PK)', async () => {
+    await exec(`
+      INSERT INTO users (id, github_id, github_login)
+      VALUES ('usr_mem', 99992, 'member_user')
+    `);
+    await exec(`
+      INSERT INTO memberships (user_id, team_id, role)
+      VALUES ('usr_mem', 'team_a', 'viewer')
+    `);
+    await expectViolation(
+      `INSERT INTO memberships (user_id, team_id, role)
+       VALUES ('usr_mem', 'team_a', 'admin')`,
+      'memberships_user_id_team_id_pk',
+    );
+  });
+
+  it('DUA-222: membership with non-existent user_id is rejected (FK)', async () => {
+    await expectViolation(
+      `INSERT INTO memberships (user_id, team_id, role)
+       VALUES ('usr_nonexistent', 'team_a', 'viewer')`,
+      'memberships_user_id_users_id_fk',
+    );
+  });
+
+  it('DUA-222: membership with non-existent team_id is rejected (FK)', async () => {
+    await exec(`
+      INSERT INTO users (id, github_id, github_login)
+      VALUES ('usr_fk', 99993, 'fk_user')
+    `);
+    await expectViolation(
+      `INSERT INTO memberships (user_id, team_id, role)
+       VALUES ('usr_fk', 'team_nonexistent', 'viewer')`,
+      'memberships_team_id_teams_id_fk',
+    );
+  });
+
+  it('DUA-222: invites FK to teams and users is enforced', async () => {
+    await exec(`
+      INSERT INTO users (id, github_id, github_login)
+      VALUES ('usr_inviter', 99994, 'inviter')
+    `);
+    // Valid insert.
+    await exec(`
+      INSERT INTO invites (id, team_id, token_hash, target_role,
+        invited_by_user_id, expires_at)
+      VALUES ('inv_ok', 'team_a', 'hash_abc', 'viewer',
+        'usr_inviter', now() + interval '7 days')
+    `);
+    // Bad team FK.
+    await expectViolation(
+      `INSERT INTO invites (id, team_id, token_hash, target_role,
+        invited_by_user_id, expires_at)
+       VALUES ('inv_bad_team', 'team_nonexistent', 'hash_bad1', 'viewer',
+        'usr_inviter', now() + interval '7 days')`,
+      'invites_team_id_teams_id_fk',
+    );
+    // Bad user FK.
+    await expectViolation(
+      `INSERT INTO invites (id, team_id, token_hash, target_role,
+        invited_by_user_id, expires_at)
+       VALUES ('inv_bad_user', 'team_a', 'hash_bad2', 'viewer',
+        'usr_nonexistent', now() + interval '7 days')`,
+      'invites_invited_by_user_id_users_id_fk',
+    );
+  });
+
+  it('DUA-222: invite token_hash is unique', async () => {
+    await exec(`
+      INSERT INTO users (id, github_id, github_login)
+      VALUES ('usr_inviter2', 99995, 'inviter2')
+    `);
+    await exec(`
+      INSERT INTO invites (id, team_id, token_hash, target_role,
+        invited_by_user_id, expires_at)
+      VALUES ('inv_tok1', 'team_a', 'hash_xyz', 'viewer',
+        'usr_inviter2', now() + interval '7 days')
+    `);
+    await expectViolation(
+      `INSERT INTO invites (id, team_id, token_hash, target_role,
+        invited_by_user_id, expires_at)
+       VALUES ('inv_tok2', 'team_a', 'hash_xyz', 'admin',
+        'usr_inviter2', now() + interval '7 days')`,
+      'invites_token_hash_unique',
+    );
+  });
+
+  it('DUA-222: web_session FK to users is enforced', async () => {
+    await exec(`
+      INSERT INTO users (id, github_id, github_login)
+      VALUES ('usr_sess', 99996, 'session_user')
+    `);
+    // Valid insert.
+    await exec(`
+      INSERT INTO web_sessions (id, user_id, token_hash, issued_at, expires_at)
+      VALUES ('ses_ok', 'usr_sess', 'sess_hash_1', now(), now() + interval '1 day')
+    `);
+    // Bad user FK.
+    await expectViolation(
+      `INSERT INTO web_sessions (id, user_id, token_hash, issued_at, expires_at)
+       VALUES ('ses_bad', 'usr_nonexistent', 'sess_hash_2', now(), now() + interval '1 day')`,
+      'web_sessions_user_id_users_id_fk',
+    );
+  });
+
+  it('DUA-222: web_session token_hash is unique', async () => {
+    await exec(`
+      INSERT INTO users (id, github_id, github_login)
+      VALUES ('usr_sess2', 99997, 'session_user2')
+    `);
+    await exec(`
+      INSERT INTO web_sessions (id, user_id, token_hash, issued_at, expires_at)
+      VALUES ('ses_h1', 'usr_sess2', 'sess_hash_uq', now(), now() + interval '1 day')
+    `);
+    await expectViolation(
+      `INSERT INTO web_sessions (id, user_id, token_hash, issued_at, expires_at)
+       VALUES ('ses_h2', 'usr_sess2', 'sess_hash_uq', now(), now() + interval '1 day')`,
+      'web_sessions_token_hash_unique',
+    );
+  });
+
+  it('DUA-222: all four tables, team_role enum, FKs, and indexes exist after migration', async () => {
+    // Tables exist.
+    for (const table of ['users', 'web_sessions', 'invites', 'memberships']) {
+      const { rows } = await db.query(
+        `SELECT tablename FROM pg_tables WHERE tablename = '${table}'`,
+      );
+      expect(rows, `table ${table} should exist`).toHaveLength(1);
+    }
+    // team_role enum type exists.
+    const { rows: enumRows } = await db.query(
+      `SELECT typname FROM pg_type WHERE typname = 'team_role'`,
+    );
+    expect(enumRows).toHaveLength(1);
+    // Indexes exist.
+    for (const idx of [
+      'users_github_id_idx',
+      'web_sessions_user_idx',
+      'web_sessions_token_hash_idx',
+      'invites_team_idx',
+      'invites_token_hash_idx',
+      'memberships_team_idx',
+    ]) {
+      const { rows: idxRows } = await db.query(
+        `SELECT indexname FROM pg_indexes WHERE indexname = '${idx}'`,
+      );
+      expect(idxRows, `index ${idx} should exist`).toHaveLength(1);
+    }
   });
 });

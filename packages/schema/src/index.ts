@@ -73,6 +73,35 @@ export const CONTRACT_ADDITIVE_CHANGES = [
     },
   },
   {
+    change: 'DUA-222: users/sessions/invites/memberships DTOs (M2 auth identity)',
+    summary:
+      'New auth identity DTOs: user (GitHub-authenticated user record), ' +
+      'membership (user↔team role binding, unique per user+team), ' +
+      'invite (team invitation with token hash, target role, single-use), ' +
+      'webSession (session record with irreversible token hash). ' +
+      'New ID schemas: userId (usr_), sessionId (ses_), inviteId (inv_). ' +
+      'All DTOs are fully additive — no existing type changed or removed.',
+    impact: {
+      database:
+        'New tables (users, web_sessions, invites, memberships) added via ' +
+        'Drizzle migration in apps/server; team_role pgEnum mirrors the ' +
+        'already-frozen teamRole Zod enum. Composite FKs and unique ' +
+        'constraints enforce tenant consistency.',
+      api: 'No HTTP routes exist yet for these DTOs (AUTH-02/03 will build ' +
+        'login, session, invite, and membership endpoints). Response ' +
+        'shapes in GET /v1/memberships etc. will use these DTOs when built.',
+      cli: 'None — the CLI does not manage users, sessions, invites, or memberships.',
+      mcp: 'None — the MCP endpoint does not consume these DTOs directly.',
+      ui: 'None — apps/web does not consume these DTOs yet (M2 onboarding will).',
+      compiler: 'None — users/memberships are auth-layer concerns, not compiler input.',
+      export: 'None — OKF export is an M3 concern.',
+      externalTsConsumers:
+        'Fully additive: new exports (user, membership, invite, webSession, ' +
+        'userId, sessionId, inviteId) alongside existing auth exports. ' +
+        'No published npm release of @teamem/schema exists yet.',
+    },
+  },
+  {
     change: 'DUA-203: search request/response DTOs',
     summary:
       'New POST /v1/search endpoint DTOs: searchRequest (projectId, query, ' +
