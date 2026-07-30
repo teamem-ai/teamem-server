@@ -43,6 +43,8 @@ import { buildAuthRoutes } from './http/routes/auth.js';
 import { buildTeamsRoutes } from './http/routes/teams.js';
 import { buildProjectsRoutes } from './http/routes/projects.js';
 import { buildKeysRoutes } from './http/routes/keys.js';
+import { buildMembersRoutes } from './http/routes/members.js';
+import { buildInvitesRoutes } from './http/routes/invites.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
 
@@ -85,6 +87,9 @@ export function buildApp(deps: AppDeps = {}) {
   // Auth routes — wired when OAuth config and db are both available.
   if (deps.githubOAuth && deps.db) {
     app.route('/', buildAuthRoutes(deps.githubOAuth, deps.db));
+    app.route('/', buildMembersRoutes(deps.githubOAuth, deps.db));
+    // Invite routes — team invitation generation (admin+) and acceptance.
+    app.route('/', buildInvitesRoutes(deps.db, deps.githubOAuth.serverBaseUrl));
   }
 
   // Governance routes (teams, projects, keys) — wired when db is available.
