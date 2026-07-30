@@ -6,6 +6,10 @@ import { ComponentShowcase } from "@/pages/component-showcase";
 import { KnowledgePage } from "@/pages/knowledge-page";
 import { SoonPage } from "@/pages/soon-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
+import { EventsPage } from "@/pages/events-page";
+import { EventDetailPage } from "@/pages/event-detail-page";
+import { JobsPage } from "@/pages/jobs-page";
+import { JobDetailPage } from "@/pages/job-detail-page";
 
 export default function App() {
   return (
@@ -32,24 +36,10 @@ export default function App() {
                 />
               }
             />
-            <Route
-              path="/events"
-              element={
-                <PlaceholderPage
-                  title="Events"
-                  description="Raw development activity ingested from your sources."
-                />
-              }
-            />
-            <Route
-              path="/jobs"
-              element={
-                <PlaceholderPage
-                  title="Jobs"
-                  description="Compile jobs that turn events into knowledge pages."
-                />
-              }
-            />
+            <Route path="/events" element={<EventsPage />} />
+            <Route path="/events/:id" element={<EventDetailPage />} />
+            <Route path="/jobs" element={<JobsPage />} />
+            <Route path="/jobs/:id" element={<JobDetailPage />} />
             <Route
               path="/members"
               element={
