@@ -22,6 +22,7 @@ import { createCompileJobHandler } from './queue/worker.js';
 import { createLlmClient } from './llm/factory.js';
 import { createEmbeddingClient } from './llm/embedding/factory.js';
 import { startServer } from './server.js';
+import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import { bootstrapMain } from './commands/bootstrap.js';
 import { installShutdownHandlers } from './lifecycle.js';
 import { GitHubConnector } from './connectors/github/connector.js';
@@ -55,6 +56,17 @@ export function createRuntimeStartup(config: {
       return { stop: () => queue.stop() };
     },
     async startHttpServer() {
+      // Build GitHub OAuth config when OAuth credentials are present.
+      let githubOAuth: GitHubOAuthConfig | undefined;
+      if (env.github?.oauthClientId && env.github?.oauthClientSecret) {
+        githubOAuth = {
+          clientId: env.github.oauthClientId,
+          clientSecret: env.github.oauthClientSecret,
+          redirectUri: `${env.baseUrl}/auth/github/callback`,
+          serverBaseUrl: env.baseUrl,
+        };
+      }
+
       // The embedding client must reach the HTTP surface too, not just the
       // compile worker: POST /v1/search and every MCP tool resolve semantic
       // capability from it. Omitting it left the read path permanently in
@@ -64,6 +76,7 @@ export function createRuntimeStartup(config: {
         db: dbHandle.db,
         queue,
         embeddingClient,
+        githubOAuth,
       });
       // `serve()` from @hono/node-server starts listening asynchronously.
       // Wait for the server to be ready so an EADDRINUSE failure surfaces
