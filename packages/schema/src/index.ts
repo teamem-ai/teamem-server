@@ -28,6 +28,27 @@ export const CONTRACT_STATUS = 'v0.3-additive' as const;
  */
 export const CONTRACT_ADDITIVE_CHANGES = [
   {
+    change: 'DUA-229: SessionStart context injection DTOs',
+    summary:
+      'New GET /v1/context endpoint DTOs: contextRequest (projectId) ' +
+      'and contextResponse (markdown, budgetUsed, conceptsIncluded, ' +
+      'conceptsAvailable). Provides token-budget-controlled markdown ' +
+      'summaries for agent SessionStart auto-injection.',
+    impact: {
+      database: 'None — context reads existing concepts; no schema changes needed.',
+      api: 'New GET /v1/context endpoint. Uses existing auth/scope middleware. ' +
+        'No existing endpoint behavior changed.',
+      cli: 'The CLI (teamem-ai/cli, M2) will call this endpoint via SessionStart hook.',
+      mcp: 'None — MCP context injection is a separate mechanism.',
+      ui: 'None — apps/web does not consume this DTO yet.',
+      compiler: 'None — context is a read path; F1/F2 compilation is unaffected.',
+      export: 'None — OKF export is an M3 concern.',
+      externalTsConsumers:
+        'Fully additive: new file, new exports. Existing imports and runtime ' +
+        'behavior are unaffected. No published npm release of @teamem/schema exists yet.',
+    },
+  },
+  {
     change: 'DUA-129: generic connector persistence seam',
     summary:
       "source.channel gains 'external' and source.kind gains 'external_event' " +
@@ -108,3 +129,4 @@ export * from './event.js';
 export * from './job.js';
 export * from './audit.js';
 export * from './search.js';
+export * from './context.js';
