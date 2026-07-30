@@ -40,6 +40,9 @@ import { searchTool, searchHandler } from './mcp/tools/search.js';
 import { buildSearchRoutes, type SearchRoutesDeps } from './http/routes/search.js';
 import { buildContextRoutes } from './http/routes/context.js';
 import { buildAuthRoutes } from './http/routes/auth.js';
+import { buildTeamsRoutes } from './http/routes/teams.js';
+import { buildProjectsRoutes } from './http/routes/projects.js';
+import { buildKeysRoutes } from './http/routes/keys.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
 
@@ -82,6 +85,19 @@ export function buildApp(deps: AppDeps = {}) {
   // Auth routes — wired when OAuth config and db are both available.
   if (deps.githubOAuth && deps.db) {
     app.route('/', buildAuthRoutes(deps.githubOAuth, deps.db));
+  }
+
+  // Governance routes (teams, projects, keys) — wired when db is available.
+  // These are web-session-authenticated and require a valid OAuth session cookie.
+  if (deps.db) {
+    // Read host/port from env for the MCP command formatter; defaults
+    // match the standard Compose development topology.
+    const mcpHost = process.env['TEAMEM_HOST'] ?? '0.0.0.0';
+    const mcpPort = Number(process.env['TEAMEM_PORT'] ?? 8080);
+    const mcpConfig = { host: mcpHost, port: mcpPort };
+    app.route('/', buildTeamsRoutes({ db: deps.db, mcpConfig }));
+    app.route('/', buildProjectsRoutes({ db: deps.db }));
+    app.route('/', buildKeysRoutes({ db: deps.db, mcpConfig }));
   }
 
   // Ingestion routes — wired only when db is available.
