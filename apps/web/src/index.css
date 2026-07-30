@@ -159,6 +159,84 @@
    Mirrors the CSS component classes from the design system.
    ============================================================ */
 @layer components {
+  /* ---------- card ---------- */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* ---------- buttons ---------- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-[7px] whitespace-nowrap rounded-sm cursor-pointer transition-colors;
+    font: 500 13.5px/1 var(--font-sans);
+    padding: 9px 14px;
+    border: 1px solid transparent;
+    color: var(--text);
+    background: transparent;
+    text-decoration: none;
+  }
+  .btn:hover {
+    text-decoration: none;
+  }
+  .btn:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .btn-primary {
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+    box-shadow: var(--shadow-sm);
+  }
+  .btn-primary:hover {
+    background: var(--btn-bg-hover);
+  }
+  .btn-outline {
+    background: var(--surface);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
+  }
+  .btn-outline:hover {
+    background: var(--surface-2);
+  }
+  .btn-ghost {
+    color: var(--text-2);
+  }
+  .btn-ghost:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .btn-sm {
+    padding: 6px 10px;
+    font-size: 12.5px;
+  }
+  .btn[disabled],
+  .btn.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* ---------- page head ---------- */
+  .page-head {
+    @apply flex items-start gap-4 mb-5 flex-wrap;
+  }
+  .page-head .ph-text {
+    min-width: 0;
+  }
+  .page-head h1 {
+    @apply text-[22px] font-bold tracking-[-0.02em];
+  }
+  .page-head .sub {
+    color: var(--text-2);
+    margin-top: 4px;
+    font-size: 13.5px;
+    max-width: 640px;
+  }
+  .page-head .ph-actions {
+    @apply ml-auto flex gap-2 items-center flex-wrap;
+  }
   /* ---------- type badges (6) ---------- */
   .tbadge {
     @apply inline-flex items-center gap-[5px] font-semibold text-[11.5px] leading-none px-2 py-1 rounded-full whitespace-nowrap tracking-[0.01em];
@@ -451,6 +529,109 @@
     letter-spacing: 0.02em;
   }
 
+  /* ---------- table (members list) ---------- */
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  .table th {
+    font-weight: 600;
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-3);
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .table tr:last-child td {
+    border-bottom: 0;
+  }
+  .table tbody tr {
+    transition: background 0.12s;
+  }
+
+  /* ---------- table card ---------- */
+  .table-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* ---------- card padding ---------- */
+  .card-pad {
+    padding: 20px;
+  }
+
+  /* ---------- avatar ---------- */
+  .avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 99px;
+    font-weight: 600;
+    text-align: center;
+    flex: none;
+  }
+
+  /* ---------- concept row (knowledge list / member profile) ---------- */
+  .krow {
+    display: flex;
+    gap: 14px;
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border);
+    align-items: flex-start;
+    transition: background 0.12s;
+    cursor: pointer;
+  }
+  .krow:last-child {
+    border-bottom: 0;
+  }
+  .krow:hover {
+    background: var(--surface-2);
+  }
+  .krow .k-main {
+    flex: 1;
+    min-width: 0;
+  }
+  .krow .k-title {
+    font-weight: 600;
+    font-size: 14.5px;
+    line-height: 1.4;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+  .krow .k-meta {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin-top: 7px;
+    flex-wrap: wrap;
+    font-size: 12.5px;
+    color: var(--text-3);
+  }
+  .krow .k-meta .path {
+    font: 400 12px var(--font-mono);
+    color: var(--text-2);
+  }
+  .krow .k-side {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 7px;
+  }
+
   /* ---------- skeleton ---------- */
   .skeleton {
     position: relative;
@@ -507,5 +688,88 @@
     width: 12px;
     height: 12px;
     color: var(--text-3);
+  }
+
+  /* ---------- filter chip (role dropdown trigger) ---------- */
+  .filter-chip {
+    @apply inline-flex items-center gap-[6px] rounded-sm px-[9px] py-[4px] cursor-pointer;
+    font-size: 13px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .filter-chip:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-3);
+  }
+  .filter-chip:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* ---------- role option (radio card for invite modal) ---------- */
+  .role-option {
+    @apply flex gap-[10px] items-start p-[11px] rounded-sm cursor-pointer text-left w-full;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    transition: border-color 0.15s, background 0.15s;
+    margin-bottom: 8px;
+    font-family: inherit;
+  }
+  .role-option:hover {
+    border-color: var(--border-strong);
+  }
+  .role-option.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .role-option .role-desc {
+    font-size: 12px;
+    color: var(--text-3);
+    margin-top: 2px;
+    line-height: 1.45;
+  }
+
+  /* ---------- radio circle (inside role option) ---------- */
+  .radio-circle {
+    width: 16px;
+    height: 16px;
+    border-radius: 99px;
+    border: 1.5px solid var(--border-strong);
+    flex: none;
+    margin-top: 2px;
+    position: relative;
+    display: inline-block;
+  }
+  .role-option.selected .radio-circle {
+    border-color: var(--accent);
+  }
+  .role-option.selected .radio-circle::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: 99px;
+    background: var(--accent);
+  }
+
+  /* ---------- modal animation ---------- */
+  @keyframes modal-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  .animate-in {
+    animation: modal-in 0.2s ease-out;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-in {
+      animation: none;
+    }
   }
 }

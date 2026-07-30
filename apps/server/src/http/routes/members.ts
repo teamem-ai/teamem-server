@@ -16,7 +16,7 @@
  *   - Missing/invalid session returns 401.
  */
 import { z } from 'zod';
-import { teamRole } from '@teamem/schema';
+import { teamRole, conceptListQuery } from '@teamem/schema';
 import type { Context, Next, MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
 import type { AppDb } from '../../db/client.js';
@@ -28,6 +28,7 @@ import {
   ConflictError,
   InvalidRequestError,
 } from '../errors.js';
+import { listConcepts, type ConceptRow } from '../../db/repositories/concepts-read.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -124,6 +125,90 @@ export function buildMembersRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
     }));
 
     return c.json({ data: members });
+  });
+
+  // ── GET /v1/members/:userId/concepts ─────────────────────────────────────
+  // Returns concepts contributed by this member's linked principal.
+  // Requires a projectId query parameter (concepts are project-scoped).
+
+  routes.get('/v1/members/:userId/concepts', async (c) => {
+    const session = getSession(c);
+
+    if (!session.teamId) {
+      throw new NotFoundError('Member not found');
+    }
+
+    const targetUserId = c.req.param('userId');
+    if (!targetUserId) {
+      throw new InvalidRequestError('Missing userId parameter');
+    }
+
+    // Parse projectId from query
+    const rawQuery: Record<string, string | string[] | undefined> = {};
+    const allQuery = c.req.queries();
+    for (const [key, values] of Object.entries(allQuery)) {
+      rawQuery[key] = values?.[0];
+    }
+
+    const parsed = conceptListQuery.pick({ projectId: true, limit: true }).safeParse(rawQuery);
+    if (!parsed.success) {
+      throw new InvalidRequestError('Invalid query parameters');
+    }
+    const { projectId, limit = 20 } = parsed.data;
+
+    // Look up the member to get their linked principal.
+    const memberResult = await db.$client.query(
+      `SELECT m.role, u.github_login, u.github_id
+       FROM memberships m
+       JOIN users u ON u.id = m.user_id
+       WHERE m.user_id = $1 AND m.team_id = $2`,
+      [targetUserId, session.teamId],
+    );
+
+    if (memberResult.rows.length === 0) {
+      throw new NotFoundError('Member not found');
+    }
+
+    const githubId = memberResult.rows[0]!['github_id'] as number;
+
+    // Find the principal linked to this user's github_id.
+    const principalResult = await db.$client.query(
+      `SELECT p.id, p.display_login
+       FROM principals p
+       WHERE p.team_id = $1
+         AND p.provider = 'github'
+         AND p.provider_user_id = $2::text
+       LIMIT 1`,
+      [session.teamId, String(githubId)],
+    );
+
+    const principalId = principalResult.rows[0]?.['id'] as string | undefined;
+
+    if (!principalId) {
+      // No linked principal — this member has no verified contributions.
+      return c.json({ data: [], nextCursor: null });
+    }
+
+    // Query concepts via the repository (scoped to team+project).
+    const result = await listConcepts(db, {
+      teamId: session.teamId,
+      projectId,
+      contributor: principalId,
+      limit,
+    });
+
+    const data = result.rows.map((row: ConceptRow) => ({
+      uuid: row.uuid,
+      path: row.path ?? '',
+      type: row.type,
+      status: row.status,
+      confidence: row.confidence,
+      title: row.title,
+      tags: row.tags,
+      lastConfirmed: row.lastConfirmed.toISOString(),
+    }));
+
+    return c.json({ data, nextCursor: null });
   });
 
   // ── PATCH /v1/members/:userId ────────────────────────────────────────────
