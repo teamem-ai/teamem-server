@@ -630,6 +630,39 @@ describe.skipIf(!url)('Invite Links Routes (live Postgres)', () => {
       expect(err2.code).toBe('conflict');
     });
 
+    it('rejects an expired invite (409 conflict)', async () => {
+      const { teamId, userId: adminUserId } = await setupAdmin();
+
+      // Create an expired invite directly in the DB
+      const plaintext = `inv_${randomBytes(32).toString('base64url').replace(/=/g, '')}`;
+      const tokenHash = hashInviteToken(plaintext);
+      const inviteId = `inv_${randomBytes(12).toString('hex')}`;
+      const pastExpiry = new Date(Date.now() - 3600_000).toISOString();
+      await db.$client.query(
+        `INSERT INTO invites (id, team_id, token_hash, target_role, invited_by_user_id, expires_at)
+         VALUES ($1, $2, $3, 'member', $4, $5)`,
+        [inviteId, teamId, tokenHash, adminUserId, pastExpiry],
+      );
+
+      // Try to accept the expired invite
+      const accepterId = await createUser(999007, 'expiredaccepter');
+      const { plaintext: accepterSession } = await createSession(accepterId);
+
+      const res = await appRequest(`/teams/${teamId}/invites/accept`, {
+        method: 'POST',
+        headers: {
+          Cookie: `${SESSION_COOKIE_NAME}=${accepterSession}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ token: plaintext }),
+      });
+
+      expect(res.status).toBe(409);
+      const json = (await res.json()) as Record<string, unknown>;
+      const err = json.error as Record<string, unknown>;
+      expect(err.code).toBe('conflict');
+    });
+
     it('rejects unknown/malformed token (404)', async () => {
       const { teamId } = await setupAdmin();
       const userId = await createUser(999003, 'tokenprobe');

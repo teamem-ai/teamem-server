@@ -159,8 +159,7 @@ export function buildInvitesRoutes(
   // Error responses:
   //   400 — missing/malformed token
   //   404 — unknown token (same as genuinely missing invite)
-  //   409 — invite already used
-  //   410 — invite expired (note: we use 410 Gone for expired resources)
+  //   409 — invite already used or expired
   //
   // Note: This endpoint does NOT require team membership. The user is
   // joining the team — they don't have membership yet. Only the web
