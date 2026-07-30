@@ -530,11 +530,85 @@ describe.skipIf(!url)('Audit Query API (live Postgres)', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('GET /v1/audit — no content columns', () => {
-    it('SECURITY: results contain no query text, payload, or secret data', async () => {
-      // Insert an audit record with a sentinel string in requestId
-      // (requestId is a service-generated UUID, not query text)
+    it('SECURITY: sentinel strings in legitimate fields do not leak as content columns', async () => {
+      // Insert audit records with sentinel strings in WHITELISTED fields.
+      // The sentinel MUST appear in those fields (proving it was stored)
+      // but MUST NOT appear in any content/payload/query column name or
+      // as a value in a non-existent column.
+      //
+      // This is a true end-to-end check: we write sentinel data through
+      // the real write path, then verify the read path does not expose
+      // content-bearing fields. Unlike a static field-name assertion, this
+      // test fails if future code accidentally adds a content column to
+      // the response mapping.
+      const sentinel = 'ZEBRAFISH_SENTINEL_42';
+
       await insertAudit({
         action: 'search.query',
+        resourceType: 'concept',
+        resourceId: `res_${sentinel}`,
+        requestId: `req_${sentinel}`,
+        principalId: `pri_${sentinel.replace(/_/g, '')}`.slice(0, 50),
+      });
+
+      await insertAudit({
+        action: 'event.payload_read',
+        resourceType: 'event',
+        resourceId: `evt_${sentinel.replace(/_/g, '')}`.slice(0, 50),
+        requestId: `req_normal_${sentinel}`,
+        principalId: null,
+      });
+
+      const token = await createTestSession(ownerUser);
+      const res = await sessionRequest('/v1/audit', token);
+      expect(res.status).toBe(200);
+
+      const body = await res.json();
+      expect(body.data.length).toBeGreaterThanOrEqual(2);
+
+      // The sentinel MUST be present in the response (proving it was inserted
+      // and returned — the test is meaningful, not a vacuous assertion).
+      const bodyStr = JSON.stringify(body);
+      expect(bodyStr).toContain(sentinel);
+
+      // But it must ONLY appear as a value of a whitelisted field — never in
+      // a column name, never in a content/payload-bearing field.
+      const whitelistedFields = new Set([
+        'id', 'createdAt', 'requestId', 'principalId', 'credentialId',
+        'action', 'resourceType', 'resourceId', 'teamId', 'projectId',
+        'outcome', 'requestId', 'nextCursor', 'data',
+      ]);
+
+      const forbiddenContentFields = [
+        'query', 'payload', 'body', 'content', 'queryText',
+        'searchQuery', 'apiKey', 'token', 'secret', 'response',
+      ];
+
+      for (const item of body.data) {
+        // Every key in the item must be in the whitelist
+        for (const key of Object.keys(item)) {
+          expect(
+            whitelistedFields.has(key),
+            `Field "${key}" is not in the audit response whitelist`,
+          ).toBe(true);
+        }
+
+        // No forbidden content field may exist
+        for (const forbidden of forbiddenContentFields) {
+          expect(
+            item,
+            `Forbidden content field "${forbidden}" found in audit item`,
+          ).not.toHaveProperty(forbidden);
+        }
+      }
+    });
+
+    it('SECURITY: forbidden substrings never appear anywhere in the response', async () => {
+      // Broader scan: blocklist of patterns that must never enter audit
+      // responses under any circumstance. This catches leaked secrets in
+      // requestId, resourceId, or any future field.
+      await insertAudit({
+        action: 'concept.read',
         resourceType: 'concept',
         resourceId: 'some-resource-uuid',
         requestId: 'req_normal_request_id',
@@ -547,9 +621,7 @@ describe.skipIf(!url)('Audit Query API (live Postgres)', () => {
       const body = await res.json();
       const bodyStr = JSON.stringify(body);
 
-      // Sentinel strings that must NEVER appear in audit responses
       const forbiddenSubstrings = [
-        'ZEBRAFISH',
         'SECRET=',
         'Bearer ',
         'tm_',
@@ -566,26 +638,6 @@ describe.skipIf(!url)('Audit Query API (live Postgres)', () => {
           bodyStr,
           `Forbidden substring "${forbidden}" found in audit response`,
         ).not.toContain(forbidden);
-      }
-
-      // Verify specific whitelisted fields are present
-      for (const item of body.data) {
-        expect(item).toHaveProperty('id');
-        expect(item).toHaveProperty('createdAt');
-        expect(item).toHaveProperty('action');
-        expect(item).toHaveProperty('resourceType');
-        expect(item).toHaveProperty('outcome');
-
-        // These fields must NOT exist
-        expect(item).not.toHaveProperty('query');
-        expect(item).not.toHaveProperty('payload');
-        expect(item).not.toHaveProperty('body');
-        expect(item).not.toHaveProperty('content');
-        expect(item).not.toHaveProperty('queryText');
-        expect(item).not.toHaveProperty('searchQuery');
-        expect(item).not.toHaveProperty('apiKey');
-        expect(item).not.toHaveProperty('token');
-        expect(item).not.toHaveProperty('secret');
       }
     });
   });
@@ -639,6 +691,67 @@ describe.skipIf(!url)('Audit Query API (live Postgres)', () => {
 
       const body = await res.json();
       expect(body.data).toHaveLength(5);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Cross-team anti-enumeration
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('GET /v1/audit — cross-team anti-enumeration', () => {
+    it('returns empty list when admin queries with another teams projectId', async () => {
+      // Admin from main team queries audit with the OTHER team's projectId.
+      // Must return empty list (200), NOT 404 or 403 — indistinguishable
+      // from "this team has no audit records for that project".
+      await insertAudit({
+        teamId: otherTeamId,
+        projectId: otherProjectId,
+        action: 'concept.read',
+      });
+      await insertAudit({
+        teamId,
+        projectId,
+        action: 'event.ingest',
+      });
+
+      const token = await createTestSession(ownerUser);
+
+      // Query with the other team's projectId while authenticated as main team admin.
+      const res = await sessionRequest(
+        `/v1/audit?projectId=${otherProjectId}`,
+        token,
+      );
+      expect(res.status).toBe(200);
+
+      const body = await res.json();
+      // Must be empty — the SQL ANDs team_id=session.teamId with project_id=param,
+      // so no rows can match across teams. This is identical to "project exists
+      // but has no audit records", preventing enumeration of other teams' projects.
+      expect(body.data).toEqual([]);
+      expect(body.nextCursor).toBeNull();
+    });
+
+    it('returns empty list for non-existent projectId (same team)', async () => {
+      // Even for a projectId that doesn't exist in the admin's own team,
+      // the response is empty 200 — no 404 to signal "project not found".
+      const fakeProjectId = 'prj_nonexistent99';
+
+      await insertAudit({
+        teamId,
+        projectId,
+        action: 'concept.read',
+      });
+
+      const token = await createTestSession(ownerUser);
+      const res = await sessionRequest(
+        `/v1/audit?projectId=${fakeProjectId}`,
+        token,
+      );
+      expect(res.status).toBe(200);
+
+      const body = await res.json();
+      expect(body.data).toEqual([]);
+      expect(body.nextCursor).toBeNull();
     });
   });
 
