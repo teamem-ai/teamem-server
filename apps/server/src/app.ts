@@ -40,6 +40,7 @@ import { searchTool, searchHandler } from './mcp/tools/search.js';
 import { buildSearchRoutes, type SearchRoutesDeps } from './http/routes/search.js';
 import { buildContextRoutes } from './http/routes/context.js';
 import { buildAuthRoutes } from './http/routes/auth.js';
+import { buildInvitesRoutes } from './http/routes/invites.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
 
@@ -82,6 +83,8 @@ export function buildApp(deps: AppDeps = {}) {
   // Auth routes — wired when OAuth config and db are both available.
   if (deps.githubOAuth && deps.db) {
     app.route('/', buildAuthRoutes(deps.githubOAuth, deps.db));
+    // Invite routes — team invitation generation (admin+) and acceptance.
+    app.route('/', buildInvitesRoutes(deps.db, deps.githubOAuth.serverBaseUrl));
   }
 
   // Ingestion routes — wired only when db is available.
