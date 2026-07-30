@@ -69,6 +69,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@teamem/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
       clsx:
         specifier: ^2.1.1
         version: 2.1.1

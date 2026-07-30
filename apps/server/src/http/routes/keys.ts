@@ -40,6 +40,9 @@ import {
   mintKeyRequest as mintKeyRequestSchema,
   type MintKeyResponse,
   type ApiScope,
+  type KeyEntry,
+  type RevokeKeyResponse,
+  type RotateKeyResponse,
 } from '@teamem/schema';
 import { validateApiKeyScopes } from '../../db/repositories/api-keys.js';
 
@@ -171,6 +174,189 @@ export function buildKeysRoutes(deps: KeysDeps): Hono {
     );
 
     return c.json({ requestId, data: response }, 201);
+  });
+
+  // ── GET /v1/teams/:teamId/keys ────────────────────────────────────────
+  // List all API keys in the team. Requires admin+ role.
+  routes.get('/v1/teams/:teamId/keys', requireRole('admin'), async (c: Context) => {
+    const requestId = c.get(REQUEST_ID_KEY) as string;
+    const ws = getWebSession(c);
+    const teamId = ws.scope.teamId;
+
+    try {
+      const result = await db.$client.query(
+        `SELECT ak.id, ak.name, ak.scopes, ak.all_projects, ak.project_id,
+                ak.created_at, ak.last_used_at, ak.revoked_at,
+                p.name AS project_name
+         FROM api_keys ak
+         LEFT JOIN projects p ON p.id = ak.project_id AND p.team_id = ak.team_id
+         WHERE ak.team_id = $1
+         ORDER BY ak.created_at DESC`,
+        [teamId],
+      );
+
+      const keys: KeyEntry[] = result.rows.map((row) => ({
+        id: row['id'] as string,
+        name: row['name'] as string,
+        scopes: row['scopes'] as ApiScope[],
+        allProjects: row['all_projects'] as boolean,
+        projectId: (row['project_id'] as string) ?? null,
+        projectName: (row['project_name'] as string) ?? null,
+        createdAt: (row['created_at'] as Date).toISOString(),
+        lastUsedAt: row['last_used_at'] ? (row['last_used_at'] as Date).toISOString() : null,
+        revoked: row['revoked_at'] !== null,
+        revokedAt: row['revoked_at'] ? (row['revoked_at'] as Date).toISOString() : null,
+      }));
+
+      return c.json({ requestId, data: keys });
+    } catch (err) {
+      throw new InternalError('Failed to list API keys', { cause: err });
+    }
+  });
+
+  // ── POST /v1/teams/:teamId/keys/:keyId/revoke ────────────────────────
+  // Revoke an API key. Requires admin+ role.
+  routes.post('/v1/teams/:teamId/keys/:keyId/revoke', requireRole('admin'), async (c: Context) => {
+    const requestId = c.get(REQUEST_ID_KEY) as string;
+    const ws = getWebSession(c);
+    const teamId = ws.scope.teamId;
+    const keyId = c.req.param('keyId');
+
+    if (!keyId) {
+      throw new InvalidRequestError('Missing keyId parameter');
+    }
+
+    try {
+      const result = await db.$client.query(
+        `UPDATE api_keys SET revoked_at = NOW()
+         WHERE id = $1 AND team_id = $2 AND revoked_at IS NULL
+         RETURNING id, revoked_at`,
+        [keyId, teamId],
+      );
+
+      const row = result.rows[0];
+      if (!row) {
+        throw new NotFoundError();
+      }
+
+      const response: RevokeKeyResponse = {
+        id: row['id'] as string,
+        revoked: true,
+        revokedAt: (row['revoked_at'] as Date).toISOString(),
+      };
+
+      console.info(
+        JSON.stringify({
+          event: 'api_key_revoked',
+          requestId,
+          keyId,
+          teamId,
+          revokedByUserId: ws.userId,
+        }),
+      );
+
+      return c.json({ requestId, data: response });
+    } catch (err) {
+      if (err instanceof NotFoundError) throw err;
+      throw new InternalError('Failed to revoke API key', { cause: err });
+    }
+  });
+
+  // ── POST /v1/teams/:teamId/keys/:keyId/rotate ────────────────────────
+  // Rotate: mint a new key and revoke the old one simultaneously.
+  // Requires admin+ role.
+  routes.post('/v1/teams/:teamId/keys/:keyId/rotate', requireRole('admin'), async (c: Context) => {
+    const requestId = c.get(REQUEST_ID_KEY) as string;
+    const ws = getWebSession(c);
+    const teamId = ws.scope.teamId;
+    const oldKeyId = c.req.param('keyId');
+
+    if (!oldKeyId) {
+      throw new InvalidRequestError('Missing keyId parameter');
+    }
+
+    try {
+      // Fetch the old key details first
+      const oldKeyResult = await db.$client.query(
+        `SELECT id, name, scopes, all_projects, project_id, revoked_at
+         FROM api_keys
+         WHERE id = $1 AND team_id = $2
+         LIMIT 1`,
+        [oldKeyId, teamId],
+      );
+
+      const oldKey = oldKeyResult.rows[0];
+      if (!oldKey) {
+        throw new NotFoundError();
+      }
+
+      if (oldKey['revoked_at']) {
+        throw new InvalidRequestError('Key is already revoked');
+      }
+
+      // Generate new key
+      const plaintextToken = generateApiKeyToken();
+      const tokenHash = hashToken(plaintextToken);
+      const newKeyId = `key_${randomBytes(12).toString('hex')}`;
+      const newName = `${oldKey['name'] as string} (rotated)`;
+      const scopes = oldKey['scopes'] as ApiScope[];
+      const allProjects = oldKey['all_projects'] as boolean;
+      const projectId = oldKey['project_id'] as string | null;
+
+      await db.$client.query('BEGIN');
+      try {
+        // Revoke old key
+        await db.$client.query(
+          `UPDATE api_keys SET revoked_at = NOW() WHERE id = $1 AND team_id = $2`,
+          [oldKeyId, teamId],
+        );
+
+        // Mint new key
+        await db.$client.query(
+          `INSERT INTO api_keys (id, team_id, project_id, name, token_hash, scopes, all_projects)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [newKeyId, teamId, projectId, newName, tokenHash, scopes, allProjects],
+        );
+
+        await db.$client.query('COMMIT');
+      } catch (err) {
+        await db.$client.query('ROLLBACK');
+        throw err;
+      }
+
+      let mcpCommand = '';
+      if (mcpConfig) {
+        mcpCommand = formatMcpAddCommand(mcpConfig, plaintextToken);
+      }
+
+      const response: RotateKeyResponse = {
+        id: newKeyId,
+        name: newName,
+        token: plaintextToken,
+        mcpCommand,
+        scopes,
+        allProjects,
+        projectId,
+        createdAt: new Date().toISOString(),
+        revokedKeyId: oldKeyId,
+      };
+
+      console.info(
+        JSON.stringify({
+          event: 'api_key_rotated',
+          requestId,
+          oldKeyId,
+          newKeyId,
+          teamId,
+          rotatedByUserId: ws.userId,
+        }),
+      );
+
+      return c.json({ requestId, data: response }, 201);
+    } catch (err) {
+      if (err instanceof NotFoundError || err instanceof InvalidRequestError) throw err;
+      throw new InternalError('Failed to rotate API key', { cause: err });
+    }
   });
 
   return routes;
