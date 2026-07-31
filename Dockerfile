@@ -35,6 +35,9 @@ COPY . .
 # classifies it as a dev dependency. pg-boss already installs the exact locked
 # pg package in the production graph (pnpm deploy --prod --legacy retains it in
 # .pnpm/), so expose that package at the app root via a version-agnostic glob.
+# Build the server (tsup) and the web SPA (Vite). Vite output is
+# self-contained static HTML/JS/CSS in apps/web/dist — no runtime
+# dependencies needed.
 RUN pnpm build \
     && pnpm --filter @teamem/server deploy --prod --legacy /production/server \
     && cd /production/server/node_modules \
@@ -61,6 +64,9 @@ WORKDIR /app
 COPY --from=build --chown=node:node /production/server/package.json ./apps/server/package.json
 COPY --from=build --chown=node:node /production/server/node_modules ./apps/server/node_modules
 COPY --from=build --chown=node:node /workspace/apps/server/dist ./apps/server/dist
+# Static web SPA (built by Vite). Served directly by the server on the same
+# port via a SPA fallback middleware — no separate web container.
+COPY --from=build --chown=node:node /workspace/apps/web/dist ./apps/web/dist
 
 USER node
 
