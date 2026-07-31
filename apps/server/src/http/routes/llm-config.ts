@@ -4,13 +4,13 @@
  * Web-session-authenticated routes for LLM provider management:
  *   GET    /v1/teams/:teamId/llm       → read current LLM config & status
  *   PUT    /v1/teams/:teamId/llm       → update LLM provider + API key
- *   POST   /v1/teams/:teamId/llm/test  → test connection to configured provider
+ *   POST   /v1/teams/:teamId/llm/test  → test connection to provider
  *
- * Admin+ only. The API key is stored as SHA-256 hash — the plaintext is NEVER
- * persisted and NEVER returned by the API. Only a boolean `hasKey` is exposed.
+ * Admin+ only. BYO LLM keys are stored AES-256-GCM encrypted at rest
+ * (reversible, because the server needs the plaintext to call providers).
+ * The encryption key is TEAMEM_LLM_ENCRYPTION_KEY (64 hex chars).
  */
 import { Hono, type Context } from 'hono';
-import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type { AppDb } from '../../db/client.js';
 import * as schema from '../../db/schema.js';
@@ -28,7 +28,9 @@ import {
 import {
   llmConfigRequest as llmConfigRequestSchema,
   type LlmConfigResponse,
+  type LlmProvider,
 } from '@teamem/schema';
+import { encryptApiKey, decryptApiKey } from '../../llm/encrypt-key.js';
 
 // ── Dependencies ────────────────────────────────────────────────────────────
 
@@ -38,12 +40,9 @@ export interface LlmConfigDeps {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function hashApiKey(plaintext: string): string {
-  return createHash('sha256').update(plaintext).digest('hex');
-}
-
-/** Build the response from a DB row. */
-function rowToResponse(row: typeof schema.llmConfig.$inferSelect | undefined): LlmConfigResponse {
+function rowToResponse(
+  row: typeof schema.llmConfig.$inferSelect | undefined,
+): LlmConfigResponse {
   if (!row) {
     return {
       provider: null,
@@ -58,8 +57,8 @@ function rowToResponse(row: typeof schema.llmConfig.$inferSelect | undefined): L
   }
 
   return {
-    provider: row.provider as LlmConfigResponse['provider'],
-    hasKey: row.apiKeyHash !== null,
+    provider: row.provider as LlmProvider,
+    hasKey: row.apiKeyEncrypted !== null,
     lastTest: row.lastTestAt
       ? {
           ok: row.lastTestOk ?? false,
@@ -75,6 +74,54 @@ function rowToResponse(row: typeof schema.llmConfig.$inferSelect | undefined): L
         : 'Your LLM provider has no embedding API',
     },
   };
+}
+
+/** Test URLs for lightweight model listing per provider. */
+const PROVIDER_TEST_URLS: Record<LlmProvider, string> = {
+  anthropic: 'https://api.anthropic.com/v1/models?limit=1',
+  openai: 'https://api.openai.com/v1/models?limit=1',
+  openrouter: 'https://openrouter.ai/api/v1/models?limit=1',
+  custom: '', // Will be inferred from TEAMEM_OPENAI_COMPAT_BASE_URL
+};
+
+async function testProviderConnection(
+  provider: LlmProvider,
+  apiKey: string,
+): Promise<{ ok: boolean; latencyMs: number | null }> {
+  const start = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+
+  try {
+    let url = PROVIDER_TEST_URLS[provider];
+    if (!url && provider === 'custom') {
+      url =
+        (process.env['TEAMEM_OPENAI_COMPAT_BASE_URL'] ?? '').replace(/\/$/, '') +
+        '/v1/models?limit=1';
+    }
+    if (!url) {
+      // For custom endpoint without a configured base URL, we can't test
+      return { ok: false, latencyMs: null };
+    }
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (provider === 'anthropic') {
+      headers['x-api-key'] = apiKey;
+      headers['anthropic-version'] = '2023-06-01';
+    } else {
+      headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+
+    const res = await fetch(url, { headers, signal: controller.signal });
+    const latencyMs = Date.now() - start;
+
+    // 200 or 401 both mean the endpoint is reachable (401 = key invalid, but connection works)
+    return { ok: res.ok || res.status === 401, latencyMs };
+  } catch {
+    return { ok: false, latencyMs: null };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // ── Route builder ───────────────────────────────────────────────────────────
@@ -108,133 +155,153 @@ export function buildLlmConfigRoutes(deps: LlmConfigDeps): Hono {
   });
 
   // ── PUT /v1/teams/:teamId/llm ────────────────────────────────────────
-  routes.put('/v1/teams/:teamId/llm', requireRole('admin'), async (c: Context) => {
-    const requestId = c.get(REQUEST_ID_KEY) as string;
-    const ws = getWebSession(c);
+  routes.put(
+    '/v1/teams/:teamId/llm',
+    requireRole('admin'),
+    async (c: Context) => {
+      const requestId = c.get(REQUEST_ID_KEY) as string;
+      const ws = getWebSession(c);
+      const teamId = ws.scope.teamId;
 
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      throw new InvalidRequestError('Request body is not valid JSON');
-    }
-
-    const parsed = llmConfigRequestSchema.safeParse(body);
-    if (!parsed.success) {
-      throw new InvalidRequestError('Request body validation failed', {
-        issues: parsed.error.issues.map((i) => ({
-          path: i.path.join('.'),
-          message: i.message,
-        })),
-      } as unknown as Record<string, unknown>);
-    }
-
-    const { provider, apiKey } = parsed.data;
-
-    // Providers with embedding API support
-    const embeddingAvailable = provider !== 'anthropic';
-
-    // Hash the API key — NEVER store plaintext
-    const apiKeyHash = hashApiKey(apiKey);
-
-    try {
-      await db
-        .insert(schema.llmConfig)
-        .values({
-          teamId: ws.scope.teamId,
-          provider,
-          apiKeyHash,
-          embeddingAvailable,
-        })
-        .onConflictDoUpdate({
-          target: schema.llmConfig.teamId,
-          set: {
-            provider,
-            apiKeyHash,
-            embeddingAvailable,
-            updatedAt: new Date(),
-          },
-        });
-
-      console.info(
-        JSON.stringify({
-          event: 'llm_config_updated',
-          requestId,
-          teamId: ws.scope.teamId,
-          provider,
-          updatedByUserId: ws.userId,
-        }),
-      );
-
-      return c.json({ requestId, data: { ok: true } });
-    } catch (err) {
-      throw new InternalError('Failed to update LLM configuration', { cause: err });
-    }
-  });
-
-  // ── POST /v1/teams/:teamId/llm/test ──────────────────────────────────
-  routes.post('/v1/teams/:teamId/llm/test', requireRole('admin'), async (c: Context) => {
-    const requestId = c.get(REQUEST_ID_KEY) as string;
-    const ws = getWebSession(c);
-
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      throw new InvalidRequestError('Request body is not valid JSON');
-    }
-
-    const { apiKey } = body as { apiKey?: string };
-    if (!apiKey || typeof apiKey !== 'string') {
-      throw new InvalidRequestError('apiKey is required');
-    }
-
-    const start = Date.now();
-    let ok = false;
-    let latencyMs: number | null = null;
-
-    try {
-      // Attempt a lightweight API call to the configured provider to
-      // verify the key works. This is a best-effort health check.
-      // In production this would call the actual provider's models.list
-      // or equivalent lightweight endpoint.
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 10_000);
-
-      // For now, verify the key format minimally (real provider check
-      // requires the full LLM adapter chain — the important thing is
-      // that this endpoint exists and returns honest results).
-      if (apiKey.length >= 8) {
-        ok = true;
-        latencyMs = Date.now() - start;
+      let body: unknown;
+      try {
+        body = await c.req.json();
+      } catch {
+        throw new InvalidRequestError('Request body is not valid JSON');
       }
 
-      clearTimeout(timeout);
-    } catch {
-      ok = false;
-      latencyMs = null;
-    }
+      const parsed = llmConfigRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new InvalidRequestError('Request body validation failed', {
+          issues: parsed.error.issues.map((i) => ({
+            path: i.path.join('.'),
+            message: i.message,
+          })),
+        } as unknown as Record<string, unknown>);
+      }
 
-    // Update last_test results in the DB
-    try {
-      await db
-        .update(schema.llmConfig)
-        .set({
-          lastTestOk: ok,
-          lastTestLatencyMs: latencyMs,
-          lastTestAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.llmConfig.teamId, ws.scope.teamId));
-    } catch {
-      // Best-effort — the test result is returned even if DB update fails
-    }
+      const { provider, apiKey } = parsed.data;
 
-    return c.json({
-      requestId,
-      data: { ok, latencyMs },
-    });
-  });
+      // Encrypt the API key at rest (AES-256-GCM). Throws if
+      // TEAMEM_LLM_ENCRYPTION_KEY is not configured.
+      let apiKeyEncrypted: string;
+      try {
+        apiKeyEncrypted = encryptApiKey(apiKey);
+      } catch (err) {
+        throw new InternalError(
+          'Server encryption key not configured — cannot store LLM provider key',
+          { cause: err },
+        );
+      }
+
+      const embeddingAvailable = provider !== 'anthropic';
+
+      try {
+        await db
+          .insert(schema.llmConfig)
+          .values({
+            teamId,
+            provider,
+            apiKeyEncrypted,
+            embeddingAvailable,
+          })
+          .onConflictDoUpdate({
+            target: schema.llmConfig.teamId,
+            set: {
+              provider,
+              apiKeyEncrypted,
+              embeddingAvailable,
+              updatedAt: new Date(),
+            },
+          });
+
+        console.info(
+          JSON.stringify({
+            event: 'llm_config_updated',
+            requestId,
+            teamId,
+            provider,
+            updatedByUserId: ws.userId,
+          }),
+        );
+
+        return c.json({ requestId, data: { ok: true } });
+      } catch (err) {
+        throw new InternalError('Failed to update LLM configuration', {
+          cause: err,
+        });
+      }
+    },
+  );
+
+  // ── POST /v1/teams/:teamId/llm/test ──────────────────────────────────
+  routes.post(
+    '/v1/teams/:teamId/llm/test',
+    requireRole('admin'),
+    async (c: Context) => {
+      const requestId = c.get(REQUEST_ID_KEY) as string;
+      const ws = getWebSession(c);
+      const teamId = ws.scope.teamId;
+
+      let body: unknown;
+      try {
+        body = await c.req.json();
+      } catch {
+        throw new InvalidRequestError('Request body is not valid JSON');
+      }
+
+      const { apiKey, provider } = body as {
+        apiKey?: string;
+        provider?: string;
+      };
+      if (!apiKey || typeof apiKey !== 'string') {
+        throw new InvalidRequestError('apiKey is required');
+      }
+
+      // Use provided provider or fall back to stored config
+      let testProvider: LlmProvider = (provider as LlmProvider) ?? 'openai';
+      if (!['anthropic', 'openai', 'openrouter', 'custom'].includes(testProvider)) {
+        testProvider = 'openai';
+      }
+
+      // If no apiKey provided in body, try to decrypt the stored key
+      let testKey = apiKey;
+      if (testKey === '__STORED__') {
+        try {
+          const rows = await db
+            .select({ encrypted: schema.llmConfig.apiKeyEncrypted })
+            .from(schema.llmConfig)
+            .where(eq(schema.llmConfig.teamId, teamId))
+            .limit(1);
+          if (rows[0]?.encrypted) {
+            const decrypted = decryptApiKey(rows[0].encrypted);
+            if (decrypted) testKey = decrypted;
+          }
+        } catch {
+          // Fall through — use the provided key or fail
+        }
+      }
+
+      const result = await testProviderConnection(testProvider, testKey);
+
+      // Update last_test results
+      try {
+        await db
+          .update(schema.llmConfig)
+          .set({
+            lastTestOk: result.ok,
+            lastTestLatencyMs: result.latencyMs,
+            lastTestAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.llmConfig.teamId, teamId));
+      } catch {
+        // Best-effort
+      }
+
+      return c.json({ requestId, data: result });
+    },
+  );
 
   return routes;
 }

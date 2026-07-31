@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS "llm_config" (
   "team_id" TEXT NOT NULL PRIMARY KEY REFERENCES "teams"("id") ON DELETE CASCADE,
   "provider" TEXT NOT NULL,
-  "api_key_hash" TEXT,
+  "api_key_encrypted" TEXT,
   "embedding_available" BOOLEAN NOT NULL DEFAULT FALSE,
   "last_test_ok" BOOLEAN,
   "last_test_latency_ms" INTEGER,

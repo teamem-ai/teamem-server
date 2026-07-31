@@ -695,7 +695,7 @@ export const llmConfig = pgTable(
       .primaryKey()
       .references(() => teams.id, { onDelete: 'cascade' }),
     provider: text('provider').notNull(), // 'anthropic' | 'openai' | 'openrouter' | 'custom'
-    apiKeyHash: text('api_key_hash'), // SHA-256 hex — null when not configured
+    apiKeyEncrypted: text('api_key_encrypted'), // AES-256-GCM encrypted — null when not configured
     embeddingAvailable: boolean('embedding_available').notNull().default(false),
     lastTestOk: boolean('last_test_ok'),
     lastTestLatencyMs: integer('last_test_latency_ms'),

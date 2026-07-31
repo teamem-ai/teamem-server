@@ -64,8 +64,12 @@ export function SettingsSourcesPage() {
   const hasWriteKey = keys.length > 0;
   const selectedKey = keys.find((k) => k.id === selectedKeyId);
 
-  const cliCommand = `teamem init --url http://localhost:8080 --token ${selectedKey ? "<paste-key>" : "<token>"} --project web-app`;
-  const mcpCommand = `claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer ${selectedKey ? "<token>" : "<token>"}"`;
+  const cliCommand = selectedKey
+    ? `teamem init --url http://localhost:8080 --token <paste-key> --project web-app`
+    : `teamem init --url http://localhost:8080 --token <token> --project web-app`;
+  const mcpCommand = selectedKey
+    ? `claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer <paste-token>"`
+    : `claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer <token>"`;
 
   return (
     <div>

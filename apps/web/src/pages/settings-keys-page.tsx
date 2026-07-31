@@ -515,7 +515,11 @@ export function SettingsKeysPage() {
               <button
                 className="btn btn-primary"
                 onClick={handleMint}
-                disabled={minting}
+                disabled={
+                  minting ||
+                  !mintName.trim() ||
+                  (!mintAllProjects && !mintProjectId)
+                }
               >
                 {minting ? "Minting…" : "Mint key"}
               </button>
