@@ -32,6 +32,7 @@ import {
   Cpu,
   AlertTriangle,
   Check,
+  Key as KeyIcon,
 } from "lucide-react";
 
 const POLL_INTERVAL_MS = 5000;
@@ -39,11 +40,14 @@ const POLL_INTERVAL_MS = 5000;
 export function Step5Complete({
   projectId,
   apiKey,
+  /** True when the user skipped Step 4 (no API key was minted). */
+  keySkipped,
   onGoToKnowledge,
 }: {
   projectId: string;
   /** API key minted in Step 4 — used for Bearer auth on v1 endpoints. */
   apiKey: string;
+  keySkipped: boolean;
   onGoToKnowledge: () => void;
 }) {
   const [stats, setStats] = useState<OnboardingStats | null>(null);
@@ -89,6 +93,69 @@ export function Step5Complete({
   }, [fetchData, polling]);
 
   const hasData = stats && (stats.hasEvents || stats.hasPages);
+
+  // ── Key skipped state: no Bearer token, can't poll read endpoints ───
+
+  if (keySkipped) {
+    return (
+      <div>
+        <h1>Waiting for the first events…</h1>
+        <p className="wiz-sub">
+          You skipped minting an API key in Step 4, so we can&apos;t check
+          whether events or pages have arrived yet. You can still visit the
+          Knowledge page — if events are flowing, pages will appear there.
+        </p>
+
+        <div className="card card-pad">
+          <div className="stat-row">
+            <div className="stat">
+              <span className="num" style={{ color: "var(--text-3)" }}>—</span>
+              <span className="lbl">Events received</span>
+            </div>
+            <div className="stat">
+              <span className="num" style={{ color: "var(--text-3)" }}>—</span>
+              <span className="lbl">Jobs found</span>
+            </div>
+            <div className="stat">
+              <span className="num" style={{ color: "var(--text-3)" }}>—</span>
+              <span className="lbl">Pages compiled</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="card" style={{ marginTop: 14 }}>
+          <div className="card-head">
+            <h3>Want live stats?</h3>
+          </div>
+          <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div className="row" style={{ alignItems: "flex-start" }}>
+              <KeyIcon
+                className="ic"
+                style={{ color: "var(--accent)", marginTop: 2 }}
+              />
+              <div className="small" style={{ flex: 1 }}>
+                Mint an API key in{" "}
+                <strong>Settings → API keys</strong> and return here — or
+                simply visit the Knowledge page to see what&apos;s been
+                compiled so far.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="wiz-foot">
+          <span className="spacer" />
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={onGoToKnowledge}
+          >
+            Go to Knowledge
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ── Error state ────────────────────────────────────────────────────────
 

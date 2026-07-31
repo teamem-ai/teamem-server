@@ -271,6 +271,7 @@ export function OnboardingPage() {
             <Step5Complete
               projectId={projectId}
               apiKey={state.step4?.token ?? ""}
+              keySkipped={!state.step4?.token}
               onGoToKnowledge={handleGoToKnowledge}
             />
           )}

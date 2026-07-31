@@ -276,6 +276,7 @@ describe("Step5Complete", () => {
       <Step5Complete
         projectId="prj_test"
         apiKey="tm_test_key"
+        keySkipped={false}
         onGoToKnowledge={vi.fn()}
       />,
     );
@@ -306,6 +307,7 @@ describe("Step5Complete", () => {
       <Step5Complete
         projectId="prj_test"
         apiKey="tm_test_key"
+        keySkipped={false}
         onGoToKnowledge={vi.fn()}
       />,
     );
@@ -336,6 +338,7 @@ describe("Step5Complete", () => {
       <Step5Complete
         projectId="prj_test"
         apiKey="tm_test_key"
+        keySkipped={false}
         onGoToKnowledge={vi.fn()}
       />,
     );
@@ -361,6 +364,7 @@ describe("Step5Complete", () => {
       <Step5Complete
         projectId="prj_test"
         apiKey="tm_test_key"
+        keySkipped={false}
         onGoToKnowledge={vi.fn()}
       />,
     );
@@ -386,6 +390,7 @@ describe("Step5Complete", () => {
       <Step5Complete
         projectId="prj_test"
         apiKey="tm_test_key"
+        keySkipped={false}
         onGoToKnowledge={onGo}
       />,
     );
@@ -436,6 +441,7 @@ describe("Onboarding red lines", () => {
       <Step5Complete
         projectId="prj_test"
         apiKey="tm_test_key"
+        keySkipped={false}
         onGoToKnowledge={vi.fn()}
       />,
     );
