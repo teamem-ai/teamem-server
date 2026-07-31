@@ -5,7 +5,8 @@
  * a first project. Everything in teamem is scoped to team → project.
  */
 import { useState, type FormEvent } from "react";
-import { createTeam, createProject, ApiRequestError, type CreateTeamResponse, type ProjectEntry } from "./onboarding-api";
+import { createTeam, createProject, ApiRequestError } from "./onboarding-api";
+import type { CreateTeamResponse, ProjectEntry } from "./onboarding-types";
 
 export interface Step1Data {
   team: CreateTeamResponse | null;
@@ -42,10 +43,12 @@ export function Step1CreateTeam({
     setSubmitting(true);
     try {
       // 1. Create the team (session user becomes owner)
-      const team = await createTeam(trimmedTeam);
+      const teamRes = await createTeam(trimmedTeam);
+      const team = teamRes.data;
 
       // 2. Create the first project inside the team
-      const project = await createProject(team.id, trimmedProject);
+      const projectRes = await createProject(team.id, trimmedProject);
+      const project = projectRes.data;
 
       onComplete({ team, project });
     } catch (err) {

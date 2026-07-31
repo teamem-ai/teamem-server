@@ -1,17 +1,17 @@
 /**
  * Step 4 — Connect your agent (mint API key + paste commands).
  *
- * Mints the first project-scoped API key with read+write scopes.
- * The plaintext token is shown exactly once (R7) alongside three
- * copyable commands:
- *   1. claude mcp add — registers teamem MCP with Claude
- *   2. teamem init — scans an existing repo to seed knowledge
- *   3. teamem cli install-hook — auto-injects context into new sessions
+ * Mints a real project-scoped API key via POST /v1/teams/:teamId/keys
+ * (web-session-authenticated, admin+).  The plaintext token is shown
+ * exactly once (R7) alongside three copyable commands.
  *
- * The Continue button text reinforces the "won't see again" warning.
+ * The server returns a pasteable `claude mcp add` command in the
+ * mintKeyResponse.mcpCommand field.  We derive the `teamem init` and
+ * `install-hook` commands client-side from the token.
  */
 import { useState, useCallback, useEffect } from "react";
-import { mintApiKey, ApiRequestError, type MintKeyResponse } from "./onboarding-api";
+import { mintApiKey, ApiRequestError } from "./onboarding-api";
+import type { MintKeyResponse } from "./onboarding-types";
 import { CommandBlock } from "@/components/ui";
 import { Key, AlertTriangle, Sparkles, Terminal, Zap } from "lucide-react";
 
@@ -39,7 +39,6 @@ export function Step4MintKey({
   const [minted, setMinted] = useState<MintKeyResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [copiedKey, setCopiedKey] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,12 +46,12 @@ export function Step4MintKey({
       setLoading(true);
       setError(null);
       try {
-        const result = await mintApiKey(
+        const res = await mintApiKey(
           teamId,
           projectId,
           `Onboarding key for ${projectName}`,
         );
-        if (!cancelled) setMinted(result);
+        if (!cancelled) setMinted(res.data);
       } catch (err) {
         if (!cancelled) {
           if (err instanceof ApiRequestError) {
@@ -84,7 +83,8 @@ export function Step4MintKey({
     });
   }, [minted, onComplete]);
 
-  // Build the init command with the token (only if we have it)
+  // Derive init and install-hook commands from the minted token.
+  // The mcpCommand comes from the server already formatted.
   const initCommand = minted
     ? `teamem init --url ${serverBaseUrl} --token ${minted.token} --project ${projectName}`
     : "";
@@ -96,9 +96,9 @@ export function Step4MintKey({
         <h1>Connect your agent</h1>
         <p className="wiz-sub">Minting your first API key…</p>
         <div className="card card-pad">
-          <div className="space-y-3">
-            <div className="skeleton h-14 w-full" />
-            <div className="skeleton h-8 w-3/4" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="skeleton" style={{ height: 56, width: "100%" }} />
+            <div className="skeleton" style={{ height: 32, width: "75%" }} />
           </div>
         </div>
       </div>
@@ -111,7 +111,7 @@ export function Step4MintKey({
         <h1>Connect your agent</h1>
         <p className="wiz-sub">
           We couldn&apos;t mint your API key. You can try again or skip this
-          step and mint keys later from Settings.
+          step and mint keys later from Settings → API keys.
         </p>
         <div className="banner error" style={{ marginTop: 14 }} role="alert">
           <AlertTriangle className="ic" />
@@ -150,64 +150,64 @@ export function Step4MintKey({
       </p>
 
       {/* One-time key reveal */}
-      <div className="space-y-3" style={{ marginTop: 10 }}>
+      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 12 }}>
         <div className="key-reveal">
           <Key
             className="ic lg"
             style={{ color: "#fbbf24", flex: "none" }}
           />
           <code>{minted.token}</code>
-          <button className="copy-btn" onClick={() => {
-            navigator.clipboard.writeText(minted.token);
-            setCopiedKey(true);
-            setTimeout(() => setCopiedKey(false), 2000);
-          }}>
-            {copiedKey ? "Copied" : "Copy"}
+          <button
+            className="copy-btn"
+            onClick={() => {
+              void navigator.clipboard.writeText(minted.token);
+            }}
+          >
+            Copy
           </button>
         </div>
-        <div className="banner warn" role="alert">
-          <AlertTriangle className="ic" />
-          <div>
-            <span className="b-title">
-              Copy it now — you won&apos;t see this key again.
-            </span>{" "}
-            We store only a hash.
-          </div>
-        </div>
+        <p
+          className="text-[12.5px]"
+          style={{ color: "var(--red)" }}
+          role="alert"
+        >
+          Copy it now — you won&apos;t see this key again. We store only a
+          hash.
+        </p>
       </div>
 
       {/* Three commands */}
-      <div style={{ marginTop: 20 }} className="stack">
+      <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 16 }}>
         <CommandBlock
           command={minted.mcpCommand}
           description={
-            <>
+            <div className="cmd-label">
               <Sparkles className="ic" />
               1 · Plug team knowledge into Claude Code — your agent can search
               every page
-            </>
+            </div>
           }
         />
 
         <CommandBlock
           command={initCommand}
           description={
-            <>
+            <div className="cmd-label">
               <Terminal className="ic" />
               2 · Scan an existing repo — seeds the knowledge base so day one
               isn&apos;t empty
-            </>
+            </div>
           }
         />
 
         <CommandBlock
           command={installHookCommand}
           description={
-            <>
+            <div className="cmd-label">
               <Zap className="ic" />
               3 · Auto-inject context — every new agent session starts with
               your team&apos;s top knowledge
-            </>
+            </div>
           }
         />
       </div>

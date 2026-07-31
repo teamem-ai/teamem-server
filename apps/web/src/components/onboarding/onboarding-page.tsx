@@ -270,6 +270,7 @@ export function OnboardingPage() {
           {state.currentStep === 5 && projectId && (
             <Step5Complete
               projectId={projectId}
+              apiKey={state.step4?.token ?? ""}
               onGoToKnowledge={handleGoToKnowledge}
             />
           )}

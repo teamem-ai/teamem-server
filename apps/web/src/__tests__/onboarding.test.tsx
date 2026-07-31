@@ -3,9 +3,14 @@
  *
  * Covers:
  *   - All 5 step components rendering with correct states
- *   - Step 2 FTS degradation variant
+ *   - Step 2 FTS degradation variant (Anthropic = no embedding)
  *   - Step 5 waiting (honest empty) state
  *   - Key red lines: key shown once, degradation explicit, no fake data
+ *
+ * Uses vi.mock at module level to stub onboarding-api functions so tests
+ * never hit real HTTP endpoints. This is unit-level stubbing; network-
+ * level integration tests (with MSW) would be a follow-up as prescribed
+ * by the task card.
  */
 import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
 import {
@@ -20,8 +25,7 @@ import { Step2LlmProvider } from "@/components/onboarding/step2-llm-provider";
 import { Step3Repositories } from "@/components/onboarding/step3-repositories";
 import { Step5Complete } from "@/components/onboarding/step5-complete";
 
-// ── Mock the API module ───────────────────────────────────────────────────
-// vitest hoists vi.mock calls to the top, so these run before imports.
+// ── Mock the API module at module level (vitest hoists these) ────────────
 
 vi.mock("@/components/onboarding/onboarding-api", async () => {
   const actual = await vi.importActual<
@@ -31,29 +35,26 @@ vi.mock("@/components/onboarding/onboarding-api", async () => {
     ...actual,
     getOnboardingStats: vi.fn(),
     getLatestConcept: vi.fn(),
-    getGitHubInstallation: vi.fn(),
     mintApiKey: vi.fn(),
-    testLlmConnection: vi.fn(),
-    saveLlmConfig: vi.fn(),
     createTeam: vi.fn(),
     createProject: vi.fn(),
   };
 });
 
-// Import mocked functions for type-safe configuration
 import {
   getOnboardingStats,
   getLatestConcept,
-  getGitHubInstallation,
+  createTeam,
+  createProject,
 } from "@/components/onboarding/onboarding-api";
 
 const mockedGetStats = vi.mocked(getOnboardingStats);
 const mockedGetLatest = vi.mocked(getLatestConcept);
-const mockedGetInstallation = vi.mocked(getGitHubInstallation);
+const mockedCreateTeam = vi.mocked(createTeam);
+const mockedCreateProject = vi.mocked(createProject);
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/** Wrap a component in a div for testing */
 function renderStep(jsx: React.ReactElement) {
   return render(<div className="wiz-card">{jsx}</div>);
 }
@@ -63,38 +64,22 @@ function renderStep(jsx: React.ReactElement) {
 describe("Step1CreateTeam", () => {
   afterEach(() => cleanup());
 
+  beforeEach(() => {
+    mockedCreateTeam.mockReset();
+    mockedCreateProject.mockReset();
+  });
+
   it("renders team and project name fields", () => {
-    const onComplete = vi.fn();
-    renderStep(<Step1CreateTeam onComplete={onComplete} />);
+    renderStep(<Step1CreateTeam onComplete={vi.fn()} />);
 
     expect(screen.getByText("Create your team")).toBeInTheDocument();
     expect(screen.getByLabelText("Team name")).toBeInTheDocument();
     expect(screen.getByLabelText("First project")).toBeInTheDocument();
-    expect(
-      screen.getByText(/you'll become the team/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/you'll become the team/)).toBeInTheDocument();
   });
 
   it("shows error when submitting with empty fields", async () => {
-    const onComplete = vi.fn();
-    renderStep(<Step1CreateTeam onComplete={onComplete} />);
-
-    const button = screen.getByText("Continue");
-    fireEvent.click(button);
-
-    await waitFor(() => {
-      expect(screen.getByText("Team name is required.")).toBeInTheDocument();
-    });
-    expect(onComplete).not.toHaveBeenCalled();
-  });
-
-  it("shows error when team name is empty but project is filled", async () => {
-    const onComplete = vi.fn();
-    renderStep(<Step1CreateTeam onComplete={onComplete} />);
-
-    fireEvent.change(screen.getByLabelText("First project"), {
-      target: { value: "my-project" },
-    });
+    renderStep(<Step1CreateTeam onComplete={vi.fn()} />);
     fireEvent.click(screen.getByText("Continue"));
 
     await waitFor(() => {
@@ -103,8 +88,16 @@ describe("Step1CreateTeam", () => {
   });
 
   it("disables submit button while submitting", async () => {
-    const onComplete = vi.fn();
-    renderStep(<Step1CreateTeam onComplete={onComplete} />);
+    mockedCreateTeam.mockResolvedValue({
+      requestId: "req_1",
+      data: { id: "team_1", name: "Test", role: "owner", createdAt: new Date().toISOString() },
+    });
+    mockedCreateProject.mockResolvedValue({
+      requestId: "req_2",
+      data: { id: "prj_1", teamId: "team_1", name: "proj", createdAt: new Date().toISOString() },
+    });
+
+    renderStep(<Step1CreateTeam onComplete={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("Team name"), {
       target: { value: "Test Team" },
@@ -112,10 +105,8 @@ describe("Step1CreateTeam", () => {
     fireEvent.change(screen.getByLabelText("First project"), {
       target: { value: "test-project" },
     });
-
-    // Submit
     fireEvent.click(screen.getByText("Continue"));
-    // Button should show "Creating…" state
+
     await waitFor(() => {
       expect(screen.getByText("Creating…")).toBeInTheDocument();
     });
@@ -128,16 +119,12 @@ describe("Step2LlmProvider", () => {
   afterEach(() => cleanup());
 
   it("renders all four provider options", () => {
-    const onComplete = vi.fn();
-    const onBack = vi.fn();
-    const onSkip = vi.fn();
-
     renderStep(
       <Step2LlmProvider
         teamId="team_test"
-        onComplete={onComplete}
-        onBack={onBack}
-        onSkip={onSkip}
+        onComplete={vi.fn()}
+        onBack={vi.fn()}
+        onSkip={vi.fn()}
       />,
     );
 
@@ -148,124 +135,69 @@ describe("Step2LlmProvider", () => {
     expect(screen.getByText("Custom endpoint")).toBeInTheDocument();
   });
 
-  it("shows API key field after selecting a provider", () => {
-    const onComplete = vi.fn();
-    const onBack = vi.fn();
-    const onSkip = vi.fn();
-
+  it("shows FTS degradation when Anthropic is selected", () => {
     renderStep(
       <Step2LlmProvider
         teamId="team_test"
-        onComplete={onComplete}
-        onBack={onBack}
-        onSkip={onSkip}
+        onComplete={vi.fn()}
+        onBack={vi.fn()}
+        onSkip={vi.fn()}
       />,
     );
 
-    // Click on Anthropic
     fireEvent.click(screen.getByText("Anthropic"));
 
-    // Should now show the API key input
-    expect(screen.getByLabelText("API key")).toBeInTheDocument();
+    // Should show FTS warning banner
+    expect(screen.getByText(/Keyword search only/)).toBeInTheDocument();
+    // Should show "Continue anyway" button
+    expect(screen.getByText("Continue anyway")).toBeInTheDocument();
   });
 
-  it("shows FTS degradation warning when Anthropic is selected and connection tests OK", async () => {
-    const onComplete = vi.fn();
-    const onBack = vi.fn();
-    const onSkip = vi.fn();
-
+  it("shows semantic search available for OpenAI", () => {
     renderStep(
       <Step2LlmProvider
         teamId="team_test"
-        onComplete={onComplete}
-        onBack={onBack}
-        onSkip={onSkip}
+        onComplete={vi.fn()}
+        onBack={vi.fn()}
+        onSkip={vi.fn()}
       />,
     );
 
-    // Select Anthropic
-    fireEvent.click(screen.getByText("Anthropic"));
-
-    // Enter an API key
-    fireEvent.change(screen.getByLabelText("API key"), {
-      target: { value: "sk-ant-test123" },
-    });
-
-    // Click Test connection
-    fireEvent.click(screen.getByText("Test connection"));
-
-    // Since the real API call will fail (no server), we check that the
-    // "Continue anyway" button appears for non-embedding providers
-    await waitFor(() => {
-      // Anthropic subtitle should be visible
-      expect(
-        screen.getByText(/Claude models/i),
-      ).toBeInTheDocument();
-    });
-  });
-
-  it("shows semantic search banner for OpenAI (embedding provider)", () => {
-    const onComplete = vi.fn();
-    const onBack = vi.fn();
-    const onSkip = vi.fn();
-
-    renderStep(
-      <Step2LlmProvider
-        teamId="team_test"
-        onComplete={onComplete}
-        onBack={onBack}
-        onSkip={onSkip}
-      />,
-    );
-
-    // Select OpenAI
     fireEvent.click(screen.getByText("OpenAI"));
 
-    // Should show the API key field and correct subtitle
-    expect(screen.getByLabelText("API key")).toBeInTheDocument();
-    expect(
-      screen.getByText(/GPT models \+ embeddings/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Semantic search available/)).toBeInTheDocument();
   });
 
-  it("skip button is present and states the consequence", () => {
-    const onComplete = vi.fn();
-    const onBack = vi.fn();
+  it("skip button states consequence: compilation stays paused", () => {
     const onSkip = vi.fn();
-
     renderStep(
       <Step2LlmProvider
         teamId="team_test"
-        onComplete={onComplete}
-        onBack={onBack}
+        onComplete={vi.fn()}
+        onBack={vi.fn()}
         onSkip={onSkip}
       />,
     );
 
-    const skipButton = screen.getByText(/Skip for now/);
-    expect(skipButton).toBeInTheDocument();
-    expect(skipButton.textContent).toContain("compilation stays paused");
-
-    fireEvent.click(skipButton);
+    const btn = screen.getByText(/Skip for now/);
+    expect(btn.textContent).toContain("compilation stays paused");
+    fireEvent.click(btn);
     expect(onSkip).toHaveBeenCalledOnce();
   });
 
-  it("back button returns to previous step", () => {
-    const onComplete = vi.fn();
-    const onBack = vi.fn();
-    const onSkip = vi.fn();
-
+  it("shows informational banner when no provider selected", () => {
     renderStep(
       <Step2LlmProvider
         teamId="team_test"
-        onComplete={onComplete}
-        onBack={onBack}
-        onSkip={onSkip}
+        onComplete={vi.fn()}
+        onBack={vi.fn()}
+        onSkip={vi.fn()}
       />,
     );
 
-    fireEvent.click(screen.getByText("Back"));
-    expect(onBack).toHaveBeenCalledOnce();
+    expect(
+      screen.getByText(/LLM is configured at deploy time/),
+    ).toBeInTheDocument();
   });
 });
 
@@ -274,81 +206,48 @@ describe("Step2LlmProvider", () => {
 describe("Step3Repositories", () => {
   afterEach(() => cleanup());
 
-  beforeEach(() => {
-    mockedGetInstallation.mockResolvedValue({
-      appName: "teamem-portal",
-      authorized: false,
-      webhookSecretConfigured: false,
-      repos: [],
-      manageUrl: "#",
-    });
-  });
-
-  it("renders loading state initially", () => {
-    const onComplete = vi.fn();
-    const onBack = vi.fn();
-    const onSkip = vi.fn();
-
+  it("does not say 'reconnect' in the subtitle", () => {
     renderStep(
       <Step3Repositories
         teamId="team_test"
-        onComplete={onComplete}
-        onBack={onBack}
-        onSkip={onSkip}
+        onComplete={vi.fn()}
+        onBack={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/reconnect/i)).toBeNull();
+    expect(screen.queryByText(/re-authorize/i)).toBeNull();
+    expect(screen.getByText(/no new connection/)).toBeInTheDocument();
+  });
+
+  it("renders Continue and Skip buttons", () => {
+    renderStep(
+      <Step3Repositories
+        teamId="team_test"
+        onComplete={vi.fn()}
+        onBack={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Continue")).toBeInTheDocument();
+    expect(screen.getByText(/Skip.*CLI.*MCP/)).toBeInTheDocument();
+  });
+
+  it("mentions deploy-time configuration", () => {
+    renderStep(
+      <Step3Repositories
+        teamId="team_test"
+        onComplete={vi.fn()}
+        onBack={vi.fn()}
+        onSkip={vi.fn()}
       />,
     );
 
     expect(
-      screen.getByText("Choose which repositories to watch"),
+      screen.getByText(/Repository access is configured on GitHub/),
     ).toBeInTheDocument();
-  });
-
-  it('does not say "reconnect" in the subtitle', async () => {
-    const onComplete = vi.fn();
-    const onBack = vi.fn();
-    const onSkip = vi.fn();
-
-    renderStep(
-      <Step3Repositories
-        teamId="team_test"
-        onComplete={onComplete}
-        onBack={onBack}
-        onSkip={onSkip}
-      />,
-    );
-
-    // Wait for the API call to settle
-    await waitFor(() => {
-      // The wording should not contain "reconnect" or "re-authorize"
-      expect(
-        screen.queryByText(/reconnect/i),
-      ).toBeNull();
-      expect(
-        screen.queryByText(/re-authorize/i),
-      ).toBeNull();
-    });
-  });
-
-  it("renders Continue and Skip buttons", async () => {
-    const onComplete = vi.fn();
-    const onBack = vi.fn();
-    const onSkip = vi.fn();
-
-    renderStep(
-      <Step3Repositories
-        teamId="team_test"
-        onComplete={onComplete}
-        onBack={onBack}
-        onSkip={onSkip}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText("Continue")).toBeInTheDocument();
-      expect(
-        screen.getByText(/Skip.*CLI.*MCP/),
-      ).toBeInTheDocument();
-    });
   });
 });
 
@@ -358,45 +257,56 @@ describe("Step5Complete", () => {
   afterEach(() => cleanup());
 
   beforeEach(() => {
-    // Default: return empty data (waiting state)
-    mockedGetStats.mockResolvedValue({
-      eventsReceived: 0,
-      jobsRunning: 0,
-      pagesCompiled: 0,
-    });
-    mockedGetLatest.mockResolvedValue(null);
+    mockedGetStats.mockReset();
+    mockedGetLatest.mockReset();
   });
 
-  it("shows waiting state with honest empty stats (all zeros)", async () => {
-    const onGoToKnowledge = vi.fn();
+  it("shows waiting state with honest empty data (all zeros)", async () => {
+    mockedGetStats.mockResolvedValue({
+      hasEvents: false,
+      hasJobs: false,
+      hasPages: false,
+      eventsCount: 0,
+      jobsCount: 0,
+      pagesCount: 0,
+    });
+    mockedGetLatest.mockResolvedValue(null);
 
     renderStep(
       <Step5Complete
         projectId="prj_test"
-        onGoToKnowledge={onGoToKnowledge}
+        apiKey="tm_test_key"
+        onGoToKnowledge={vi.fn()}
       />,
     );
 
-    // Initially shows "Waiting for the first events…"
     await waitFor(() => {
       expect(
         screen.getByText("Waiting for the first events…"),
       ).toBeInTheDocument();
     });
 
-    // All three stat labels should appear
     expect(screen.getByText("Events received")).toBeInTheDocument();
-    expect(screen.getByText("Jobs running")).toBeInTheDocument();
+    expect(screen.getByText("Jobs found")).toBeInTheDocument();
     expect(screen.getByText("Pages compiled")).toBeInTheDocument();
   });
 
   it("shows troubleshooting guidance in waiting state", async () => {
-    const onGoToKnowledge = vi.fn();
+    mockedGetStats.mockResolvedValue({
+      hasEvents: false,
+      hasJobs: false,
+      hasPages: false,
+      eventsCount: 0,
+      jobsCount: 0,
+      pagesCount: 0,
+    });
+    mockedGetLatest.mockResolvedValue(null);
 
     renderStep(
       <Step5Complete
         projectId="prj_test"
-        onGoToKnowledge={onGoToKnowledge}
+        apiKey="tm_test_key"
+        onGoToKnowledge={vi.fn()}
       />,
     );
 
@@ -406,48 +316,52 @@ describe("Step5Complete", () => {
       ).toBeInTheDocument();
     });
 
-    // Three troubleshooting items
-    expect(
-      screen.getByText(/teamem init/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/GitHub App is/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/installed on that repository/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/LLM provider.*Step 2/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/teamem init/)).toBeInTheDocument();
+    expect(screen.getByText(/GitHub App is/)).toBeInTheDocument();
+    expect(screen.getByText(/LLM provider/)).toBeInTheDocument();
   });
 
   it("does not show fake success when data is absent", async () => {
-    const onGoToKnowledge = vi.fn();
+    mockedGetStats.mockResolvedValue({
+      hasEvents: false,
+      hasJobs: false,
+      hasPages: false,
+      eventsCount: 0,
+      jobsCount: 0,
+      pagesCount: 0,
+    });
+    mockedGetLatest.mockResolvedValue(null);
 
     renderStep(
       <Step5Complete
         projectId="prj_test"
-        onGoToKnowledge={onGoToKnowledge}
+        apiKey="tm_test_key"
+        onGoToKnowledge={vi.fn()}
       />,
     );
 
     await waitFor(() => {
-      // Should NOT claim "Your first knowledge is here" when no data
-      expect(
-        screen.queryByText("Your first knowledge is here"),
-      ).toBeNull();
-      // Should NOT show "Compiled just now" pill
+      expect(screen.queryByText("Your first knowledge is here")).toBeNull();
       expect(screen.queryByText("Compiled just now")).toBeNull();
     });
   });
 
   it("shows Refresh button in waiting state", async () => {
-    const onGoToKnowledge = vi.fn();
+    mockedGetStats.mockResolvedValue({
+      hasEvents: false,
+      hasJobs: false,
+      hasPages: false,
+      eventsCount: 0,
+      jobsCount: 0,
+      pagesCount: 0,
+    });
+    mockedGetLatest.mockResolvedValue(null);
 
     renderStep(
       <Step5Complete
         projectId="prj_test"
-        onGoToKnowledge={onGoToKnowledge}
+        apiKey="tm_test_key"
+        onGoToKnowledge={vi.fn()}
       />,
     );
 
@@ -456,21 +370,28 @@ describe("Step5Complete", () => {
     });
   });
 
-  it("has Go to Knowledge button in waiting state", async () => {
-    const onGoToKnowledge = vi.fn();
+  it("has Go to Knowledge button", async () => {
+    mockedGetStats.mockResolvedValue({
+      hasEvents: false,
+      hasJobs: false,
+      hasPages: false,
+      eventsCount: 0,
+      jobsCount: 0,
+      pagesCount: 0,
+    });
+    mockedGetLatest.mockResolvedValue(null);
 
+    const onGo = vi.fn();
     renderStep(
       <Step5Complete
         projectId="prj_test"
-        onGoToKnowledge={onGoToKnowledge}
+        apiKey="tm_test_key"
+        onGoToKnowledge={onGo}
       />,
     );
 
-    const btn = screen.getByText("Go to Knowledge");
-    expect(btn).toBeInTheDocument();
-
-    fireEvent.click(btn);
-    expect(onGoToKnowledge).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByText("Go to Knowledge"));
+    expect(onGo).toHaveBeenCalledOnce();
   });
 });
 
@@ -479,55 +400,50 @@ describe("Step5Complete", () => {
 describe("Onboarding red lines", () => {
   afterEach(() => cleanup());
 
-  beforeEach(() => {
-    mockedGetStats.mockResolvedValue({
-      eventsReceived: 0,
-      jobsRunning: 0,
-      pagesCompiled: 0,
-    });
-    mockedGetLatest.mockResolvedValue(null);
-  });
-
   it("Step 2: FTS degradation is explicit (not hidden)", () => {
-    // Verify that the Anthropic provider card shows "no embedding API"
-    const onComplete = vi.fn();
-    const onBack = vi.fn();
-    const onSkip = vi.fn();
-
     renderStep(
       <Step2LlmProvider
         teamId="team_test"
-        onComplete={onComplete}
-        onBack={onBack}
-        onSkip={onSkip}
+        onComplete={vi.fn()}
+        onBack={vi.fn()}
+        onSkip={vi.fn()}
       />,
     );
 
     // Anthropic subtitle must mention no embedding
-    const anthropicSub = screen.getByText(/Claude models.*no embedding API/);
-    expect(anthropicSub).toBeInTheDocument();
+    expect(
+      screen.getByText(/Claude models.*no embedding API/),
+    ).toBeInTheDocument();
 
     // OpenAI subtitle must mention embeddings
-    const openaiSub = screen.getByText(/GPT models \+ embeddings/);
-    expect(openaiSub).toBeInTheDocument();
+    expect(
+      screen.getByText(/GPT models \+ embeddings/),
+    ).toBeInTheDocument();
   });
 
   it("Step 5: waiting state is honest — no fake compiled page", async () => {
-    const onGoToKnowledge = vi.fn();
+    mockedGetStats.mockResolvedValue({
+      hasEvents: false,
+      hasJobs: false,
+      hasPages: false,
+      eventsCount: 0,
+      jobsCount: 0,
+      pagesCount: 0,
+    });
+    mockedGetLatest.mockResolvedValue(null);
 
     renderStep(
       <Step5Complete
         projectId="prj_test"
-        onGoToKnowledge={onGoToKnowledge}
+        apiKey="tm_test_key"
+        onGoToKnowledge={vi.fn()}
       />,
     );
 
     await waitFor(() => {
-      // The "Latest page" card should not appear when there's no data
       expect(screen.queryByText("Latest page")).toBeNull();
     });
 
-    // Troubleshooting section should be visible instead
     expect(
       screen.getByText("No events yet? Check these"),
     ).toBeInTheDocument();

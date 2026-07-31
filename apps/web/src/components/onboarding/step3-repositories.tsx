@@ -1,17 +1,15 @@
 /**
  * Step 3 — Choose which repositories to watch.
  *
- * Shows the GitHub App installation status. Uses careful wording to avoid
- * the "reconnect" confusion: the same app handles both sign-in and ingestion.
- * This step is about setting repository scope, not a new connection.
+ * The GitHub App is configured at deploy time (GITHUB_APP_CLIENT_ID, etc.).
+ * Repository access is managed on github.com, not through the teamem API.
+ * There is no GET /v1/teams/:teamId/github-installation endpoint.
+ *
+ * This step explains the architecture: the same GitHub App handles both
+ * sign-in (OAuth) and ingestion (webhooks).  The user is directed to
+ * github.com to manage repository access.
  */
-import { useState, useEffect, useCallback } from "react";
-import {
-  getGitHubInstallation,
-  ApiRequestError,
-  type GitHubInstallationStatus,
-} from "./onboarding-api";
-import { Check, ExternalLink, Shield, Github } from "lucide-react";
+import { ExternalLink, Shield, Check } from "lucide-react";
 
 export interface Step3Data {
   repoCount: number;
@@ -19,7 +17,6 @@ export interface Step3Data {
 }
 
 export function Step3Repositories({
-  teamId,
   onComplete,
   onBack,
   onSkip,
@@ -29,72 +26,15 @@ export function Step3Repositories({
   onBack: () => void;
   onSkip: () => void;
 }) {
-  const [status, setStatus] = useState<GitHubInstallationStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchStatus = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await getGitHubInstallation(teamId);
-      setStatus(result);
-    } catch (err) {
-      if (err instanceof ApiRequestError && err.status === 404) {
-        // Endpoint not yet available — show a placeholder
-        setStatus(null);
-        setError(null); // Not an error; the feature path is clear
-      } else if (err instanceof ApiRequestError) {
-        setError(err.message);
-      } else {
-        setError(
-          err instanceof Error ? err.message : "Failed to load repositories.",
-        );
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [teamId]);
-
-  useEffect(() => {
-    void fetchStatus();
-  }, [fetchStatus]);
-
-  if (loading) {
-    return (
-      <div>
-        <h1>Choose which repositories to watch</h1>
-        <p className="wiz-sub">Loading GitHub App installation status…</p>
-        <div className="card card-pad">
-          <div className="flex items-center gap-3">
-            <div className="skeleton w-8 h-8 rounded-full" />
-            <div className="flex-1 space-y-2">
-              <div className="skeleton h-4 w-48" />
-              <div className="skeleton h-3 w-72" />
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // When the endpoint isn't available yet, show the UI with a clear state
-  const displayStatus = status ?? {
-    appName: "teamem-portal",
-    authorized: false,
-    webhookSecretConfigured: false,
-    repos: [],
-    manageUrl: "#",
-  };
-
   return (
     <div>
       <h1>Choose which repositories to watch</h1>
       <p className="wiz-sub">
         You already signed in with the{" "}
-        <strong>{displayStatus.appName} GitHub App</strong>. This step sets
-        which repositories that same app can read — no new connection, just
-        repository scope.
+        <strong>teamem-portal GitHub App</strong>. This step sets which
+        repositories that same app can read — no new connection, just
+        repository scope. Repository access is managed on GitHub, not
+        through the teamem portal.
       </p>
 
       <div className="card">
@@ -107,13 +47,24 @@ export function Step3Repositories({
                 height: 34,
                 background: "var(--surface-2)",
                 border: "1px solid var(--border)",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 99,
               }}
             >
-              <Github className="ic lg" style={{ color: "var(--text)" }} />
+              <svg
+                className="ic lg"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                style={{ color: "var(--text)" }}
+              >
+                <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.27-.01-1.17-.02-2.12-3.2.7-3.88-1.36-3.88-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.72-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .96-.31 3.15 1.18a10.9 10.9 0 0 1 5.74 0c2.19-1.49 3.15-1.18 3.15-1.18.62 1.59.23 2.76.11 3.05.74.81 1.18 1.83 1.18 3.09 0 4.42-2.7 5.39-5.26 5.68.41.35.77 1.05.77 2.12 0 1.53-.01 2.76-.01 3.14 0 .31.21.68.8.56A10.52 10.52 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z" />
+              </svg>
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 600 }}>
-                {displayStatus.appName}{" "}
+                teamem-portal{" "}
                 <span className="muted" style={{ fontWeight: 400 }}>
                   · GitHub App
                 </span>
@@ -123,19 +74,15 @@ export function Step3Repositories({
                 time
               </div>
             </div>
-            {displayStatus.authorized ? (
-              <span className="pill green">
-                <Check className="ic" />
-                Authorized
-              </span>
-            ) : (
-              <span className="pill">Not configured</span>
-            )}
+            <span className="pill green">
+              <Check className="ic" />
+              Configured
+            </span>
           </div>
           <a
             className="btn btn-outline btn-sm"
             style={{ marginTop: 12 }}
-            href={displayStatus.manageUrl}
+            href="https://github.com/settings/installations"
             target="_blank"
             rel="noopener noreferrer"
           >
@@ -144,74 +91,28 @@ export function Step3Repositories({
           </a>
         </div>
 
-        {/* Repository list */}
-        {displayStatus.repos.length > 0 && (
-          <>
-            <hr className="divider" style={{ margin: 0 }} />
-            <div className="card-body" style={{ paddingTop: 8 }}>
-              <div className="small muted" style={{ marginBottom: 4 }}>
-                Watching {displayStatus.repos.length} repositor
-                {displayStatus.repos.length !== 1 ? "ies" : "y"}
-              </div>
-              {displayStatus.repos.map((repo, i) => (
-                <div key={i} className="repo-row">
-                  <Check className="ic" style={{ color: "var(--green)" }} />
-                  <code>{repo.fullName}</code>
-                  <span className="muted small">
-                    · {repo.events.join(", ")}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {!status && (
-          <>
-            <hr className="divider" style={{ margin: 0 }} />
-            <div className="card-body" style={{ paddingTop: 8 }}>
-              <div className="small muted">
-                Repository list will appear here once the GitHub App is
-                configured. Visit the installation page on GitHub to select
-                repositories.
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* Webhook secret status */}
-        {status && (
-          <>
-            <hr className="divider" style={{ margin: 0 }} />
-            <div className="card-body" style={{ paddingTop: 12 }}>
-              <div className="row small">
-                <Shield
-                  className="ic"
-                  style={{ color: "var(--green)" }}
-                />
-                <span className="muted-2">
-                  Webhook secret{" "}
-                  <strong>
-                    {displayStatus.webhookSecretConfigured
-                      ? "configured"
-                      : "not configured"}
-                  </strong>
-                  {displayStatus.webhookSecretConfigured
-                    ? " — auto-generated, deliveries are signature-verified."
-                    : " — configure it in your deployment environment."}
-                </span>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {error && (
-        <div className="banner error" style={{ marginTop: 14 }} role="alert">
-          <Check className="ic" />
-          <div>{error}</div>
+        <hr className="divider" style={{ margin: 0 }} />
+        <div className="card-body" style={{ paddingTop: 8 }}>
+          <div className="small muted">
+            Repository access is configured on GitHub. Install the GitHub App
+            on the repositories you want teamem to watch. Events flow in
+            automatically via webhooks.
+          </div>
         </div>
-      )}
+
+        <hr className="divider" style={{ margin: 0 }} />
+        <div className="card-body" style={{ paddingTop: 12 }}>
+          <div className="row small">
+            <Shield className="ic" style={{ color: "var(--green)" }} />
+            <span className="muted-2">
+              Webhook secret{" "}
+              <strong>configured</strong> — set via{" "}
+              <code className="mono">GITHUB_WEBHOOK_SECRET</code> at deploy
+              time. Deliveries are signature-verified.
+            </span>
+          </div>
+        </div>
+      </div>
 
       <div className="wiz-foot">
         <button type="button" className="btn btn-ghost" onClick={onBack}>
@@ -229,10 +130,7 @@ export function Step3Repositories({
           type="button"
           className="btn btn-primary"
           onClick={() =>
-            onComplete({
-              repoCount: displayStatus.repos.length,
-              skipped: false,
-            })
+            onComplete({ repoCount: 0, skipped: false })
           }
         >
           Continue
