@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { KnowledgePage } from "@/pages/knowledge-page";
 import { ScopeProvider } from "@/lib/scope";
@@ -190,8 +190,8 @@ describe("KnowledgePage", () => {
       screen.getByText("Decision on Compile Queue: Redis vs. Postgres"),
     ).toBeInTheDocument();
     expect(screen.getByText("decisions/use-postgresql-pgvector")).toBeInTheDocument();
-    expect(screen.getByText("3 evidence items")).toBeInTheDocument();
-    expect(screen.getByText("1 evidence item")).toBeInTheDocument();
+    expect(screen.getByText("3 evidence")).toBeInTheDocument();
+    expect(screen.getByText("1 evidence")).toBeInTheDocument();
     const confirmed = await screen.findAllByText(/Last confirmed/);
     expect(confirmed.length).toBe(3);
     // Disputed row shows the status badge (also appears in the filter dropdown)
@@ -259,6 +259,26 @@ describe("KnowledgePage", () => {
     expect(document.body.textContent).not.toContain("All confidence");
   });
 
+  it("viewer session sees only Type and Status filters", async () => {
+    setupScope(VIEWER_SESSION);
+    mocks.fetchConcepts.mockResolvedValue({ requestId: "r", data: MOCK_SUMMARIES, nextCursor: null });
+    renderPage();
+    await screen.findByText("Knowledge");
+    const selects = document.querySelectorAll("select.filter-chip");
+    expect(selects.length).toBe(2); // type + status only
+    expect(screen.queryByLabelText("Filter by tag")).toBeNull();
+    expect(screen.queryByLabelText("Filter by contributor principal ID")).toBeNull();
+  });
+
+  it("shows skeleton rows while loading the list", async () => {
+    setupScope();
+    // Never resolve — keeps loading state
+    mocks.fetchConcepts.mockImplementation(() => new Promise(() => {}));
+    renderPage();
+    expect(await screen.findByText("Knowledge")).toBeInTheDocument();
+    expect(document.querySelectorAll(".skeleton").length).toBeGreaterThan(0);
+  });
+
   it("initializes the tag filter from the URL query param", async () => {
     setupScope();
     mocks.fetchConcepts.mockResolvedValue({ requestId: "r", data: [], nextCursor: null });
@@ -272,6 +292,28 @@ describe("KnowledgePage", () => {
 
   // ── Search ──
 
+  const MOCK_SEARCH_RESULTS = {
+    requestId: "req_search",
+    results: [
+      {
+        uuid: "13ee5d2e-6bfe-4406-ae91-153c4c0ea148",
+        path: "decisions/use-postgresql-pgvector",
+        type: "decision",
+        status: "active",
+        confidence: "high",
+        title: "Use PostgreSQL with pgvector and pg-boss",
+        tags: ["postgresql", "pgvector"],
+        lastConfirmed: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        evidenceCount: 3,
+        contributors: [],
+        relevance: 0.36,
+        ftsFallback: false,
+      },
+    ],
+    degraded: false,
+    nextCursor: null,
+  };
+
   it("has a search bar for member role", async () => {
     setupScope();
     mocks.fetchConcepts.mockResolvedValue({ requestId: "r", data: [], nextCursor: null });
@@ -279,6 +321,83 @@ describe("KnowledgePage", () => {
     expect(
       await screen.findByPlaceholderText(/Ask in natural language/),
     ).toBeInTheDocument();
+  });
+
+  it("triggers semantic search and renders results", async () => {
+    setupScope();
+    mocks.fetchConcepts.mockResolvedValue({ requestId: "r", data: [], nextCursor: null });
+    mocks.searchConcepts.mockResolvedValue(MOCK_SEARCH_RESULTS);
+    renderPage();
+
+    const input = await screen.findByPlaceholderText(/Ask in natural language/);
+    fireEvent.change(input, { target: { value: "why postgres" } });
+    fireEvent.click(screen.getByText("Search"));
+
+    expect(
+      await screen.findByText("Use PostgreSQL with pgvector and pg-boss"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/1 result for/)).toBeInTheDocument();
+    expect(screen.getByText(/semantic/)).toBeInTheDocument();
+    expect(screen.getByText("Top match first")).toBeInTheDocument();
+    expect(mocks.searchConcepts).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "why postgres" }),
+    );
+  });
+
+  it("does not render relevance as a percentage", async () => {
+    setupScope();
+    mocks.fetchConcepts.mockResolvedValue({ requestId: "r", data: [], nextCursor: null });
+    mocks.searchConcepts.mockResolvedValue(MOCK_SEARCH_RESULTS);
+    renderPage();
+
+    const input = await screen.findByPlaceholderText(/Ask in natural language/);
+    fireEvent.change(input, { target: { value: "why postgres" } });
+    fireEvent.click(screen.getByText("Search"));
+    await screen.findByText("Use PostgreSQL with pgvector and pg-boss");
+
+    expect(document.body.textContent).not.toContain("36%");
+    expect(document.body.textContent).not.toContain("0.36");
+  });
+
+  it("shows degraded banner and keyword label when search degraded", async () => {
+    setupScope();
+    mocks.fetchConcepts.mockResolvedValue({ requestId: "r", data: [], nextCursor: null });
+    mocks.searchConcepts.mockResolvedValue({
+      ...MOCK_SEARCH_RESULTS,
+      degraded: true,
+      results: [
+        {
+          ...MOCK_SEARCH_RESULTS.results[0]!,
+          ftsFallback: true,
+        },
+      ],
+    });
+    renderPage();
+
+    const input = await screen.findByPlaceholderText(/Ask in natural language/);
+    fireEvent.change(input, { target: { value: "why postgres" } });
+    fireEvent.click(screen.getByText("Search"));
+
+    expect(await screen.findByText("Keyword search only")).toBeInTheDocument();
+    expect(screen.getByText(/keyword/)).toBeInTheDocument();
+  });
+
+  it("shows empty state when search returns no results", async () => {
+    setupScope();
+    mocks.fetchConcepts.mockResolvedValue({ requestId: "r", data: [], nextCursor: null });
+    mocks.searchConcepts.mockResolvedValue({
+      requestId: "req_search",
+      results: [],
+      degraded: false,
+      nextCursor: null,
+    });
+    renderPage();
+
+    const input = await screen.findByPlaceholderText(/Ask in natural language/);
+    fireEvent.change(input, { target: { value: "nonexistent query" } });
+    fireEvent.click(screen.getByText("Search"));
+
+    expect(await screen.findByText("No pages match your search")).toBeInTheDocument();
   });
 
   // ── Viewer (real role from session) ──

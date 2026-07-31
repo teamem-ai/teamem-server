@@ -12,6 +12,7 @@ import {
   FileCode,
   Sparkles,
   Check,
+  Github,
 } from "lucide-react";
 import { TypeBadge, type ConceptType } from "@/components/ui/type-badge";
 import {
@@ -314,14 +315,7 @@ export function ConceptDetailPage() {
                   ))}
                 </div>
               ) : (
-                <div className="empty-state" style={{ padding: "18px 8px" }}>
-                  <p className="small">
-                    No verified contributors. Events that produced this page
-                    were{" "}
-                    <code className="mono">client_claimed</code> — self-reported
-                    identities don&apos;t appear here.
-                  </p>
-                </div>
+                <ContributorEmptyState evidence={concept.evidence} isDisputed={isDisputed} />
               )}
             </div>
           </div>
@@ -563,6 +557,38 @@ function evidenceSub(ev: Evidence): string {
   return "";
 }
 
+function ContributorEmptyState({
+  evidence,
+  isDisputed,
+}: {
+  evidence: Evidence[];
+  isDisputed: boolean;
+}) {
+  const allMcp = evidence.length > 0 && evidence.every((ev) => ev.kind === "mcp_write");
+  const allRepoFile = evidence.length > 0 && evidence.every((ev) => ev.kind === "repo_file");
+
+  let message: string;
+  if (isDisputed) {
+    message =
+      "Both positions were compiled from separate repo files, but no verified human contributors are recorded for either position.";
+  } else if (allMcp) {
+    message =
+      "Agent writes via MCP are attributed to the invoking principal; if that principal was client_claimed it is intentionally excluded from the contributor list.";
+  } else if (allRepoFile) {
+    message =
+      "No verified contributors. Events that produced this page were client_claimed — self-reported identities don’t appear here.";
+  } else {
+    message =
+      "No verified contributors. Events that produced this page were client_claimed — self-reported identities don’t appear here.";
+  }
+
+  return (
+    <div className="empty-state" style={{ padding: "18px 8px" }}>
+      <p className="small">{message}</p>
+    </div>
+  );
+}
+
 // ── Contributor row — three forms: human bound / human unbound / service ──
 
 function ContributorRow({ contributor }: { contributor: PrincipalRef }) {
@@ -575,8 +601,8 @@ function ContributorRow({ contributor }: { contributor: PrincipalRef }) {
       ? "Unbound human contributor"
       : contributor.provider;
 
-  return (
-    <div className="contrib-row">
+  const body = (
+    <>
       <span className={cn("avatar", contributor.kind === "service" ? "service" : "human")}>
         {isBound && contributor.avatarUrl ? (
           <img
@@ -611,8 +637,24 @@ function ContributorRow({ contributor }: { contributor: PrincipalRef }) {
         </div>
         <div className="small muted">{sub}</div>
       </div>
-    </div>
+    </>
   );
+
+  if (isBound && contributor.githubLogin) {
+    return (
+      <a
+        href={`https://github.com/${contributor.githubLogin}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="contrib-row"
+      >
+        {body}
+        <Github className="w-3.5 h-3.5 text-muted-foreground" />
+      </a>
+    );
+  }
+
+  return <div className="contrib-row">{body}</div>;
 }
 
 // ── Skeleton ──

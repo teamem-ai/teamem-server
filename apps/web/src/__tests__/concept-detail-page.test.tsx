@@ -268,6 +268,17 @@ describe("ConceptDetailPage", () => {
     expect(screen.getByText("GitHub account")).toBeInTheDocument();
   });
 
+  it("links bound GitHub contributors to their GitHub profile", async () => {
+    setupScope();
+    mocks.fetchConcept.mockResolvedValue(threeEvidenceConcept);
+    renderConcept(threeEvidenceConcept.uuid);
+
+    await screen.findByText("Contributors · 2");
+    const ghLink = screen.getByText("@dli").closest("a");
+    expect(ghLink).toHaveAttribute("href", "https://github.com/dli");
+    expect(ghLink).toHaveAttribute("target", "_blank");
+  });
+
   it("renders unbound human contributor without a GitHub account link", async () => {
     setupScope();
     mocks.fetchConcept.mockResolvedValue(disputedConcept);
@@ -331,20 +342,41 @@ describe("ConceptDetailPage", () => {
     await screen.findByText(/Stripe webhook retries/);
     expect(screen.getAllByText("Agent write (MCP)").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/internal event/)).toBeInTheDocument();
-    // mcp_write links to the internal event record, not an external URL
+    // mcp_write links to the internal event detail page (not an external URL)
     const evRefs = screen.getAllByText("evt_53014880b618482c94dc28ac167acee9");
     const linked = evRefs.find((el) => el.closest("a") !== null);
-    expect(linked?.closest("a")?.getAttribute("href")).toContain("/events/");
+    expect(linked?.closest("a")?.getAttribute("href")).toBe(
+      "/events/evt_53014880b618482c94dc28ac167acee9",
+    );
   });
 
-  it("shows the honest empty contributors state", async () => {
+  it("shows mcp-specific empty contributors message", async () => {
     setupScope();
     mocks.fetchConcept.mockResolvedValue(mcpConcept);
     renderConcept(mcpConcept.uuid);
 
     await screen.findByText(/Stripe webhook retries/);
     expect(screen.getByText("Contributors · 0")).toBeInTheDocument();
-    expect(screen.getByText(/No verified contributors/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Agent writes via MCP are attributed to the invoking principal/),
+    ).toBeInTheDocument();
+  });
+
+  it("shows disputed-specific empty contributors message", async () => {
+    setupScope();
+    const disputedEmpty = {
+      ...disputedConcept,
+      uuid: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      contributors: [],
+    };
+    mocks.fetchConcept.mockResolvedValue(disputedEmpty);
+    renderConcept(disputedEmpty.uuid);
+
+    await screen.findByText(/Conflicting evidence/);
+    expect(screen.getByText("Contributors · 0")).toBeInTheDocument();
+    expect(
+      screen.getAllByText(/Both positions were compiled from separate repo files/).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   // ── 404 (unified, no access hints) ──

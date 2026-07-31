@@ -25,9 +25,17 @@ export function PermissionDenied({
 /** Information banner for viewer browsing knowledge. */
 export function ViewerInfoBanner() {
   return (
-    <Banner variant="info">
-      You&apos;re browsing as a <span className="role-badge viewer mx-1">Viewer</span> —
-      semantic search needs a higher role. Ask a team admin.
+    <Banner
+      variant="info"
+      title="Viewer access"
+      actions={
+        <a className="btn btn-sm btn-primary" href="/settings/team">
+          Request access
+        </a>
+      }
+    >
+      You&apos;re browsing as a <span className="role-badge viewer mx-1">Viewer</span>.
+      Semantic search needs a higher role — ask a team admin.
     </Banner>
   );
 }

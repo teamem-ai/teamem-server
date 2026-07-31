@@ -20,6 +20,7 @@ import type {
   SearchResponse,
   ContextResponse,
   ProjectEntry,
+  EventDetail,
 } from "@teamem/schema";
 
 const BASE = "/v1";
@@ -167,4 +168,14 @@ export async function searchConcepts(params: SearchParams): Promise<SearchRespon
 
 export async function fetchContext(projectId: string): Promise<ContextResponse> {
   return get("/context", { projectId });
+}
+
+// ── Events (itemResponse envelope) ─────────────────────────────────────────
+
+export async function fetchEvent(eventId: string, projectId: string): Promise<EventDetail> {
+  const resp = await get<{ requestId: string; data: EventDetail }>(
+    `/events/${eventId}`,
+    { projectId },
+  );
+  return resp.data;
 }

@@ -240,11 +240,11 @@ export function KnowledgePage() {
         </div>
         <div className="k-meta">
           <span className="path">{item.path}</span>
+          <span className="small muted">
+            {item.evidenceCount} evidence
+          </span>
           <span title={formatFull(item.lastConfirmed)}>
             Last confirmed {relativeTime(item.lastConfirmed)}
-          </span>
-          <span className="small muted">
-            {item.evidenceCount} evidence{item.evidenceCount !== 1 ? " items" : " item"}
           </span>
         </div>
       </div>
@@ -295,12 +295,17 @@ export function KnowledgePage() {
         </form>
       )}
 
-      {/* Filters — map 1:1 to the conceptListQuery contract params. */}
+      {/* Filters — map 1:1 to the conceptListQuery contract params.
+          Viewer sees only Type/Status (design spec). */}
       <div className="filter-row mb-5">
         <FilterChip label="Type" options={TYPE_OPTIONS} value={typeFilter} onChange={setTypeFilter} />
         <FilterChip label="Status" options={STATUS_OPTIONS} value={statusFilter} onChange={setStatusFilter} />
-        <TagFilterInput value={tagFilter} onChange={setTagFilter} />
-        <ContributorFilterInput value={contributorFilter} onChange={setContributorFilter} />
+        {!isViewer && (
+          <>
+            <TagFilterInput value={tagFilter} onChange={setTagFilter} />
+            <ContributorFilterInput value={contributorFilter} onChange={setContributorFilter} />
+          </>
+        )}
         <span className="small muted" style={{ marginLeft: "auto" }}>
           Sorted by <strong>last confirmed</strong>
         </span>

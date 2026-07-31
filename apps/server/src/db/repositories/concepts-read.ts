@@ -43,7 +43,14 @@ function toEvidenceDto(row: EvidenceRow): Evidence {
   }
 }
 
-/** Map a DB principal (+ optional user) row to a display ref for the UI. */
+/** Map a DB principal row to a display ref for the UI.
+ *
+ *  We do not join the users table: providerUserId is a string that may be
+ *  non-numeric (e.g. service principals, external identity providers), so
+ *  casting it to integer for a github_id join is unsafe. Instead we treat the
+ *  principal's displayLogin as the GitHub login for github humans and derive
+ *  the public avatar URL from it.
+ */
 function toPrincipalRef(
   principalRow: {
     id: string;
@@ -51,16 +58,11 @@ function toPrincipalRef(
     provider: string;
     providerKind: string;
     displayLogin: string | null;
-    providerUserId: string | null;
-    githubLogin?: string | null;
-    avatarUrl?: string | null;
   },
 ): PrincipalRef {
-  const displayName =
-    principalRow.githubLogin ??
-    principalRow.displayLogin ??
-    principalRow.providerKind ??
-    principalRow.id;
+  const isGithubHuman = principalRow.kind === 'human' && principalRow.provider === 'github';
+  const githubLogin = isGithubHuman ? principalRow.displayLogin : undefined;
+  const displayName = principalRow.displayLogin ?? principalRow.providerKind ?? principalRow.id;
 
   const ref: PrincipalRef = {
     principalId: principalRow.id,
@@ -69,12 +71,9 @@ function toPrincipalRef(
     displayName,
   };
 
-  if (principalRow.avatarUrl) {
-    ref.avatarUrl = principalRow.avatarUrl;
-  }
-
-  if (principalRow.githubLogin) {
-    ref.githubLogin = principalRow.githubLogin;
+  if (githubLogin) {
+    ref.githubLogin = githubLogin;
+    ref.avatarUrl = `https://avatars.githubusercontent.com/${githubLogin}?size=64`;
   }
 
   return ref;
@@ -134,9 +133,6 @@ async function assembleConcept(
       provider: schema.principals.provider,
       providerKind: schema.principals.providerKind,
       displayLogin: schema.principals.displayLogin,
-      providerUserId: schema.principals.providerUserId,
-      githubLogin: schema.users.githubLogin,
-      avatarUrl: schema.users.avatarUrl,
     })
     .from(schema.conceptContributors)
     .innerJoin(
@@ -144,14 +140,6 @@ async function assembleConcept(
       and(
         eq(schema.principals.teamId, teamId),
         eq(schema.principals.id, schema.conceptContributors.principalId),
-      ),
-    )
-    .leftJoin(
-      schema.users,
-      and(
-        eq(schema.users.githubId, sql`CAST(${schema.principals.providerUserId} AS INTEGER)`),
-        eq(schema.principals.kind, 'human'),
-        eq(schema.principals.provider, 'github'),
       ),
     )
     .where(
@@ -360,9 +348,6 @@ export async function enrichConceptRows<T extends { uuid: string; teamId: string
         provider: schema.principals.provider,
         providerKind: schema.principals.providerKind,
         displayLogin: schema.principals.displayLogin,
-        providerUserId: schema.principals.providerUserId,
-        githubLogin: schema.users.githubLogin,
-        avatarUrl: schema.users.avatarUrl,
       })
       .from(schema.conceptContributors)
       .innerJoin(
@@ -370,14 +355,6 @@ export async function enrichConceptRows<T extends { uuid: string; teamId: string
         and(
           eq(schema.principals.teamId, teamId),
           eq(schema.principals.id, schema.conceptContributors.principalId),
-        ),
-      )
-      .leftJoin(
-        schema.users,
-        and(
-          eq(schema.users.githubId, sql`CAST(${schema.principals.providerUserId} AS INTEGER)`),
-          eq(schema.principals.kind, 'human'),
-          eq(schema.principals.provider, 'github'),
         ),
       )
       .where(
@@ -398,9 +375,6 @@ export async function enrichConceptRows<T extends { uuid: string; teamId: string
       provider: row.provider,
       providerKind: row.providerKind,
       displayLogin: row.displayLogin,
-      providerUserId: row.providerUserId,
-      githubLogin: row.githubLogin,
-      avatarUrl: row.avatarUrl,
     });
     const list = contribMap.get(row.conceptUuid) ?? [];
     list.push(ref);

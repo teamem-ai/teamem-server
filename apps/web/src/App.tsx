@@ -6,6 +6,7 @@ import { ComponentShowcase } from "@/pages/component-showcase";
 import { KnowledgePage } from "@/pages/knowledge-page";
 import { ConceptDetailPage } from "@/pages/concept-detail-page";
 import { ContextPreviewPage } from "@/pages/context-preview-page";
+import { EventDetailPage } from "@/pages/event-detail-page";
 import { SoonPage } from "@/pages/soon-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
 
@@ -36,6 +37,7 @@ export default function App() {
                 />
               }
             />
+            <Route path="/events/:id" element={<EventDetailPage />} />
             <Route
               path="/jobs"
               element={
