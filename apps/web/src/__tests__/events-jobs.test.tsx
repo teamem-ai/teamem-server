@@ -428,13 +428,13 @@ describe("EventDetailPage", () => {
 
   it("shows fail-closed lock state when audit write fails", async () => {
     mockFetchError(
-      new AuditWriteFailedError(500, {
-        requestId: "req-audit-fail-001",
-        error: {
-          code: "internal",
-          message: "Payload read audit failed; access denied",
-        },
-      }),
+      new AuditWriteFailedError(
+        500,
+        "internal",
+        "Payload read audit failed; access denied",
+        undefined,
+        "req-audit-fail-001",
+      ),
     );
     renderEventDetail("evt_failClosed");
     await waitFor(() => {

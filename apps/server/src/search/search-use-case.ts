@@ -22,6 +22,7 @@ import {
   type SearchResponse,
   type SearchResult,
   type CursorPayload,
+  type PrincipalRef,
 } from '@teamem/schema';
 import type { AppDb } from '../db/client.js';
 import { hybridSearch, type HybridSearchRow } from '../compiler/search/hybrid.js';
@@ -37,6 +38,7 @@ import {
 } from '../auth/scope.js';
 import { and, eq } from 'drizzle-orm';
 import * as schema from '../db/schema.js';
+import { enrichConceptRows } from '../db/repositories/concepts-read.js';
 
 // ── Error types ─────────────────────────────────────────────────────────────
 
@@ -86,7 +88,11 @@ function computeSearchFilterHash(params: {
 // ── DTO mapping ─────────────────────────────────────────────────────────────
 
 /** Map a HybridSearchRow to the frozen SearchResult DTO. */
-function toSearchResult(row: HybridSearchRow): SearchResult {
+function toSearchResult(
+  row: HybridSearchRow,
+  evidenceCount: number,
+  contributors: PrincipalRef[],
+): SearchResult {
   return {
     uuid: row.uuid,
     path: row.path,
@@ -96,6 +102,8 @@ function toSearchResult(row: HybridSearchRow): SearchResult {
     title: row.title,
     tags: row.tags,
     lastConfirmed: row.lastConfirmed.toISOString(),
+    evidenceCount,
+    contributors,
     relevance: Math.round(row.relevance * 1000) / 1000, // round to 3 decimal places
     ftsFallback: row.ftsFallback,
   };
@@ -247,7 +255,24 @@ export async function search(
   });
 
   // ── Map to DTOs ───────────────────────────────────────────────────────
-  const results: SearchResult[] = result.rows.map(toSearchResult);
+  // Enrich with evidence counts and contributor display refs (DUA-234).
+  const enrichInput = result.rows.map((row) => ({
+    uuid: row.uuid,
+    teamId,
+    projectId,
+  }));
+  const enriched = await enrichConceptRows(db, teamId, projectId, enrichInput);
+  const enrichMap = new Map(
+    enriched.map((e) => [
+      e.uuid,
+      { evidenceCount: e.evidenceCount, contributors: e.contributors },
+    ]),
+  );
+
+  const results: SearchResult[] = result.rows.map((row) => {
+    const meta = enrichMap.get(row.uuid)!;
+    return toSearchResult(row, meta.evidenceCount, meta.contributors);
+  });
 
   // ── Build next cursor ─────────────────────────────────────────────────
   let nextCursor: string | null = null;

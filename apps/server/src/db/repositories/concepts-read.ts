@@ -9,9 +9,9 @@
  * Every query carries both team_id and project_id (red line 5.5).
  * Never fetches first and authorizes later.
  */
-import { and, eq, lt, gt, or, desc, asc, inArray } from 'drizzle-orm';
+import { and, eq, lt, gt, or, desc, asc, inArray, count } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
-import type { Concept, Evidence } from '@teamem/schema';
+import type { Concept, Evidence, PrincipalRef } from '@teamem/schema';
 import { CONCEPT_SCHEMA_VERSION } from '@teamem/schema';
 import * as schema from '../schema.js';
 import type { AppDb } from '../client.js';
@@ -41,6 +41,42 @@ function toEvidenceDto(row: EvidenceRow): Evidence {
     case 'manual':
       return { kind: row.kind, ref: row.ref ?? '', at };
   }
+}
+
+/** Map a DB principal row to a display ref for the UI.
+ *
+ *  We do not join the users table: providerUserId is a string that may be
+ *  non-numeric (e.g. service principals, external identity providers), so
+ *  casting it to integer for a github_id join is unsafe. Instead we treat the
+ *  principal's displayLogin as the GitHub login for github humans and derive
+ *  the public avatar URL from it.
+ */
+function toPrincipalRef(
+  principalRow: {
+    id: string;
+    kind: 'human' | 'service';
+    provider: string;
+    providerKind: string;
+    displayLogin: string | null;
+  },
+): PrincipalRef {
+  const isGithubHuman = principalRow.kind === 'human' && principalRow.provider === 'github';
+  const githubLogin = isGithubHuman ? principalRow.displayLogin : undefined;
+  const displayName = principalRow.displayLogin ?? principalRow.providerKind ?? principalRow.id;
+
+  const ref: PrincipalRef = {
+    principalId: principalRow.id,
+    kind: principalRow.kind,
+    provider: principalRow.providerKind,
+    displayName,
+  };
+
+  if (githubLogin) {
+    ref.githubLogin = githubLogin;
+    ref.avatarUrl = `https://avatars.githubusercontent.com/${githubLogin}?size=64`;
+  }
+
+  return ref;
 }
 
 // ── Internal assembler ──────────────────────────────────────────────────────
@@ -88,12 +124,24 @@ async function assembleConcept(
       ),
     );
 
-  // 3. Contributors (Q5: principal ids only)
+  // 3. Contributors (Q5: principal ids only) resolved to display refs
+  //    for the UI three-form (human bound / human unbound / service).
   const contributorRows = await db
     .select({
-      principalId: schema.conceptContributors.principalId,
+      id: schema.principals.id,
+      kind: schema.principals.kind,
+      provider: schema.principals.provider,
+      providerKind: schema.principals.providerKind,
+      displayLogin: schema.principals.displayLogin,
     })
     .from(schema.conceptContributors)
+    .innerJoin(
+      schema.principals,
+      and(
+        eq(schema.principals.teamId, teamId),
+        eq(schema.principals.id, schema.conceptContributors.principalId),
+      ),
+    )
     .where(
       and(
         eq(schema.conceptContributors.teamId, teamId),
@@ -101,6 +149,8 @@ async function assembleConcept(
         eq(schema.conceptContributors.conceptUuid, conceptUuid),
       ),
     );
+
+  const evidenceCount = evidenceRows.length;
 
   return {
     uuid: conceptUuid,
@@ -113,7 +163,8 @@ async function assembleConcept(
     lastConfirmed: conceptRow.lastConfirmed.toISOString(),
     schemaVersion: CONCEPT_SCHEMA_VERSION,
     firstSeen: conceptRow.firstSeen.toISOString(),
-    contributors: contributorRows.map((r) => r.principalId),
+    evidenceCount,
+    contributors: contributorRows.map(toPrincipalRef),
     evidence: evidenceRows.map(toEvidenceDto),
     supersedes: conceptRow.supersedesUuid ?? null,
     aliases,
@@ -210,6 +261,10 @@ export interface ConceptRow {
   readonly updatedAt: Date;
   /** Current path from concept_paths (null if somehow missing — should never happen). */
   readonly path: string | null;
+  /** Enriched after the initial query: number of evidence rows for this concept. */
+  evidenceCount: number;
+  /** Enriched after the initial query: resolved contributor display refs. */
+  contributors: PrincipalRef[];
 }
 
 const CONCEPT_WITH_PATH_COLUMNS = {
@@ -248,6 +303,89 @@ export interface ListConceptsParams {
 export interface ListConceptsResult {
   readonly rows: ConceptRow[];
   readonly hasMore: boolean;
+}
+
+/**
+ * Enrich a set of concept rows with evidence counts and resolved contributor
+ * refs. These are computed in two batched scoped queries rather than joined into
+ * the paginated query to avoid row explosion / aggregation complexity.
+ *
+ * Generic over the row shape so it can be reused by the list, detail, and
+ * search use cases.
+ */
+export async function enrichConceptRows<T extends { uuid: string; teamId: string; projectId: string }>(
+  db: AppDb,
+  teamId: string,
+  projectId: string,
+  rows: T[],
+): Promise<Array<T & { evidenceCount: number; contributors: PrincipalRef[] }>> {
+  if (rows.length === 0) {
+    return rows as Array<T & { evidenceCount: number; contributors: PrincipalRef[] }>;
+  }
+
+  const uuids = rows.map((r) => r.uuid);
+
+  const [evidenceCounts, contributors] = await Promise.all([
+    db
+      .select({
+        conceptUuid: schema.conceptEvidence.conceptUuid,
+        count: count(schema.conceptEvidence.id).as('count'),
+      })
+      .from(schema.conceptEvidence)
+      .where(
+        and(
+          eq(schema.conceptEvidence.teamId, teamId),
+          eq(schema.conceptEvidence.projectId, projectId),
+          inArray(schema.conceptEvidence.conceptUuid, uuids),
+        ),
+      )
+      .groupBy(schema.conceptEvidence.conceptUuid),
+    db
+      .select({
+        conceptUuid: schema.conceptContributors.conceptUuid,
+        id: schema.principals.id,
+        kind: schema.principals.kind,
+        provider: schema.principals.provider,
+        providerKind: schema.principals.providerKind,
+        displayLogin: schema.principals.displayLogin,
+      })
+      .from(schema.conceptContributors)
+      .innerJoin(
+        schema.principals,
+        and(
+          eq(schema.principals.teamId, teamId),
+          eq(schema.principals.id, schema.conceptContributors.principalId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.conceptContributors.teamId, teamId),
+          eq(schema.conceptContributors.projectId, projectId),
+          inArray(schema.conceptContributors.conceptUuid, uuids),
+        ),
+      ),
+  ]);
+
+  const countMap = new Map(evidenceCounts.map((c) => [c.conceptUuid, Number(c.count)]));
+  const contribMap = new Map<string, PrincipalRef[]>();
+  for (const row of contributors) {
+    const ref = toPrincipalRef({
+      id: row.id,
+      kind: row.kind,
+      provider: row.provider,
+      providerKind: row.providerKind,
+      displayLogin: row.displayLogin,
+    });
+    const list = contribMap.get(row.conceptUuid) ?? [];
+    list.push(ref);
+    contribMap.set(row.conceptUuid, list);
+  }
+
+  return rows.map((r) => ({
+    ...r,
+    evidenceCount: countMap.get(r.uuid) ?? 0,
+    contributors: contribMap.get(r.uuid) ?? [],
+  }));
 }
 
 /**
@@ -345,8 +483,10 @@ export async function listConcepts(
     rows.pop();
   }
 
+  const enriched = await enrichConceptRows(db, teamId, projectId, rows);
+
   return {
-    rows: rows as unknown as ConceptRow[],
+    rows: enriched,
     hasMore,
   };
 }
