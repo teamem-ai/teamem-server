@@ -50,7 +50,6 @@ const usedInvite = {
 
 const notFoundInvite = {
   status: "not_found" as const,
-  invite: {} as typeof validInvite.invite,
 };
 
 const loggedInSession = {

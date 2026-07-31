@@ -9,7 +9,6 @@
  * contract — it is surfaced as an error, never silently swallowed.
  */
 import { inviteLookupResponse } from "@teamem/schema";
-import type { InviteLookupStatus } from "@teamem/schema";
 
 // ── Types (derived from the shared contract, not hand-written) ───────────
 
@@ -28,8 +27,8 @@ export interface GitHubStatus {
   configured: boolean;
 }
 
-/** Status of an invite lookup. Mirrors the schema enum. */
-export type { InviteLookupStatus };
+/** Status of a found invite. Re-exported from the shared schema. */
+export type { InviteFoundStatus } from "@teamem/schema";
 
 /**
  * Response shape from GET /invites/:token.
@@ -65,29 +64,21 @@ export async function getGitHubStatus(): Promise<GitHubStatus> {
 
 /**
  * Look up an invite by its plaintext token.
- * Validates the response against the shared Zod schema before returning.
- * On 404, returns a schema-conforming not_found object (never an empty
- * object that would violate the contract).
+ *
+ * Cross-boundary response validation:
+ *   - HTTP 404 (malformed / unknown token) → not_found branch, no fake
+ *     invite object is fabricated.
+ *   - HTTP 200 → validated against the shared Zod schema. A parse failure
+ *     means the server violated the contract and is surfaced as an error.
  */
 export async function lookupInvite(token: string): Promise<InviteLookup> {
   const res = await fetch(`/invites/${encodeURIComponent(token)}`);
 
   if (res.status === 404) {
-    // Return a schema-conforming not_found response instead of an empty
-    // object. The Zod schema requires `invite` to be a complete object.
-    return inviteLookupResponse.parse({
-      status: "not_found",
-      invite: {
-        id: "inv_unknown",
-        teamId: "unknown",
-        teamName: null,
-        targetRole: "member",
-        invitedByLogin: null,
-        invitedByRole: null,
-        expiresAt: new Date(0).toISOString(),
-        usedAt: null,
-      },
-    });
+    // The server returns 404 for unknown or malformed tokens (by design
+    // these are indistinguishable). The contract represents this as the
+    // not_found branch with no invite object.
+    return { status: "not_found" };
   }
 
   if (!res.ok) throw new Error(`/invites/:token returned ${res.status}`);

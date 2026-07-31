@@ -557,8 +557,8 @@ describe('invite-lookup DTOs (v0.3 — DUA-232)', () => {
     },
   } as const;
 
-  it('accepts a valid invite lookup response with all statuses', () => {
-    const statuses = ['valid', 'expired', 'used', 'not_found'] as const;
+  it('accepts a valid invite lookup response for each found status', () => {
+    const statuses = ['valid', 'expired', 'used'] as const;
     for (const status of statuses) {
       const result = inviteLookupResponse.safeParse({
         ...validInviteLookup,
@@ -566,6 +566,13 @@ describe('invite-lookup DTOs (v0.3 — DUA-232)', () => {
       });
       expect(result.success).toBe(true);
     }
+  });
+
+  it('accepts a not_found response without an invite object', () => {
+    const result = inviteLookupResponse.safeParse({
+      status: 'not_found',
+    });
+    expect(result.success).toBe(true);
   });
 
   it('accepts invite lookup with null teamName and inviter fields', () => {
@@ -593,6 +600,17 @@ describe('invite-lookup DTOs (v0.3 — DUA-232)', () => {
         },
       }).success,
     ).toBe(true);
+  });
+
+  it('rejects not_found branch with an invite object', () => {
+    // not_found is a discriminated branch; carrying an invite object is
+    // invalid because the invite is unknown.
+    expect(
+      inviteLookupResponse.safeParse({
+        status: 'not_found',
+        invite: validInviteLookup.invite,
+      }).success,
+    ).toBe(false);
   });
 
   it('rejects invite lookup with invalid status', () => {

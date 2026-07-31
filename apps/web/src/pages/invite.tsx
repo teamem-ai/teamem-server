@@ -193,7 +193,7 @@ export function InvitePage() {
   }, [token]);
 
   async function handleAccept() {
-    if (!inviteData || !token) return;
+    if (!inviteData || !token || inviteData.status === "not_found") return;
     setJoining(true);
     setAcceptError(null);
     try {
@@ -280,11 +280,17 @@ export function InvitePage() {
     );
   }
 
-  const invite = inviteData?.invite;
-  const teamName = invite?.teamName ?? "unknown team";
-  const targetRole = invite?.targetRole ?? "member";
-  const invitedByLogin = invite?.invitedByLogin ?? null;
-  const invitedByRole = invite?.invitedByRole ?? null;
+  // TypeScript narrowing: by the time we reach this point, the status
+  // must be valid/expired/used (not not_found), which guarantees `invite`.
+  if (!inviteData || inviteData.status === "not_found") {
+    return null;
+  }
+
+  const invite = inviteData.invite;
+  const teamName = invite.teamName ?? "unknown team";
+  const targetRole = invite.targetRole;
+  const invitedByLogin = invite.invitedByLogin;
+  const invitedByRole = invite.invitedByRole;
 
   // ── Guest (not logged in) ────────────────────────────────────────────
   if (state === "guest") {

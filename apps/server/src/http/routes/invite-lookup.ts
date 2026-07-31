@@ -17,7 +17,7 @@
 import type { Context } from "hono";
 import type { AppDb } from "../../db/client.js";
 import { lookupInviteByToken } from "../../auth/invites.js";
-import { inviteLookupResponse } from "@teamem/schema";
+import { inviteFoundResponse } from "@teamem/schema";
 import { InvalidRequestError, NotFoundError, InternalError } from "../errors.js";
 
 /**
@@ -99,10 +99,10 @@ export async function inviteLookupHandler(
     },
   };
 
-  // Validate against the contract DTO before shipping — a mismatch here
-  // is a server bug (wrong field name, invalid enum, etc.), not a client
-  // mistake.
-  const parsed = inviteLookupResponse.safeParse(payload);
+  // Validate against the found branch of the contract DTO before shipping.
+  // The not_found branch is never returned as a 200 response (it maps to
+  // HTTP 404 via NotFoundError), so we only validate the found payload.
+  const parsed = inviteFoundResponse.safeParse(payload);
   if (!parsed.success) {
     console.error(
       JSON.stringify({
