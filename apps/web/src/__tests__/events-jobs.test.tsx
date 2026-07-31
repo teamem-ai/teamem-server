@@ -237,6 +237,20 @@ const mockFailedJobDetailResponse = {
   data: mockFailedJob,
 };
 
+const mockJobWithAlreadyCompiled = {
+  ...mockJob,
+  events: [
+    { eventId: "evt_001", status: "compiled" as const, conceptIds: ["550e8400-e29b-41d4-a716-446655440000"] },
+    { eventId: "evt_003", status: "skipped" as const, reason: "already_compiled" as const },
+  ],
+  eventCount: 2,
+};
+
+const mockJobAlreadyCompiledDetailResponse = {
+  requestId: "req-1",
+  data: mockJobWithAlreadyCompiled,
+};
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Events List Page
 // ══════════════════════════════════════════════════════════════════════════════
@@ -559,6 +573,44 @@ describe("JobDetailPage", () => {
       expect(skippedTag.classList.contains("jr-tag")).toBe(true);
       // Neutral: jr-tag skipped, not jr-tag failed
       expect(skippedTag.closest(".jr-tag.skipped")).toBeTruthy();
+    });
+  });
+
+  it("shows job detail Kind placeholder instead of fabricating 'compilation'", async () => {
+    mockFetchResponse(mockJobDetailResponse);
+    renderJobDetail("eaf45a04-7c3d-4a1b-9f2c-8d7e6a5b4c3d");
+    await waitFor(() => {
+      expect(screen.getByText("Processing")).toBeInTheDocument();
+    });
+    // The job detail metadata must not contain a hardcoded "compilation" value.
+    expect(screen.queryByText("compilation")).toBeNull();
+    // It should show the honest placeholder for the missing DTO field.
+    const placeholders = document.querySelectorAll(".card-head .small.muted");
+    const values = Array.from(placeholders).map((el) => el.textContent?.trim());
+    expect(values).toContain("—");
+  });
+
+  it("renders distinct skip reasons for no_knowledge and already_compiled", async () => {
+    mockFetchResponse(mockJobAlreadyCompiledDetailResponse);
+    renderJobDetail("eaf45a04-7c3d-4a1b-9f2c-8d7e6a5b4c3d");
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /This event was already compiled into knowledge pages/,
+        ),
+      ).toBeInTheDocument();
+    });
+
+    // Also verify the original no_knowledge wording remains on the default mock
+    cleanup();
+    mockFetchResponse(mockJobDetailResponse);
+    renderJobDetail("eaf45a04-7c3d-4a1b-9f2c-8d7e6a5b4c3d");
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /No durable knowledge to keep — this is healthy filtering/,
+        ),
+      ).toBeInTheDocument();
     });
   });
 

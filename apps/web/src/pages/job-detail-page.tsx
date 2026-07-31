@@ -134,6 +134,16 @@ function EventResultTag({ result }: { result: JobEventResult }) {
   );
 }
 
+function skipReasonText(reason: string): string {
+  if (reason === "no_knowledge") {
+    return "No durable knowledge to keep — this is healthy filtering, not a failure.";
+  }
+  if (reason === "already_compiled") {
+    return "This event was already compiled into knowledge pages.";
+  }
+  return reason;
+}
+
 function EventResultRow({ result }: { result: JobEventResult }) {
   const isCompiled = result.status === "compiled" && "conceptIds" in result;
   const isSkipped = result.status === "skipped";
@@ -168,7 +178,7 @@ function EventResultRow({ result }: { result: JobEventResult }) {
         )}
         {isSkipped && (
           <div className="text-[12.5px] text-text-3 mt-[6px]">
-            Nothing durable to keep — this is healthy filtering, not a failure.
+            {skipReasonText("reason" in result ? result.reason : "")}
           </div>
         )}
         {isPending && (
@@ -319,7 +329,12 @@ export function JobDetailPage() {
         {/* Job metadata card */}
         <div className="card">
           <div className="card-head">
-            <code className="mono">compilation</code>
+            <span
+              className="small muted"
+              title="The API does not expose job kind yet (DUA-156 gap)"
+            >
+              —
+            </span>
             <JobStatusPill status={job.status as JobStatus} />
             <div className="ch-actions">
               <button

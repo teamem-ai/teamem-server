@@ -412,8 +412,12 @@ export function EventsPage() {
             </button>
           );
         })}
-        <span className="small muted hidden sm:inline" style={{ marginLeft: "auto" }}>
-          {events.length} events · cursor pagination
+        <span
+          className="small muted hidden sm:inline"
+          style={{ marginLeft: "auto" }}
+          title="Cursor pagination; count is loaded rows, not total dataset size"
+        >
+          {events.length} events loaded
         </span>
       </div>
 
