@@ -11,7 +11,7 @@
 #   Phase 1 — Configuration validation (required vars, warnings for missing)
 #   Phase 2 — Compose up → health check automation
 #   Phase 3 — Topology & security checks (loopback binding, port audit)
-#   Phase 4 — Browser manual checklist (5 steps with timing checkpoints)
+#   Phase 4 — Browser manual checklist (6 steps with timing checkpoints)
 #   Phase 5 — Automated ingest → compile → concept page → MCP context
 #   Phase 6 — Report generation (pass/fail/skip with timestamps)
 #
@@ -1291,6 +1291,13 @@ REPORT_EOF
   printf "  ║  Report:   %-50s ║\n" "$report_file"
   echo "  ╚═══════════════════════════════════════════════════════════════╝"
   echo ""
+
+  # Remind the tester that the Regression Checks table in the report is a
+  # template placeholder — they must fill in real lint/typecheck/test results.
+  warn "REMINDER: The generated report's 'Regression Checks' table contains"
+  warn "  «pending» placeholders. After running pnpm lint / pnpm typecheck /"
+  warn "  pnpm test, backfill the real pass/fail/skip results before declaring"
+  warn "  the acceptance complete. An unfilled «pending» row is NOT a pass."
 
   if [[ "$overall" == "PASS" ]]; then
     pass "M2 Cold Deploy Test: PASS ($total_elapsed)"
