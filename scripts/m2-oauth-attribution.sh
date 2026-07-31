@@ -100,23 +100,31 @@ if [ "$WALKTHROUGH" != "true" ] || [ "$TEST_ONLY" = "true" ]; then
     warn "Set TEST_DATABASE_URL and re-run with --test-only to execute."
   else
     info "Running member attribution integration tests..."
-    cd "$REPO_ROOT"
-    if pnpm exec vitest run apps/server/src/http/routes/member-attribution.integration.test.ts 2>&1; then
+    # Integration tests use their own vitest config (vitest.integration.config.ts)
+    # because the root workspace config excludes *.integration.test.ts files.
+    # Run from apps/server with the integration config so include/exclude rules
+    # match and the pg driver is resolvable.
+    cd "$REPO_ROOT/apps/server"
+    if ../../node_modules/.bin/vitest run \
+        --config vitest.integration.config.ts \
+        src/http/routes/member-attribution.integration.test.ts 2>&1; then
       pass "All member attribution integration tests passed"
     else
       fail "Some integration tests failed — check output above"
     fi
 
-    info "Running related integration tests (concepts-read, members, invites, auth)..."
-    if pnpm exec vitest run \
-      apps/server/src/http/routes/concepts-read.integration.test.ts \
-      apps/server/src/http/routes/members.integration.test.ts \
-      apps/server/src/db/repositories/concepts-write.integration.test.ts \
+    info "Running related integration tests (concepts-read, members, concepts-write)..."
+    if ../../node_modules/.bin/vitest run \
+        --config vitest.integration.config.ts \
+        src/http/routes/concepts-read.integration.test.ts \
+        src/http/routes/members.integration.test.ts \
+        src/db/repositories/concepts-write.integration.test.ts \
       2>&1; then
       pass "All related integration tests passed"
     else
       fail "Some related integration tests failed — check output above"
     fi
+    cd "$REPO_ROOT"
   fi
 fi
 
