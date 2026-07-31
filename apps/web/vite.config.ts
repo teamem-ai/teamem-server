@@ -2,6 +2,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
+const apiTarget =
+  process.env["TEAMEM_DEV_PROXY_TARGET"] ?? "http://localhost:8080";
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -13,19 +16,19 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/v1": {
-        target: "http://localhost:8080",
+        target: apiTarget,
         changeOrigin: true,
       },
       "/auth": {
-        target: "http://localhost:8080",
+        target: apiTarget,
         changeOrigin: true,
       },
       "/invites": {
-        target: "http://localhost:8080",
+        target: apiTarget,
         changeOrigin: true,
       },
       "/teams": {
-        target: "http://localhost:8080",
+        target: apiTarget,
         changeOrigin: true,
       },
     },
