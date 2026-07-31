@@ -97,7 +97,9 @@ function ConceptRow({ concept }: { concept: ConceptSummary }) {
         </div>
         <div className="k-meta">
           <span className="path">{concept.path}</span>
-          <span>{concept.tags.length} tag{concept.tags.length !== 1 ? "s" : ""}</span>
+          {concept.tags.length > 0 && (
+            <span>{concept.tags.length} tag{concept.tags.length !== 1 ? "s" : ""}</span>
+          )}
           <span>
             Last confirmed{" "}
             {formatRelative(concept.lastConfirmed)}

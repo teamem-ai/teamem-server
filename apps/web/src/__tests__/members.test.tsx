@@ -310,9 +310,11 @@ describe("MembersPage", () => {
     expect(screen.getByText("Viewer")).toBeInTheDocument();
     // "Member" appears as table header, role badge, and modal option
     expect(screen.getAllByText("Member").length).toBeGreaterThanOrEqual(2);
-    // "Admin" and "Owner" also appear in modal + possibly in table
+    // "Admin" appears in modal + table (current user is admin)
     expect(screen.getAllByText("Admin").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Owner").length).toBeGreaterThanOrEqual(1);
+    // "Owner" is NOT shown — current user is admin, not owner
+    // (admin cannot invite as owner per server-side RBAC)
+    expect(screen.queryByText("Owner")).toBeNull();
   });
 
   it("invite modal generates link", async () => {
@@ -655,11 +657,14 @@ describe("MemberProfilePage", () => {
 
     renderProfilePage("usr_contrib");
 
+    // Wait for both the profile AND the contributed concepts to load.
+    // The profile renders first, then concepts load in a second async hop
+    // (projectId is obtained after profile load, then concepts are fetched).
     await waitFor(() => {
       expect(screen.getByText("contributor")).toBeInTheDocument();
+      expect(screen.getByText(/Contributed pages · 1/)).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/Contributed pages · 1/)).toBeInTheDocument();
     expect(
       screen.getByText("Use PostgreSQL as primary database"),
     ).toBeInTheDocument();

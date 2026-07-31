@@ -56,11 +56,20 @@ function InviteModal({
   teamId,
   open,
   onClose,
+  currentUserRole,
 }: {
   teamId: string | null;
   open: boolean;
   onClose: () => void;
+  /** Current user's role — used to hide owner option from non-owners. */
+  currentUserRole: Role | null;
 }) {
+  const isOwner = currentUserRole === "owner";
+  // Roles the current user is allowed to invite for (admins cannot invite as owner).
+  const allowedRoles: Role[] = isOwner
+    ? ["viewer", "member", "admin", "owner"]
+    : ["viewer", "member", "admin"];
+
   const [selectedRole, setSelectedRole] = useState<Role>("member");
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [targetRole, setTargetRole] = useState<Role>("member");
@@ -172,7 +181,7 @@ function InviteModal({
           {!isLinkStep ? (
             /* Step 1: Role selection */
             <div>
-              {ROLES.map((role) => (
+              {allowedRoles.map((role) => (
                 <button
                   key={role}
                   className={cn(
@@ -790,6 +799,7 @@ export function MembersPage() {
         teamId={currentUser?.teamId ?? null}
         open={inviteModalOpen}
         onClose={() => setInviteModalOpen(false)}
+        currentUserRole={currentUser?.role ?? null}
       />
 
       {/* Remove confirmation */}
