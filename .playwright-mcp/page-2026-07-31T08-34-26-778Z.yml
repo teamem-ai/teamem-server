@@ -1,0 +1,70 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - img "teamem logo" [ref=e6]
+      - text: teamem
+    - navigation [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]: Knowledge
+        - link "Knowledge" [ref=e12] [cursor=pointer]:
+          - /url: /knowledge
+        - link "Context preview" [ref=e15] [cursor=pointer]:
+          - /url: /context-preview
+      - generic [ref=e18]:
+        - generic [ref=e19]: Activity
+        - link "Events" [ref=e20] [cursor=pointer]:
+          - /url: /events
+        - link "Jobs" [ref=e23] [cursor=pointer]:
+          - /url: /jobs
+      - generic [ref=e27]:
+        - generic [ref=e28]: Team
+        - link "Members" [ref=e29] [cursor=pointer]:
+          - /url: /members
+        - link "Audit" [ref=e35] [cursor=pointer]:
+          - /url: /audit
+        - link "Team digest SOON" [ref=e38] [cursor=pointer]:
+          - /url: /soon
+          - text: Team digest
+          - generic [ref=e42]: SOON
+      - generic [ref=e43]:
+        - generic [ref=e44]: Settings
+        - link "Settings" [ref=e45] [cursor=pointer]:
+          - /url: /settings/keys
+    - generic [ref=e49]: portal v0.2.0 · self-hosted
+  - generic [ref=e51]:
+    - banner [ref=e52]:
+      - button "A Acme Corp" [ref=e53] [cursor=pointer]:
+        - generic [ref=e54]: A
+        - text: Acme Corp
+      - generic [ref=e57]: /
+      - button "web-app" [ref=e58] [cursor=pointer]
+      - button "Search knowledge… ⌘K" [ref=e64] [cursor=pointer]:
+        - text: Search knowledge…
+        - generic [ref=e68]: ⌘K
+      - button "Switch to dark theme" [ref=e69] [cursor=pointer]
+      - button "DL" [ref=e73] [cursor=pointer]
+    - main [ref=e74]:
+      - generic [ref=e75]:
+        - navigation [ref=e76]:
+          - link "API keys" [ref=e77] [cursor=pointer]:
+            - /url: /settings/keys
+          - link "Ingestion" [ref=e78] [cursor=pointer]:
+            - /url: /settings/sources
+          - link "LLM & retrieval" [ref=e79] [cursor=pointer]:
+            - /url: /settings/llm
+          - link "Project" [ref=e80] [cursor=pointer]:
+            - /url: /settings/project
+          - link "Team" [ref=e81] [cursor=pointer]:
+            - /url: /settings/team
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - generic [ref=e84]:
+              - heading "API keys" [level=1] [ref=e85]
+              - paragraph [ref=e86]: Credentials for agents and the CLI. Keys carry data-plane scopes only — they can never administer the portal.
+            - button "Mint API key" [ref=e88] [cursor=pointer]
+          - paragraph [ref=e94]:
+            - text: Key IDs (
+            - code [ref=e95]: key_…
+            - text: ) are identifiers, safe to display. The secret token (
+            - code [ref=e96]: tm_…
+            - text: ) is shown once at minting — we store only its hash.

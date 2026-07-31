@@ -11,6 +11,7 @@ import { DangerConfirmDialog } from "@/components/ui/danger-confirm-dialog";
 import { PermissionDenied, ViewerInfoBanner } from "@/components/ui/permission-denied";
 import { Users } from "lucide-react";
 import type { MyTeam } from "@teamem/schema";
+import { useSession } from "@/lib/session";
 
 // ── Inline fetch helpers ────────────────────────────────────────────────────
 
@@ -33,7 +34,8 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 // ── Main page ───────────────────────────────────────────────────────────────
 
 export function SettingsTeamPage() {
-  const role: string = "owner"; // placeholder
+  const session = useSession();
+  const role = session.role ?? "viewer";
   const isOwner = role === "owner";
   const isViewer: boolean = role === "viewer";
 

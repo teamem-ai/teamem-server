@@ -10,6 +10,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useSession } from "@/lib/session";
 import { EmptyState } from "@/components/ui/empty-state";
 import { KeyReveal, CommandBlock } from "@/components/ui/command-block";
 import { DangerConfirmDialog } from "@/components/ui/danger-confirm-dialog";
@@ -58,7 +59,10 @@ function useKeys(teamId: string | null) {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!teamId) return;
+    if (!teamId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -153,8 +157,12 @@ function ScopeSelector({
 // ── Main page component ─────────────────────────────────────────────────────
 
 export function SettingsKeysPage() {
-  // In production, teamId comes from session context
-  const teamId = "team_demo"; // placeholder — wired to session context in M2
+  const session = useSession();
+  const teamId = session.teamId;
+  const role = session.role ?? "viewer";
+  const canManage = role === "owner" || role === "admin";
+  const isViewer: boolean = role === "viewer";
+
   const { keys, loading, error, refresh } = useKeys(teamId);
   const { projects } = useProjects(teamId);
 
@@ -171,11 +179,6 @@ export function SettingsKeysPage() {
   const [mintScopes, setMintScopes] = useState<ApiScope[]>(["read"]);
   const [mintError, setMintError] = useState<string | null>(null);
   const [minting, setMinting] = useState(false);
-
-  // Permission state (placeholder — driven by session)
-  const role: string = "owner"; // placeholder — driven by session
-  const canManage = role === "owner" || role === "admin";
-  const isViewer: boolean = role === "viewer";
 
   // ── Mint handler ──────────────────────────────────────────────────────
   const handleMint = async () => {

@@ -654,4 +654,29 @@
     height: 12px;
     color: var(--text-3);
   }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 900px) {
+    /* Sidebar becomes static top bar on mobile */
+    .sidebar-resp {
+      position: static !important;
+      width: 100% !important;
+      height: auto !important;
+      border-right: 0 !important;
+      border-bottom: 1px solid var(--border) !important;
+    }
+    .main-resp {
+      margin-left: 0 !important;
+      flex-direction: column !important;
+    }
+    .grid-2,
+    .grid-3,
+    .provider-pick {
+      grid-template-columns: 1fr;
+    }
+    .kv {
+      grid-template-columns: 1fr;
+      gap: 2px 0;
+    }
+  }
 }

@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { CommandBlock } from "@/components/ui/command-block";
 import type { KeyEntry, ConnectorStatusResponse } from "@teamem/schema";
+import { useSession } from "@/lib/session";
 
 // ── Inline fetch helpers ────────────────────────────────────────────────────
 
@@ -27,8 +28,9 @@ async function fetchJson<T>(url: string): Promise<T> {
 // ── Main page ───────────────────────────────────────────────────────────────
 
 export function SettingsSourcesPage() {
-  const teamId = "team_demo"; // placeholder
-  const role: string = "owner"; // placeholder
+  const session = useSession();
+  const teamId = session.teamId;
+  const role = session.role ?? "viewer";
   const canManage = role === "owner" || role === "admin";
 
   const [keys, setKeys] = useState<KeyEntry[]>([]);
@@ -60,9 +62,10 @@ export function SettingsSourcesPage() {
   }, [teamId, canManage]);
 
   const hasWriteKey = keys.length > 0;
+  const selectedKey = keys.find((k) => k.id === selectedKeyId);
 
-  const cliCommand = `teamem init --url http://localhost:8080 --token <paste-key> --project web-app`;
-  const mcpCommand = `claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer <token>"`;
+  const cliCommand = `teamem init --url http://localhost:8080 --token ${selectedKey ? "<paste-key>" : "<token>"} --project web-app`;
+  const mcpCommand = `claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer ${selectedKey ? "<token>" : "<token>"}"`;
 
   return (
     <div>

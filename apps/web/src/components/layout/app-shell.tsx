@@ -6,9 +6,9 @@ import { Topbar } from "./topbar";
  *  All authenticated pages reuse this layout. */
 export function AppShell() {
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen flex-col md:flex-row">
       <Sidebar />
-      <div className="flex-1 ml-sidebar min-w-0 flex flex-col">
+      <div className="flex-1 ml-sidebar md:ml-sidebar min-w-0 flex flex-col main-resp">
         <Topbar />
         <main className="flex-1 px-8 py-7 max-w-[1180px] w-full mx-auto">
           <Outlet />

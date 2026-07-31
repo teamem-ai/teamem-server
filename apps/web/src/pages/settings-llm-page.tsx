@@ -10,6 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import { PermissionDenied, ViewerInfoBanner } from "@/components/ui/permission-denied";
 import type { LlmConfigResponse, LlmProvider } from "@teamem/schema";
+import { useSession } from "@/lib/session";
 
 // ── Inline fetch helpers ────────────────────────────────────────────────────
 
@@ -70,8 +71,9 @@ const PROVIDERS: ProviderDef[] = [
 // ── Main page ───────────────────────────────────────────────────────────────
 
 export function SettingsLlmPage() {
-  const teamId = "team_demo"; // placeholder
-  const role: string = "owner"; // placeholder
+  const session = useSession();
+  const teamId = session.teamId;
+  const role = session.role ?? "viewer";
   const canManage = role === "owner" || role === "admin";
   const isViewer: boolean = role === "viewer";
 
@@ -128,14 +130,18 @@ export function SettingsLlmPage() {
 
   // Test connection
   const handleTest = async () => {
+    if (!apiKey.trim()) return;
     setTesting(true);
     setTestResult(null);
     try {
-      await new Promise((r) => setTimeout(r, 800));
-      setTestResult({
-        ok: true,
-        latencyMs: Math.floor(Math.random() * 200 + 50),
-      });
+      const data = await fetchJson<{ ok: boolean; latencyMs: number }>(
+        `/v1/teams/${teamId}/llm/test`,
+        {
+          method: "POST",
+          body: JSON.stringify({ provider: selectedProvider, apiKey }),
+        }
+      );
+      setTestResult(data);
     } catch {
       setTestResult({ ok: false, latencyMs: 0 });
     } finally {
@@ -204,12 +210,14 @@ export function SettingsLlmPage() {
             <div className="card-body">
               <div className="grid-2 provider-pick">
                 {PROVIDERS.map((p) => (
-                  <label
+                  <button
                     key={p.id}
+                    type="button"
                     className={cn(
-                      "provider-opt",
+                      "provider-opt text-left",
                       selectedProvider === p.id && "sel"
                     )}
+                    onClick={() => setSelectedProvider(p.id)}
                   >
                     <span className="radio" />
                     <div>
@@ -220,7 +228,7 @@ export function SettingsLlmPage() {
                         {p.description}
                       </div>
                     </div>
-                  </label>
+                  </button>
                 ))}
               </div>
 

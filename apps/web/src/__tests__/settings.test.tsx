@@ -1,11 +1,40 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { SessionProvider } from "@/lib/session";
 import { SettingsLayout } from "@/pages/settings-layout";
 import { SettingsKeysPage } from "@/pages/settings-keys-page";
+import { SettingsSourcesPage } from "@/pages/settings-sources-page";
 import { SettingsLlmPage } from "@/pages/settings-llm-page";
 import { SettingsProjectPage } from "@/pages/settings-project-page";
 import { SettingsTeamPage } from "@/pages/settings-team-page";
+
+// ── Wrapper ─────────────────────────────────────────────────────────────────
+
+/** Wraps children with SessionProvider at a given role. */
+function TestWrapper({
+  children,
+  role = "owner",
+  teamId = "team_test",
+}: {
+  children: React.ReactNode;
+  role?: string;
+  teamId?: string | null;
+}) {
+  return (
+    <MemoryRouter>
+      <SessionProvider
+        value={{
+          teamId,
+          role: role as import("@teamem/schema").TeamRole,
+          projectId: "prj_test",
+        }}
+      >
+        {children}
+      </SessionProvider>
+    </MemoryRouter>
+  );
+}
 
 // ── Mock helpers ────────────────────────────────────────────────────────────
 
@@ -14,6 +43,58 @@ function mockFetchResponse(data: unknown, status = 200) {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+// ── Shared mock setup ───────────────────────────────────────────────────────
+
+/** Mock fetch to return empty list + empty projects for keys/sources pages. */
+function mockEmptyLists() {
+  return vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation((url: string | URL | Request) => {
+      const urlStr = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      if (urlStr.includes("/projects")) {
+        return Promise.resolve(mockFetchResponse([]) as Response);
+      }
+      if (urlStr.includes("/connectors")) {
+        return Promise.resolve(
+          mockFetchResponse({
+            github: {
+              connected: false,
+              appName: null,
+              installedOn: null,
+              repositories: [],
+              webhookSecretConfigured: false,
+              recentDeliveries: [],
+            },
+            cli: {
+              lastInit: { at: null, repo: null, commitSha: null, eventsCount: 0, pagesCount: 0 },
+              activeKeysWithWrite: 0,
+            },
+            mcp: {
+              endpointHealthy: true,
+              activeKeysWithWrite: 0,
+            },
+          }) as Response
+        );
+      }
+      if (urlStr.includes("/teams/mine")) {
+        return Promise.resolve(
+          mockFetchResponse([{ id: "team_test", name: "Test Team", role: "owner" }]) as Response
+        );
+      }
+      if (urlStr.includes("/llm")) {
+        return Promise.resolve(
+          mockFetchResponse({
+            provider: null,
+            hasKey: false,
+            lastTest: null,
+            semanticRetrieval: { available: false, mode: "fts-only", reason: null },
+          }) as Response
+        );
+      }
+      return Promise.resolve(mockFetchResponse([]) as Response);
+    });
 }
 
 // ── SettingsLayout ──────────────────────────────────────────────────────────
@@ -54,43 +135,32 @@ describe("SettingsKeysPage", () => {
   });
 
   it("renders the page header", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([]) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsKeysPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     expect(screen.getByText("API keys")).toBeInTheDocument();
-    expect(
-      screen.getByText(/Keys carry data-plane scopes/)
-    ).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByText("No keys minted yet")).toBeInTheDocument();
-    });
+    expect(screen.getByText(/Keys carry data-plane scopes/)).toBeInTheDocument();
   });
 
   it("shows the Mint button for admin+", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([]) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper role="admin">
         <SettingsKeysPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     expect(screen.getByText("Mint API key")).toBeInTheDocument();
   });
 
   it("shows empty state when no keys are present", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([]) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsKeysPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(screen.getByText("No keys minted yet")).toBeInTheDocument();
@@ -98,13 +168,11 @@ describe("SettingsKeysPage", () => {
   });
 
   it("shows the key safety notice at the bottom", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([]) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsKeysPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(
@@ -113,18 +181,88 @@ describe("SettingsKeysPage", () => {
     });
   });
 
-  it("has the Mint API key button present", async () => {
+  it("hides management actions when viewer", async () => {
+    mockEmptyLists();
+    render(
+      <TestWrapper role="viewer">
+        <SettingsKeysPage />
+      </TestWrapper>
+    );
+    // Viewer sees PermissionDenied, not the Mint button
+    await waitFor(() => {
+      expect(screen.getByText(/Higher role required/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Mint API key")).toBeNull();
+  });
+
+  it("shows no keys when teamId is null (not in a team)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockFetchResponse([]) as Response
     );
     render(
-      <MemoryRouter>
+      <TestWrapper teamId={null}>
         <SettingsKeysPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
-    const btn = screen.getByText("Mint API key");
-    expect(btn).toBeInTheDocument();
-    expect(btn).not.toBeDisabled();
+    await waitFor(() => {
+      expect(screen.getByText("No keys minted yet")).toBeInTheDocument();
+    });
+  });
+});
+
+// ── SettingsSourcesPage ─────────────────────────────────────────────────────
+
+describe("SettingsSourcesPage", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("renders the page header", () => {
+    mockEmptyLists();
+    render(
+      <TestWrapper>
+        <SettingsSourcesPage />
+      </TestWrapper>
+    );
+    expect(screen.getByText("Ingestion sources")).toBeInTheDocument();
+  });
+
+  it("shows GitHub App card", async () => {
+    mockEmptyLists();
+    render(
+      <TestWrapper>
+        <SettingsSourcesPage />
+      </TestWrapper>
+    );
+    await waitFor(() => {
+      expect(screen.getByText("GitHub App")).toBeInTheDocument();
+    });
+  });
+
+  it("shows CLI and MCP cards", async () => {
+    mockEmptyLists();
+    render(
+      <TestWrapper>
+        <SettingsSourcesPage />
+      </TestWrapper>
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/CLI.*teamem init/)).toBeInTheDocument();
+      expect(screen.getByText(/MCP.*agent writes/)).toBeInTheDocument();
+    });
+  });
+
+  it("shows endpoint healthy status", async () => {
+    mockEmptyLists();
+    render(
+      <TestWrapper>
+        <SettingsSourcesPage />
+      </TestWrapper>
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Endpoint healthy")).toBeInTheDocument();
+    });
   });
 });
 
@@ -137,18 +275,11 @@ describe("SettingsLlmPage", () => {
   });
 
   it("renders the page header", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse({
-        provider: null,
-        hasKey: false,
-        lastTest: null,
-        semanticRetrieval: { available: false, mode: "fts-only", reason: null },
-      }) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsLlmPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     expect(screen.getByText("LLM & retrieval")).toBeInTheDocument();
     await waitFor(() => {
@@ -157,18 +288,11 @@ describe("SettingsLlmPage", () => {
   });
 
   it("shows semantic retrieval status section", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse({
-        provider: null,
-        hasKey: false,
-        lastTest: null,
-        semanticRetrieval: { available: false, mode: "fts-only", reason: null },
-      }) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsLlmPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(screen.getByText("Semantic retrieval")).toBeInTheDocument();
@@ -176,18 +300,11 @@ describe("SettingsLlmPage", () => {
   });
 
   it("shows compilation section as placeholder", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse({
-        provider: null,
-        hasKey: false,
-        lastTest: null,
-        semanticRetrieval: { available: false, mode: "fts-only", reason: null },
-      }) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsLlmPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(screen.getByText("Compilation")).toBeInTheDocument();
@@ -195,6 +312,18 @@ describe("SettingsLlmPage", () => {
   });
 
   it("shows fts-only mode when no embedding is available", async () => {
+    mockEmptyLists();
+    render(
+      <TestWrapper>
+        <SettingsLlmPage />
+      </TestWrapper>
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Unavailable — keyword/)).toBeInTheDocument();
+    });
+  });
+
+  it("hides provider management from viewer", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockFetchResponse({
         provider: null,
@@ -204,12 +333,12 @@ describe("SettingsLlmPage", () => {
       }) as Response
     );
     render(
-      <MemoryRouter>
+      <TestWrapper role="viewer">
         <SettingsLlmPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
-      expect(screen.getByText(/Unavailable — keyword/)).toBeInTheDocument();
+      expect(screen.getByText(/Higher role required/)).toBeInTheDocument();
     });
   });
 });
@@ -222,40 +351,34 @@ describe("SettingsProjectPage", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the page header", () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([]) as Response
-    );
+  it("renders the page header", async () => {
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsProjectPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     expect(screen.getByText("Project")).toBeInTheDocument();
   });
 
   it("shows the Danger zone section for owner", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([]) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsProjectPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(screen.getByText("Danger zone")).toBeInTheDocument();
     });
   });
 
-  it("shows purge button", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([]) as Response
-    );
+  it("shows purge button for owner", async () => {
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsProjectPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(screen.getByText(/Purge…/)).toBeInTheDocument();
@@ -263,13 +386,11 @@ describe("SettingsProjectPage", () => {
   });
 
   it("shows Staleness detection as SOON placeholder", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([]) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsProjectPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(screen.getByText("Staleness detection")).toBeInTheDocument();
@@ -277,17 +398,30 @@ describe("SettingsProjectPage", () => {
   });
 
   it("shows General settings section", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([]) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsProjectPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(screen.getByText("General")).toBeInTheDocument();
     });
+  });
+
+  it("hides purge from non-owner admin", async () => {
+    mockEmptyLists();
+    render(
+      <TestWrapper role="admin">
+        <SettingsProjectPage />
+      </TestWrapper>
+    );
+    await waitFor(() => {
+      // Danger zone is shown but with restricted message, not the purge button
+      expect(screen.getByText("Danger zone")).toBeInTheDocument();
+    });
+    // Purge button not present for non-owner
+    expect(screen.queryByText(/Purge…/)).toBeNull();
   });
 });
 
@@ -299,28 +433,22 @@ describe("SettingsTeamPage", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the page header", () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([]) as Response
-    );
+  it("renders the page header", async () => {
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsTeamPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     expect(screen.getByText("Team")).toBeInTheDocument();
   });
 
   it("shows the Danger zone for owner", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([
-        { id: "team_1", name: "Acme Corp", role: "owner" },
-      ]) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsTeamPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(screen.getByText("Danger zone")).toBeInTheDocument();
@@ -328,15 +456,11 @@ describe("SettingsTeamPage", () => {
   });
 
   it("shows delete team button for owner", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([
-        { id: "team_1", name: "Acme Corp", role: "owner" },
-      ]) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsTeamPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(screen.getByText(/Delete team…/)).toBeInTheDocument();
@@ -344,15 +468,11 @@ describe("SettingsTeamPage", () => {
   });
 
   it("shows New team button", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([
-        { id: "team_1", name: "Acme Corp", role: "owner" },
-      ]) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsTeamPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(screen.getByText("New team")).toBeInTheDocument();
@@ -360,20 +480,44 @@ describe("SettingsTeamPage", () => {
   });
 
   it("shows multi-team hint text", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      mockFetchResponse([
-        { id: "team_1", name: "Acme Corp", role: "owner" },
-      ]) as Response
-    );
+    mockEmptyLists();
     render(
-      <MemoryRouter>
+      <TestWrapper>
         <SettingsTeamPage />
-      </MemoryRouter>
+      </TestWrapper>
     );
     await waitFor(() => {
       expect(
         screen.getByText(/You can belong to multiple teams/)
       ).toBeInTheDocument();
+    });
+  });
+
+  it("shows empty state when no teams exist", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockFetchResponse([]) as Response
+    );
+    render(
+      <TestWrapper>
+        <SettingsTeamPage />
+      </TestWrapper>
+    );
+    await waitFor(() => {
+      expect(screen.getByText("No teams yet")).toBeInTheDocument();
+    });
+  });
+
+  it("hides management from viewer", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockFetchResponse([{ id: "team_test", name: "Test", role: "viewer" }]) as Response
+    );
+    render(
+      <TestWrapper role="viewer">
+        <SettingsTeamPage />
+      </TestWrapper>
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/Higher role required/)).toBeInTheDocument();
     });
   });
 });

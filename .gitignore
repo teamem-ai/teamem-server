@@ -20,3 +20,4 @@ coverage/
 .DS_Store
 .claude/settings.local.json
 .pi/extensions/emdash-hook.ts
+.playwright-mcp/

@@ -9,6 +9,7 @@ import { DangerConfirmDialog } from "@/components/ui/danger-confirm-dialog";
 import { PermissionDenied, ViewerInfoBanner } from "@/components/ui/permission-denied";
 import { SoonBadge } from "@/components/ui/soon-badge";
 import type { ProjectEntry } from "@teamem/schema";
+import { useSession } from "@/lib/session";
 
 // ── Inline fetch helpers ────────────────────────────────────────────────────
 
@@ -41,8 +42,9 @@ interface PurgeResponse {
 // ── Main page ───────────────────────────────────────────────────────────────
 
 export function SettingsProjectPage() {
-  const teamId = "team_demo"; // placeholder
-  const role: string = "owner"; // placeholder
+  const session = useSession();
+  const teamId = session.teamId;
+  const role = session.role ?? "viewer";
   const canManage = role === "owner" || role === "admin";
   const isOwner = role === "owner";
   const isViewer: boolean = role === "viewer";
@@ -97,7 +99,6 @@ export function SettingsProjectPage() {
   // Purge
   const handlePurge = async () => {
     if (!project) return;
-    setPurging(true);
     setPurgeError(null);
     try {
       const result = await fetchJson<PurgeResponse>(
@@ -108,8 +109,6 @@ export function SettingsProjectPage() {
       setShowPurge(false);
     } catch (err) {
       setPurgeError(err instanceof Error ? err.message : "Purge failed");
-    } finally {
-      setPurging(false);
     }
   };
 
