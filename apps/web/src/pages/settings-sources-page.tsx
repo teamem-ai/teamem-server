@@ -8,7 +8,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { CommandBlock } from "@/components/ui/command-block";
-import type { KeyEntry, ConnectorStatusResponse } from "@teamem/schema";
+import type { KeyEntry, ConnectorStatusResponse, MintKeyResponse } from "@teamem/schema";
 import { useSession } from "@/lib/session";
 
 // ── Inline fetch helpers ────────────────────────────────────────────────────
@@ -37,20 +37,29 @@ export function SettingsSourcesPage() {
   const [selectedKeyId, setSelectedKeyId] = useState("");
   const [connectorStatus, setConnectorStatus] =
     useState<ConnectorStatusResponse | null>(null);
+  const [setupToken, setSetupToken] = useState<string | null>(null);
+  const [mintedMcpCommand, setMintedMcpCommand] = useState<string | null>(null);
+  const [minting, setMinting] = useState(false);
 
-  // Fetch available keys with write scope
-  useEffect(() => {
+  const effectiveProjectId = session.projectId ?? "<project-id>";
+
+  const loadKeys = () => {
     if (!canManage) return;
     fetchJson<KeyEntry[]>(`/v1/teams/${teamId}/keys`)
       .then((data) => {
-        setKeys(data.filter((k) => !k.revoked && k.scopes.includes("events:write")));
-        // Pre-select first write-capable key
-        const firstWriteKey = data.find(
+        const writeKeys = data.filter(
           (k) => !k.revoked && k.scopes.includes("events:write")
         );
-        if (firstWriteKey) setSelectedKeyId(firstWriteKey.id);
+        setKeys(writeKeys);
+        const firstWriteKey = writeKeys[0];
+        if (firstWriteKey && !selectedKeyId) setSelectedKeyId(firstWriteKey.id);
       })
       .catch(() => setKeys([]));
+  };
+
+  // Fetch available keys with write scope
+  useEffect(() => {
+    loadKeys();
   }, [teamId, canManage]);
 
   // Try to fetch connector status
@@ -64,12 +73,42 @@ export function SettingsSourcesPage() {
   const hasWriteKey = keys.length > 0;
   const selectedKey = keys.find((k) => k.id === selectedKeyId);
 
-  const cliCommand = selectedKey
-    ? `teamem init --url http://localhost:8080 --token <paste-key> --project web-app`
-    : `teamem init --url http://localhost:8080 --token <token> --project web-app`;
-  const mcpCommand = selectedKey
-    ? `claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer <paste-token>"`
-    : `claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer <token>"`;
+  const selectedToken = setupToken ?? (selectedKey ? "<paste-key>" : "<token>");
+  const cliCommand = `teamem init --url http://localhost:8080 --token ${selectedToken} --project ${effectiveProjectId}`;
+  const mcpCommand = mintedMcpCommand ?? `claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer ${selectedToken}"`;
+
+  async function handleMintSetupKey() {
+    if (!canManage || !teamId) return;
+    setMinting(true);
+    try {
+      const res = await fetch(`${BASE}/v1/teams/${teamId}/keys`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "CLI / MCP setup",
+          scopes: ["events:write"],
+          projectId: selectedKey?.projectId ?? session.projectId ?? null,
+          allProjects: selectedKey?.allProjects ?? !session.projectId,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error?.message ?? `Mint failed: ${res.status}`);
+      }
+      const { data } = (await res.json()) as { data: MintKeyResponse };
+      setSetupToken(data.token);
+      setMintedMcpCommand(data.mcpCommand);
+      loadKeys();
+      // Auto-select the newly minted key
+      if (data.id) setSelectedKeyId(data.id);
+    } catch (e) {
+      // Surface error inline would be ideal; for now keep it honest and retryable
+      console.error("Failed to mint setup key", e);
+    } finally {
+      setMinting(false);
+    }
+  }
 
   return (
     <div>
@@ -114,7 +153,7 @@ export function SettingsSourcesPage() {
                 <dl className="kv">
                   <dt>App</dt>
                   <dd>
-                    {connectorStatus.github.appName}{" "}
+                    {connectorStatus.github.appName ?? "GitHub App"}{" "}
                     <span className="text-text-3 text-[12px]">
                       · the same app used for sign-in — this page manages its
                       installation scope
@@ -255,6 +294,28 @@ export function SettingsSourcesPage() {
                   )}
                 </select>
               </div>
+              {canManage && (
+                <div className="flex items-center gap-2">
+                  <button
+                    className="btn btn-outline btn-sm"
+                    onClick={handleMintSetupKey}
+                    disabled={minting}
+                  >
+                    {minting ? "Creating key…" : "Create write key & copy command"}
+                  </button>
+                </div>
+              )}
+              {setupToken && (
+                <div className="rounded-md border border-amber-soft bg-amber-soft p-3 text-[13px] text-text-2">
+                  <strong className="text-amber">One-time token:</strong>{" "}
+                  <code className="font-mono text-[12px] break-all">
+                    {setupToken}
+                  </code>
+                  <p className="mt-1 text-[12px] text-text-3">
+                    Copy this now — it cannot be shown again.
+                  </p>
+                </div>
+              )}
               <CommandBlock
                 command={cliCommand}
                 description="Run in your repo root:"

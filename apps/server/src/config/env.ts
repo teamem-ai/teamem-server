@@ -74,6 +74,15 @@ const optionalGithubClientSecret = z.preprocess(
   blankToUndefined,
   z.string().trim().min(1).optional(),
 );
+const optionalLlmEncryptionKey = z.preprocess(
+  blankToUndefined,
+  z
+    .string()
+    .trim()
+    .regex(/^[0-9a-fA-F]{64}$/, 'TEAMEM_LLM_ENCRYPTION_KEY must be 64 hex characters (32 bytes)')
+    .optional(),
+);
+
 const optionalHttpUrl = z.preprocess(
   blankToUndefined,
   z
@@ -136,6 +145,7 @@ const rawServerEnvSchema = z
     TEAMEM_BASE_URL: optionalBaseUrl,
     TEAMEM_OPENAI_COMPAT_BASE_URL: optionalHttpUrl,
     TEAMEM_OPENAI_COMPAT_API_KEY: optionalSecret,
+    TEAMEM_LLM_ENCRYPTION_KEY: optionalLlmEncryptionKey,
   })
   .superRefine((env, context) => {
     const hasCustomBaseUrl = env.TEAMEM_OPENAI_COMPAT_BASE_URL !== undefined;
@@ -198,6 +208,8 @@ export interface ServerEnvironment {
    */
   githubAppConfigured: boolean;
   llmProviders: ResolvedLlmConfig[];
+  /** AES-256-GCM encryption key for BYO LLM provider keys stored in DB. */
+  llmEncryptionKey?: string;
 }
 
 
@@ -272,6 +284,7 @@ export function parseServerEnv(environment: Environment = process.env): ServerEn
       : undefined,
     githubAppConfigured,
     llmProviders,
+    llmEncryptionKey: env.TEAMEM_LLM_ENCRYPTION_KEY,
   };
 }
 

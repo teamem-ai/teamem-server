@@ -70,7 +70,7 @@ export function buildConnectorStatusRoutes(deps: ConnectorStatusDeps): Hono {
       const response: ConnectorStatusResponse = {
         github: {
           connected: githubConnected,
-          appName: githubConnected ? 'teamem-portal' : null,
+          appName: githubConnected ? null : null, // read from connector config when table exists
           installedOn: null,
           repositories: [],
           webhookSecretConfigured: false,

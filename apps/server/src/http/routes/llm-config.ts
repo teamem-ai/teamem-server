@@ -81,7 +81,8 @@ const PROVIDER_TEST_URLS: Record<LlmProvider, string> = {
   anthropic: 'https://api.anthropic.com/v1/models?limit=1',
   openai: 'https://api.openai.com/v1/models?limit=1',
   openrouter: 'https://openrouter.ai/api/v1/models?limit=1',
-  custom: '', // Will be inferred from TEAMEM_OPENAI_COMPAT_BASE_URL
+  // Base URL is the /v1 root (per env.ts). The test function appends /models.
+  custom: process.env['TEAMEM_OPENAI_COMPAT_BASE_URL'] ?? '',
 };
 
 async function testProviderConnection(
@@ -94,10 +95,9 @@ async function testProviderConnection(
 
   try {
     let url = PROVIDER_TEST_URLS[provider];
-    if (!url && provider === 'custom') {
-      url =
-        (process.env['TEAMEM_OPENAI_COMPAT_BASE_URL'] ?? '').replace(/\/$/, '') +
-        '/v1/models?limit=1';
+    if (provider === 'custom' && url) {
+      // Base URL already points at the /v1 root (per env.ts). Append /models only.
+      url = url.replace(/\/$/, '') + '/models?limit=1';
     }
     if (!url) {
       // For custom endpoint without a configured base URL, we can't test
@@ -115,8 +115,9 @@ async function testProviderConnection(
     const res = await fetch(url, { headers, signal: controller.signal });
     const latencyMs = Date.now() - start;
 
-    // 200 or 401 both mean the endpoint is reachable (401 = key invalid, but connection works)
-    return { ok: res.ok || res.status === 401, latencyMs };
+    // Only HTTP 200 means the key was accepted. 401 means the endpoint exists
+    // but the key is invalid, so we report it as NOT ok.
+    return { ok: res.ok, latencyMs };
   } catch {
     return { ok: false, latencyMs: null };
   } finally {

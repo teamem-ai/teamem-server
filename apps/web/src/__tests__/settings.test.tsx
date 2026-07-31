@@ -233,6 +233,51 @@ describe("SettingsSourcesPage", () => {
       expect(screen.getByText("Endpoint healthy")).toBeInTheDocument();
     });
   });
+
+  it("mints a write key and shows the actionable CLI/MCP command", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    fetchSpy.mockImplementation((url: string | URL | Request) => {
+      const urlStr =
+        typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      if (urlStr.endsWith("/keys") && typeof url === "string" && url.includes("/teams/")) {
+        return Promise.resolve(
+          mockFetchResponse({
+            id: "key_new",
+            name: "CLI / MCP setup",
+            token: "tm_test_token_123",
+            mcpCommand: "claude mcp add --transport http teamem http://localhost:8080/mcp --header 'Authorization: Bearer tm_test_token_123'",
+            scopes: ["events:write"],
+            allProjects: false,
+            projectId: "prj_test",
+            createdAt: new Date().toISOString(),
+          }) as Response
+        );
+      }
+      if (urlStr.includes("/projects")) return Promise.resolve(mockFetchResponse([]) as Response);
+      if (urlStr.includes("/connectors")) {
+        return Promise.resolve(
+          mockFetchResponse({
+            github: { connected: false, appName: null, installedOn: null, repositories: [], webhookSecretConfigured: false, recentDeliveries: [] },
+            cli: { lastInit: { at: null, repo: null, commitSha: null, eventsCount: 0, pagesCount: 0 }, activeKeysWithWrite: 0 },
+            mcp: { endpointHealthy: true, activeKeysWithWrite: 0 },
+          }) as Response
+        );
+      }
+      if (urlStr.includes("/teams/mine")) {
+        return Promise.resolve(mockFetchResponse([{ id: "team_test", name: "Test Team", role: mockSessionRole }]) as Response);
+      }
+      return Promise.resolve(mockFetchResponse([]) as Response);
+    });
+    renderPage(SettingsSourcesPage);
+    await waitFor(() => {
+      expect(screen.getByText("Create write key & copy command")).toBeInTheDocument();
+    });
+    screen.getByText("Create write key & copy command").click();
+    await waitFor(() => {
+      expect(screen.getByText("tm_test_token_123")).toBeInTheDocument();
+      expect(screen.getByText(/teamem init.*tm_test_token_123/)).toBeInTheDocument();
+    });
+  });
 });
 
 // ── SettingsLlmPage ─────────────────────────────────────────────────────────
