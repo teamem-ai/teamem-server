@@ -1,4 +1,4 @@
-import { AlertTriangle, Info, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Info, AlertCircle, CheckCircle, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ReactNode } from "react";
 
@@ -10,8 +10,8 @@ const variantConfig: Record<
 > = {
   info: { icon: Info, className: "banner info" },
   warn: { icon: AlertTriangle, className: "banner warn" },
-  error: { icon: AlertTriangle, className: "banner error" },
-  success: { icon: AlertTriangle, className: "banner success" },
+  error: { icon: AlertCircle, className: "banner error" },
+  success: { icon: CheckCircle, className: "banner success" },
 };
 
 export function Banner({

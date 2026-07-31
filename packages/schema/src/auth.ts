@@ -88,3 +88,57 @@ export const webSession = z.strictObject({
   createdAt: isoDateTime,
 });
 export type WebSession = z.infer<typeof webSession>;
+
+// ── v0.3 additive (DUA-232): invite lookup response ───────────────────────
+
+/** Status for the found (HTTP 200) branch of the invite-lookup endpoint. */
+export const inviteFoundStatus = z.enum(['valid', 'expired', 'used']);
+export type InviteFoundStatus = z.infer<typeof inviteFoundStatus>;
+
+/**
+ * Enriched invite object returned for found (valid / expired / used) tokens.
+ * The server joins the team and inviter identities to build a human-readable
+ * summary for the invite-acceptance page.
+ */
+export const inviteLookupInfo = z.strictObject({
+  id: inviteId,
+  teamId,
+  teamName: z.string().nullable(),
+  targetRole: teamRole,
+  invitedByLogin: z.string().nullable(),
+  invitedByRole: teamRole.nullable(),
+  expiresAt: isoDateTime,
+  usedAt: isoDateTime.nullable(),
+});
+export type InviteLookupInfo = z.infer<typeof inviteLookupInfo>;
+
+/**
+ * Public invite-lookup response DTO.
+ *
+ * Discriminated union:
+ *   - found (valid / expired / used) → includes the enriched invite object
+ *   - not_found                    → no invite object; status only
+ *
+ * The server returns HTTP 200 for found tokens and HTTP 404 for not_found
+ * (malformed/unknown tokens are also 404 for security reasons). The web UI
+ * maps the 404 response to the not_found branch; it never fabricates a
+ * fake invite to satisfy the schema.
+ */
+/** Convenience alias for the found (HTTP 200) branch used by the server. */
+export const inviteFoundResponse = z.strictObject({
+  status: inviteFoundStatus,
+  invite: inviteLookupInfo,
+});
+export type InviteFoundResponse = z.infer<typeof inviteFoundResponse>;
+
+/** not_found branch — status only, no fake invite object. */
+export const inviteNotFoundResponse = z.strictObject({
+  status: z.literal('not_found'),
+});
+export type InviteNotFoundResponse = z.infer<typeof inviteNotFoundResponse>;
+
+export const inviteLookupResponse = z.union([
+  inviteFoundResponse,
+  inviteNotFoundResponse,
+]);
+export type InviteLookupResponse = z.infer<typeof inviteLookupResponse>;

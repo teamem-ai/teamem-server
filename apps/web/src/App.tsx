@@ -9,16 +9,28 @@ import { ContextPreviewPage } from "@/pages/context-preview-page";
 import { EventDetailPage } from "@/pages/event-detail-page";
 import { SoonPage } from "@/pages/soon-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
+import { LoginPage } from "@/pages/login";
+import { InvitePage } from "@/pages/invite";
+import { AppLanding } from "@/pages/app-landing";
+import { OnboardingPage } from "@/components/onboarding/onboarding-page";
 
 export default function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
         <Routes>
+          {/* Public auth entry pages (no AppShell) */}
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/join" element={<InvitePage />} />
+          <Route path="/app" element={<AppLanding />} />
+
           {/* Component showcase (design system self-check) */}
           <Route path="/components" element={<AppShell />}>
             <Route index element={<ComponentShowcase />} />
           </Route>
+
+          {/* Onboarding wizard — focused flow, no app shell */}
+          <Route path="/onboarding" element={<OnboardingPage />} />
 
           {/* Redirect root to knowledge */}
           <Route path="/" element={<Navigate to="/knowledge" replace />} />
