@@ -18,15 +18,21 @@ import type { AppDb } from '../../db/client.js';
 import type { McpCommandConfig } from '../../commands/format-mcp-command.js';
 import {
   requireWebSession,
+  requireTeamMembership,
   getSessionUser,
 } from '../session.js';
 import {
   InvalidRequestError,
+  NotFoundError,
   InternalError,
   REQUEST_ID_KEY,
 } from '../errors.js';
 import {
+  requireRole,
+} from '../../auth/rbac.js';
+import {
   createTeamRequest as createTeamRequestSchema,
+  renameTeamRequest as renameTeamRequestSchema,
   type CreateTeamResponse,
   type MyTeam,
 } from '@teamem/schema';
@@ -137,6 +143,106 @@ export function buildTeamsRoutes(deps: TeamsDeps): Hono {
       return c.json({ requestId, data: teams });
     } catch (err) {
       throw new InternalError('Failed to list teams', { cause: err });
+    }
+  });
+
+  // ── PATCH /v1/teams/:teamId ────────────────────────────────────────────
+  // Rename a team. Requires owner role.
+  routes.patch('/v1/teams/:teamId', requireWebSession(db), requireTeamMembership(db), requireRole('owner'), async (c: Context) => {
+    const requestId = c.get(REQUEST_ID_KEY) as string;
+    const teamId = c.req.param('teamId');
+
+    if (!teamId) {
+      throw new InvalidRequestError('Missing teamId parameter');
+    }
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      throw new InvalidRequestError('Request body is not valid JSON');
+    }
+
+    const parsed = renameTeamRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new InvalidRequestError('Request body validation failed', {
+        issues: parsed.error.issues.map((i) => ({
+          path: i.path.join('.'),
+          message: i.message,
+        })),
+      } as unknown as Record<string, unknown>);
+    }
+
+    const { name } = parsed.data;
+
+    try {
+      const result = await db.$client.query(
+        `UPDATE teams SET name = $1 WHERE id = $2
+         RETURNING id, name`,
+        [name, teamId],
+      );
+
+      const row = result.rows[0];
+      if (!row) {
+        throw new NotFoundError();
+      }
+
+      return c.json({ requestId, data: { id: row['id'] as string, name: row['name'] as string } });
+    } catch (err) {
+      if (err instanceof NotFoundError) throw err;
+      throw new InternalError('Failed to rename team', { cause: err });
+    }
+  });
+
+  // ── POST /v1/teams/:teamId/delete ─────────────────────────────────────
+  // Delete a team. Requires owner role. This is destructive and cannot be undone.
+  routes.post('/v1/teams/:teamId/delete', requireWebSession(db), requireTeamMembership(db), requireRole('owner'), async (c: Context) => {
+    const requestId = c.get(REQUEST_ID_KEY) as string;
+    const sessionUser = getSessionUser(c);
+    const teamId = c.req.param('teamId');
+
+    if (!teamId) {
+      throw new InvalidRequestError('Missing teamId parameter');
+    }
+
+    try {
+      // Verify team exists and user is owner
+      const membershipResult = await db.$client.query(
+        `SELECT role FROM memberships WHERE user_id = $1 AND team_id = $2 AND role = 'owner' LIMIT 1`,
+        [sessionUser.userId, teamId],
+      );
+
+      if (membershipResult.rows.length === 0) {
+        throw new NotFoundError();
+      }
+
+      await db.$client.query('BEGIN');
+      try {
+        // CASCADE will handle related records. Audit records are kept
+        // because audit_log has no FK to teams.
+        await db.$client.query('DELETE FROM teams WHERE id = $1', [teamId]);
+        await db.$client.query('COMMIT');
+      } catch (err) {
+        await db.$client.query('ROLLBACK');
+        throw err;
+      }
+
+      console.info(
+        JSON.stringify({
+          event: 'team_deleted',
+          requestId,
+          teamId,
+          deletedByUserId: sessionUser.userId,
+        }),
+      );
+
+      return c.json({
+        requestId,
+        data: { id: teamId, deleted: true, deletedAt: new Date().toISOString() },
+      });
+    } catch (err) {
+      if (err instanceof NotFoundError) throw err;
+      throw new InternalError('Failed to delete team', { cause: err });
     }
   });
 

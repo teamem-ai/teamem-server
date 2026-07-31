@@ -22,7 +22,7 @@ export function KeyReveal({
 
   return (
     <div className={cn("space-y-3", className)}>
-      <div className="key-reveal">
+      <div className="key-reveal" data-testid="key-token">
         <code>{token}</code>
         <button onClick={handleCopy} className="copy-btn">
           {copied ? (

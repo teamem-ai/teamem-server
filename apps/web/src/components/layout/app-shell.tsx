@@ -11,7 +11,7 @@ export function AppShell() {
     <ScopeProvider>
       <div className="app-shell flex min-h-screen flex-col lg:flex-row">
         <Sidebar />
-        <div className="flex-1 min-w-0 flex flex-col lg:ml-sidebar">
+        <div className="flex-1 ml-sidebar min-w-0 flex flex-col main-resp">
           <Topbar />
           <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 lg:py-7 max-w-[1180px] w-full mx-auto">
             <Outlet />

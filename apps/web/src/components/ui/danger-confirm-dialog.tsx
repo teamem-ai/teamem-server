@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 
 export type DangerLevel = "normal" | "type-name";
 
@@ -48,7 +48,7 @@ export function DangerConfirmDialog({
             onClick={() => onOpenChange(false)}
             aria-label="Close"
           >
-            ✕
+            <X className="w-4 h-4" />
           </button>
         </div>
 
