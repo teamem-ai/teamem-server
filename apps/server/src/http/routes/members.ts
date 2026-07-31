@@ -199,14 +199,14 @@ export function buildMembersRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
        FROM concepts c
        JOIN concept_contributors cc
          ON cc.concept_uuid = c.uuid
-        AND cc.team_id = $2 AND cc.project_id = $3 AND cc.principal_id = $4
+        AND cc.team_id = $1 AND cc.project_id = $2 AND cc.principal_id = $3
        LEFT JOIN concept_paths cp
          ON cp.concept_uuid = c.uuid AND cp.is_current = true
-        AND cp.team_id = $2 AND cp.project_id = $3
-       WHERE c.team_id = $2 AND c.project_id = $3
+        AND cp.team_id = $1 AND cp.project_id = $2
+       WHERE c.team_id = $1 AND c.project_id = $2
        ORDER BY c.last_confirmed DESC
-       LIMIT $5`,
-      [targetUserId, session.teamId, projectId, principalId, limit],
+       LIMIT $4`,
+      [session.teamId, projectId, principalId, limit],
     );
 
     const data = conceptRows.rows.map((row) => ({
