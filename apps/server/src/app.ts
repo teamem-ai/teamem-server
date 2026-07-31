@@ -151,14 +151,25 @@ export function buildApp(deps: AppDeps = {}) {
       const teamRow = teamResult.rows[0] as Record<string, unknown> | undefined;
       teamName = (teamRow?.['name'] as string) ?? null;
 
-      // Look up inviter login
+      // Look up inviter login and role
       let inviterLogin: string | null = null;
+      let inviterRole: string | null = null;
       const userResult = await db.$client.query(
         `SELECT github_login FROM users WHERE id = $1 LIMIT 1`,
         [invite.invitedByUserId],
       );
       const userRow = userResult.rows[0] as Record<string, unknown> | undefined;
       inviterLogin = (userRow?.['github_login'] as string) ?? null;
+
+      // Look up inviter's role within the target team
+      if (inviterLogin) {
+        const roleResult = await db.$client.query(
+          `SELECT role FROM memberships WHERE user_id = $1 AND team_id = $2 LIMIT 1`,
+          [invite.invitedByUserId, invite.teamId],
+        );
+        const roleRow = roleResult.rows[0] as Record<string, unknown> | undefined;
+        inviterRole = (roleRow?.['role'] as string) ?? null;
+      }
 
       return c.json({
         status: lookupResult.status,
@@ -168,6 +179,7 @@ export function buildApp(deps: AppDeps = {}) {
           teamName,
           targetRole: invite.targetRole,
           invitedByLogin: inviterLogin,
+          invitedByRole: inviterRole,
           expiresAt: invite.expiresAt,
           usedAt: invite.usedAt,
         },

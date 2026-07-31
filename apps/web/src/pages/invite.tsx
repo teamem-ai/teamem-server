@@ -57,11 +57,13 @@ function InviteSummary({
   teamName,
   targetRole,
   invitedByLogin,
+  invitedByRole,
   joiningAsLogin,
 }: {
   teamName: string;
   targetRole: string;
   invitedByLogin: string | null;
+  invitedByRole?: string | null;
   joiningAsLogin?: string;
 }) {
   const inviterInitials = (invitedByLogin ?? "?").slice(0, 2).toUpperCase();
@@ -109,7 +111,15 @@ function InviteSummary({
           >
             {inviterInitials}
           </span>
-          <span>{invitedByLogin ?? "unknown"}</span>
+          <span>
+            {invitedByLogin ?? "unknown"}
+            {invitedByRole && (
+              <>
+                {" "}·{" "}
+                <span className="small muted">{invitedByRole}</span>
+              </>
+            )}
+          </span>
         </div>
       )}
     </div>
@@ -216,13 +226,13 @@ export function InvitePage() {
       <main className="auth">
         <div className="auth-card">
           <LogoMark />
-          <div className="empty" style={{ padding: "24px 0 0" }}>
+          <div className="empty-state" style={{ padding: "24px 0 0" }}>
             <div className="e-icon">
               <ClockIcon />
             </div>
-            <h1 style={{ fontSize: 20 }}>
+            <h3 style={{ fontSize: 20 }}>
               This invite link is no longer valid
-            </h1>
+            </h3>
             <p style={{ marginTop: 8 }}>
               It may have expired (invites last 7 days) or was already used.
               <br />
@@ -246,13 +256,13 @@ export function InvitePage() {
         <div data-view="expired">
           <div className="auth-card">
             <LogoMark />
-            <div className="empty" style={{ padding: "24px 0 0" }}>
+            <div className="empty-state" style={{ padding: "24px 0 0" }}>
               <div className="e-icon">
                 <ClockIcon />
               </div>
-              <h1 style={{ fontSize: 20 }}>
+              <h3 style={{ fontSize: 20 }}>
                 This invite link is no longer valid
-              </h1>
+              </h3>
               <p style={{ marginTop: 8 }}>
                 It may have expired (invites last 7 days) or was already used.
                 <br />
@@ -274,6 +284,7 @@ export function InvitePage() {
   const teamName = invite?.teamName ?? "unknown team";
   const targetRole = invite?.targetRole ?? "member";
   const invitedByLogin = invite?.invitedByLogin ?? null;
+  const invitedByRole = invite?.invitedByRole ?? null;
 
   // ── Guest (not logged in) ────────────────────────────────────────────
   if (state === "guest") {
@@ -292,6 +303,7 @@ export function InvitePage() {
               teamName={teamName}
               targetRole={targetRole}
               invitedByLogin={invitedByLogin}
+              invitedByRole={invitedByRole}
             />
 
             <div className="auth-box">
@@ -333,6 +345,7 @@ export function InvitePage() {
               teamName={teamName}
               targetRole={targetRole}
               invitedByLogin={invitedByLogin}
+              invitedByRole={invitedByRole}
               joiningAsLogin={joiningAs}
             />
 

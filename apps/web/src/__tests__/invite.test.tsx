@@ -22,6 +22,7 @@ const validInvite = {
     teamName: "Acme Corp",
     targetRole: "member",
     invitedByLogin: "k.zhang",
+    invitedByRole: "admin",
     expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
     usedAt: null,
   },

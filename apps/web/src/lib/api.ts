@@ -29,6 +29,7 @@ export interface InviteLookup {
     teamName: string | null;
     targetRole: string;
     invitedByLogin: string | null;
+    invitedByRole: string | null;
     expiresAt: string;
     usedAt: string | null;
   };
