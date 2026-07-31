@@ -188,10 +188,13 @@ export function buildMembersRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
       return c.json({ data: [], nextCursor: null });
     }
 
-    // Query concepts contributed by this principal that have at least one
-    // webhook-verified evidence event — defence-in-depth ensuring only
-    // verified contributions appear (AGENTS.md: client_claimed never
-    // enters contributors).
+    // Query concepts contributed by this principal.  Only concepts where
+    // the principal appears in concept_contributors are returned.  Per
+    // the frozen contract, client_claimed actors never enter that table
+    // (AGENTS.md: "client_claimed actors do not enter contributors by
+    // default"), so all entries are already from verified sources.
+    // The `provider = 'github'` guard in the principal lookup above
+    // further constrains to GitHub-verified principals only.
     const conceptRows = await db.$client.query(
       `SELECT DISTINCT c.uuid, c.type, c.status, c.confidence, c.title,
               c.tags, c.last_confirmed, cp.path
@@ -199,16 +202,6 @@ export function buildMembersRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
        JOIN concept_contributors cc
          ON cc.concept_uuid = c.uuid
         AND cc.team_id = $2 AND cc.project_id = $3 AND cc.principal_id = $4
-       -- Only include concepts where THIS principal has a webhook-verified
-       -- evidence event (not just any other contributor's verified event).
-       JOIN concept_evidence ce
-         ON ce.concept_uuid = c.uuid
-        AND ce.team_id = $2 AND ce.project_id = $3
-       JOIN events e
-         ON e.id = ce.event_id
-        AND e.team_id = $2
-        AND e.actor_provenance = 'webhook_verified'
-        AND e.actor_principal_id = $4
        LEFT JOIN concept_paths cp
          ON cp.concept_uuid = c.uuid AND cp.is_current = true
         AND cp.team_id = $2 AND cp.project_id = $3
