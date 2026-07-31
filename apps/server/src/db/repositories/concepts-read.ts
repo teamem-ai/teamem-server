@@ -58,6 +58,8 @@ function toPrincipalRef(
     provider: string;
     providerKind: string;
     displayLogin: string | null;
+    /** Internal user ID (usr_...) when this principal maps to a portal user. */
+    userId?: string | null;
   },
 ): PrincipalRef {
   const isGithubHuman = principalRow.kind === 'human' && principalRow.provider === 'github';
@@ -74,6 +76,10 @@ function toPrincipalRef(
   if (githubLogin) {
     ref.githubLogin = githubLogin;
     ref.avatarUrl = `https://avatars.githubusercontent.com/${githubLogin}?size=64`;
+  }
+
+  if (principalRow.userId) {
+    ref.userId = principalRow.userId;
   }
 
   return ref;
@@ -133,6 +139,7 @@ async function assembleConcept(
       provider: schema.principals.provider,
       providerKind: schema.principals.providerKind,
       displayLogin: schema.principals.displayLogin,
+      userId: schema.users.id,
     })
     .from(schema.conceptContributors)
     .innerJoin(
@@ -140,6 +147,12 @@ async function assembleConcept(
       and(
         eq(schema.principals.teamId, teamId),
         eq(schema.principals.id, schema.conceptContributors.principalId),
+      ),
+    )
+    .leftJoin(
+      schema.users,
+      and(
+        eq(schema.users.githubId, sql`CAST(${schema.principals.providerUserId} AS INTEGER)`),
       ),
     )
     .where(
@@ -348,6 +361,7 @@ export async function enrichConceptRows<T extends { uuid: string; teamId: string
         provider: schema.principals.provider,
         providerKind: schema.principals.providerKind,
         displayLogin: schema.principals.displayLogin,
+        userId: schema.users.id,
       })
       .from(schema.conceptContributors)
       .innerJoin(
@@ -355,6 +369,19 @@ export async function enrichConceptRows<T extends { uuid: string; teamId: string
         and(
           eq(schema.principals.teamId, teamId),
           eq(schema.principals.id, schema.conceptContributors.principalId),
+        ),
+      )
+      .leftJoin(
+        schema.users,
+        and(
+          eq(sql`${schema.users.githubId}::text`, schema.principals.providerUserId),
+        ),
+      )
+      .leftJoin(
+        schema.memberships,
+        and(
+          eq(schema.memberships.userId, schema.users.id),
+          eq(schema.memberships.teamId, teamId),
         ),
       )
       .where(
@@ -375,6 +402,7 @@ export async function enrichConceptRows<T extends { uuid: string; teamId: string
       provider: row.provider,
       providerKind: row.providerKind,
       displayLogin: row.displayLogin,
+      userId: row.userId,
     });
     const list = contribMap.get(row.conceptUuid) ?? [];
     list.push(ref);

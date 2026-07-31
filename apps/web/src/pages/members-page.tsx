@@ -730,7 +730,7 @@ export function MembersPage() {
 
                     {/* Role cell */}
                     <td>
-                      {isOwner && !(isSelf && isOnlyOwner) ? (
+                      {isOwner ? (
                         <RoleDropdown
                           currentRole={m.role}
                           isLastOwner={isSelf && isOnlyOwner}

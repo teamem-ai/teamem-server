@@ -13,12 +13,12 @@ import type { ConceptType } from "@/components/ui";
 import type { ConfidenceLevel } from "@/components/ui";
 import {
   fetchMembers,
-  fetchMe,
   fetchMemberConcepts,
   ApiError,
   type MemberEntry,
   type ConceptSummary,
 } from "@/lib/api";
+import { useScope } from "@/lib/scope";
 
 // ── MemberAvatar ────────────────────────────────────────────────────────────
 
@@ -86,7 +86,7 @@ function MemberAvatar({
 function ConceptRow({ concept }: { concept: ConceptSummary }) {
   return (
     <Link
-      to={`/concepts/${concept.uuid}`}
+      to={`/concept/${concept.uuid}`}
       className="krow"
       style={{ color: "inherit", textDecoration: "none" }}
     >
@@ -147,24 +147,24 @@ function formatJoined(iso: string): string {
 
 export function MemberProfilePage() {
   const { userId } = useParams<{ userId: string }>();
+  const { projectId, status: scopeStatus } = useScope();
 
   const [member, setMember] = useState<MemberEntry | null>(null);
   const [concepts, setConcepts] = useState<ConceptSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [conceptsLoading, setConceptsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [projectId, setProjectId] = useState<string | null>(null);
 
   // ── Load member data ──────────────────────────────────────────────────
   const loadMember = useCallback(async () => {
     if (!userId) return;
+    // Wait for scope to be ready so we don't race with auth.
+    if (scopeStatus !== "ready") return;
     setLoading(true);
     setError(null);
     try {
-      const [membersData, userData] = await Promise.all([
-        fetchMembers(),
-        fetchMe(),
-      ]);
+      const membersData = await fetchMembers();
+
       const found = membersData.find((m) => m.userId === userId);
       if (!found) {
         setError("Member not found");
@@ -172,34 +172,6 @@ export function MemberProfilePage() {
         return;
       }
       setMember(found);
-
-      // Extract projectId from the user's team info.
-      // Since the frontend doesn't yet have a project switcher, we need
-      // to query the user's projects. For now, we'll use the team's
-      // first project. In a full implementation, this would come from
-      // the Topbar's project switcher context.
-      if (userData.teamId) {
-        // Try to get projects for the team
-        try {
-          const projectsRes = await fetch(
-            `/teams/${userData.teamId}/projects`,
-            { credentials: "same-origin" },
-          );
-          if (projectsRes.ok) {
-            const projectsJson = await projectsRes.json();
-            if (
-              projectsJson.data &&
-              Array.isArray(projectsJson.data) &&
-              projectsJson.data.length > 0
-            ) {
-              const firstProject = projectsJson.data[0] as { id: string };
-              setProjectId(firstProject.id);
-            }
-          }
-        } catch {
-          // Projects endpoint might not be available; that's OK
-        }
-      }
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 401) {
@@ -215,7 +187,7 @@ export function MemberProfilePage() {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, scopeStatus]);
 
   // ── Load contributed concepts ──────────────────────────────────────────
   useEffect(() => {

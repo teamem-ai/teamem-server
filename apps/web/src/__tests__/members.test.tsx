@@ -9,6 +9,7 @@ import {
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { MembersPage } from "@/pages/members-page";
 import { MemberProfilePage } from "@/pages/member-profile-page";
+import { ScopeProvider } from "@/lib/scope";
 
 // ── Mock fetch globally ────────────────────────────────────────────────────
 
@@ -29,11 +30,27 @@ afterEach(() => {
 function renderProfilePage(userId: string) {
   return render(
     <MemoryRouter initialEntries={[`/members/${userId}`]}>
-      <Routes>
-        <Route path="/members/:userId" element={<MemberProfilePage />} />
-      </Routes>
+      <ScopeProvider>
+        <Routes>
+          <Route path="/members/:userId" element={<MemberProfilePage />} />
+        </Routes>
+      </ScopeProvider>
     </MemoryRouter>,
   );
+}
+
+/** Pre-load the two ScopeProvider mock responses (consumed first by fetchMe + fetchProjects). */
+function setupScope() {
+  // fetchMe → /auth/me
+  mockFetch.mockResolvedValueOnce({
+    ok: true, status: 200,
+    json: async () => ({ userId: "usr_viewer", githubLogin: "viewer", avatarUrl: null, teamId: "team_1", teamName: "Test", role: "viewer" }),
+  });
+  // fetchProjects → /v1/teams/:teamId/projects
+  mockFetch.mockResolvedValueOnce({
+    ok: true, status: 200,
+    json: async () => ({ requestId: "req_1", data: [{ id: "prj_1", name: "project-1", teamId: "team_1", createdAt: "2026-01-01T00:00:00.000Z" }] }),
+  });
 }
 
 function setupMembersMocks(members: unknown[], currentUser: unknown) {
@@ -505,34 +522,11 @@ describe("MemberProfilePage", () => {
   });
 
   it("shows 404 for non-existent member", async () => {
+    setupScope();
+    // fetchMembers returns a different user
     mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: [
-          {
-            userId: "usr_other",
-            githubLogin: "otheruser",
-            avatarUrl: null,
-            role: "owner",
-            joinedAt: "2026-07-28T00:00:00.000Z",
-            principalId: null,
-            principalDisplayLogin: null,
-          },
-        ],
-      }),
-    });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        userId: "usr_other",
-        githubLogin: "otheruser",
-        avatarUrl: null,
-        teamId: "team_1",
-        teamName: "Test",
-        role: "owner",
-      }),
+      ok: true, status: 200,
+      json: async () => ({ data: [{ userId: "usr_other", githubLogin: "otheruser", avatarUrl: null, role: "owner", joinedAt: "2026-07-28T00:00:00.000Z", principalId: null, principalDisplayLogin: null }] }),
     });
 
     renderProfilePage("usr_nonexistent");
@@ -543,45 +537,15 @@ describe("MemberProfilePage", () => {
   });
 
   it("renders member profile with role and join date", async () => {
+    setupScope();
+    // fetchMembers
     mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: [
-          {
-            userId: "usr_abc",
-            githubLogin: "contributor",
-            avatarUrl: null,
-            role: "member",
-            joinedAt: "2026-07-29T00:00:00.000Z",
-            principalId: "pri_1",
-            principalDisplayLogin: "contributor",
-          },
-        ],
-      }),
+      ok: true, status: 200,
+      json: async () => ({ data: [{ userId: "usr_abc", githubLogin: "contributor", avatarUrl: null, role: "member", joinedAt: "2026-07-29T00:00:00.000Z", principalId: "pri_1", principalDisplayLogin: "contributor" }] }),
     });
+    // fetchMemberConcepts (empty)
     mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        userId: "usr_viewer",
-        githubLogin: "viewer",
-        avatarUrl: null,
-        teamId: "team_1",
-        teamName: "Test",
-        role: "viewer",
-      }),
-    });
-    // projects fetch
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: [{ id: "prj_1" }] }),
-    });
-    // concepts fetch
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
+      ok: true, status: 200,
       json: async () => ({ data: [], nextCursor: null }),
     });
 
@@ -593,121 +557,41 @@ describe("MemberProfilePage", () => {
 
     expect(screen.getByText("Member")).toBeInTheDocument();
     expect(screen.getByText(/Joined July 29, 2026/)).toBeInTheDocument();
-    expect(screen.getByText("Members")).toBeInTheDocument();
-    // Attribution footnote appears twice: empty state desc + dedicated footnote
-    expect(
-      screen.getAllByText(/Only webhook-verified contributions appear here/).length,
-    ).toBeGreaterThanOrEqual(1);
   });
 
   it("renders contributed concepts when available", async () => {
+    setupScope();
+    // fetchMembers
     mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: [
-          {
-            userId: "usr_contrib",
-            githubLogin: "contributor",
-            avatarUrl: null,
-            role: "member",
-            joinedAt: "2026-07-29T00:00:00.000Z",
-            principalId: "pri_1",
-            principalDisplayLogin: "contributor",
-          },
-        ],
-      }),
+      ok: true, status: 200,
+      json: async () => ({ data: [{ userId: "usr_contrib", githubLogin: "contributor", avatarUrl: null, role: "member", joinedAt: "2026-07-29T00:00:00.000Z", principalId: "pri_1", principalDisplayLogin: "contributor" }] }),
     });
+    // fetchMemberConcepts
     mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        userId: "usr_viewer",
-        githubLogin: "viewer",
-        avatarUrl: null,
-        teamId: "team_1",
-        teamName: "Test",
-        role: "viewer",
-      }),
-    });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: [{ id: "prj_1" }] }),
-    });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: [
-          {
-            uuid: "00000000-0000-0000-0000-000000000001",
-            path: "decisions/use-postgres",
-            type: "decision",
-            status: "active",
-            confidence: "high",
-            title: "Use PostgreSQL as primary database",
-            tags: ["postgresql", "database"],
-            lastConfirmed: "2026-07-28T00:00:00.000Z",
-          },
-        ],
-        nextCursor: null,
-      }),
+      ok: true, status: 200,
+      json: async () => ({ data: [{ uuid: "00000000-0000-0000-0000-000000000001", path: "decisions/use-postgres", type: "decision", status: "active", confidence: "high", title: "Use PostgreSQL as primary database", tags: ["postgresql", "database"], lastConfirmed: "2026-07-28T00:00:00.000Z" }], nextCursor: null }),
     });
 
     renderProfilePage("usr_contrib");
 
-    // Wait for both the profile AND the contributed concepts to load.
-    // The profile renders first, then concepts load in a second async hop
-    // (projectId is obtained after profile load, then concepts are fetched).
     await waitFor(() => {
       expect(screen.getByText("contributor")).toBeInTheDocument();
       expect(screen.getByText(/Contributed pages · 1/)).toBeInTheDocument();
     });
 
-    expect(
-      screen.getByText("Use PostgreSQL as primary database"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Use PostgreSQL as primary database")).toBeInTheDocument();
   });
 
   it("shows empty state when member has no contributions", async () => {
+    setupScope();
+    // fetchMembers
     mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: [
-          {
-            userId: "usr_new",
-            githubLogin: "newuser",
-            avatarUrl: null,
-            role: "viewer",
-            joinedAt: "2026-07-30T00:00:00.000Z",
-            principalId: null,
-            principalDisplayLogin: null,
-          },
-        ],
-      }),
+      ok: true, status: 200,
+      json: async () => ({ data: [{ userId: "usr_new", githubLogin: "newuser", avatarUrl: null, role: "viewer", joinedAt: "2026-07-30T00:00:00.000Z", principalId: null, principalDisplayLogin: null }] }),
     });
+    // fetchMemberConcepts (returns empty)
     mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        userId: "usr_viewer",
-        githubLogin: "viewer",
-        avatarUrl: null,
-        teamId: "team_1",
-        teamName: "Test",
-        role: "viewer",
-      }),
-    });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: [{ id: "prj_1" }] }),
-    });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
+      ok: true, status: 200,
       json: async () => ({ data: [], nextCursor: null }),
     });
 
@@ -721,14 +605,14 @@ describe("MemberProfilePage", () => {
   });
 
   it("shows error state when fetch fails", async () => {
+    setupScope();
+    // fetchMembers rejects
     mockFetch.mockRejectedValueOnce(new Error("Network error"));
 
     renderProfilePage("usr_test");
 
     await waitFor(() => {
-      expect(
-        screen.getByText("Failed to load member profile"),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Failed to load member profile")).toBeInTheDocument();
     });
   });
 });

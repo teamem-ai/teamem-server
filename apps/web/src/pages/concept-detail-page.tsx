@@ -640,16 +640,27 @@ function ContributorRow({ contributor }: { contributor: PrincipalRef }) {
     </>
   );
 
-  if (isBound && contributor.githubLogin) {
+  // Link bound human contributors to their internal member profile when a
+  // userId is available; otherwise fall back to their GitHub profile.
+  const memberLink =
+    isBound && contributor.userId ? `/members/${contributor.userId}` : null;
+
+  if (isBound && (contributor.githubLogin || memberLink)) {
+    const href = memberLink ?? `https://github.com/${contributor.githubLogin}`;
+    const isInternal = !!memberLink;
     return (
       <a
-        href={`https://github.com/${contributor.githubLogin}`}
-        target="_blank"
-        rel="noopener noreferrer"
+        href={href}
+        target={isInternal ? undefined : "_blank"}
+        rel={isInternal ? undefined : "noopener noreferrer"}
         className="contrib-row"
       >
         {body}
-        <Github className="w-3.5 h-3.5 text-muted-foreground" />
+        {isInternal ? (
+          <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
+        ) : (
+          <Github className="w-3.5 h-3.5 text-muted-foreground" />
+        )}
       </a>
     );
   }

@@ -28,7 +28,6 @@ import {
   ConflictError,
   InvalidRequestError,
 } from '../errors.js';
-import { listConcepts, type ConceptRow } from '../../db/repositories/concepts-read.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -189,23 +188,41 @@ export function buildMembersRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
       return c.json({ data: [], nextCursor: null });
     }
 
-    // Query concepts via the repository (scoped to team+project).
-    const result = await listConcepts(db, {
-      teamId: session.teamId,
-      projectId,
-      contributor: principalId,
-      limit,
-    });
+    // Query concepts contributed by this principal that have at least one
+    // webhook-verified evidence event — defence-in-depth ensuring only
+    // verified contributions appear (AGENTS.md: client_claimed never
+    // enters contributors).
+    const conceptRows = await db.$client.query(
+      `SELECT DISTINCT c.uuid, c.type, c.status, c.confidence, c.title,
+              c.tags, c.last_confirmed, cp.path
+       FROM concepts c
+       JOIN concept_contributors cc
+         ON cc.concept_uuid = c.uuid
+        AND cc.team_id = $2 AND cc.project_id = $3 AND cc.principal_id = $4
+       JOIN concept_evidence ce
+         ON ce.concept_uuid = c.uuid
+        AND ce.team_id = $2 AND ce.project_id = $3
+       JOIN events e
+         ON e.id = ce.event_id
+        AND e.team_id = $2 AND e.actor_provenance = 'webhook_verified'
+       LEFT JOIN concept_paths cp
+         ON cp.concept_uuid = c.uuid AND cp.is_current = true
+        AND cp.team_id = $2 AND cp.project_id = $3
+       WHERE c.team_id = $2 AND c.project_id = $3
+       ORDER BY c.last_confirmed DESC
+       LIMIT $5`,
+      [targetUserId, session.teamId, projectId, principalId, String(limit)],
+    );
 
-    const data = result.rows.map((row: ConceptRow) => ({
-      uuid: row.uuid,
-      path: row.path ?? '',
-      type: row.type,
-      status: row.status,
-      confidence: row.confidence,
-      title: row.title,
-      tags: row.tags,
-      lastConfirmed: row.lastConfirmed.toISOString(),
+    const data = conceptRows.rows.map((row) => ({
+      uuid: row['uuid'] as string,
+      path: (row['path'] as string) ?? '',
+      type: row['type'] as string,
+      status: row['status'] as string,
+      confidence: row['confidence'] as string,
+      title: row['title'] as string,
+      tags: row['tags'] as string[],
+      lastConfirmed: (row['last_confirmed'] as Date).toISOString(),
     }));
 
     return c.json({ data, nextCursor: null });
