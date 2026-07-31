@@ -1,207 +1,480 @@
-import { useState, useEffect, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
-import { ArrowLeft, AlertTriangle, FileJson, Clock, User, Server } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
-import { NotFound } from "@/components/ui/not-found";
-import { fetchEvent, ApiError } from "@/lib/api";
-import { useScope } from "@/lib/scope";
-import { formatFull } from "@/lib/date";
-import type { EventDetail } from "@teamem/schema";
-
 /**
- * Event detail page — renders the audited payload for an MCP write or any
- * other ingested event. Requires the read:payload scope; without it we show
- * an honest permission-denied state instead of fabricating or 404-ing.
+ * Event detail page — D2 in DESIGN.md §7–§8.
+ *
+ * Displays event metadata + redacted payload viewer with audit notice.
+ * Fail-closed: if the audit write fails server-side, the payload is
+ * blocked and a lock state is shown (AuditWriteFailedError).
+ * Consumes GET /v1/events/:id (requires read:payload scope, audited).
  */
-export function EventDetailPage() {
-  const { id } = useParams<{ id: string }>();
-  const scope = useScope();
-  const [event, setEvent] = useState<EventDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [notFound, setNotFound] = useState(false);
+import { useState, useEffect } from "react";
+import { useParams } from "react-router-dom";
+import {
+  ArrowLeft,
+  Copy,
+  ShieldCheck,
+  Lock,
+  Info,
+  GitCommitHorizontal,
+  GitPullRequest,
+  CircleDot,
+  MessageSquare,
+  Terminal,
+  Sparkles,
+  Activity,
+} from "lucide-react";
+import type { EventDetail, ActorProvenance } from "@teamem/schema";
+import {
+  fetchEventDetail,
+  AuditWriteFailedError,
+  ApiError,
+} from "@/lib/api";
+import { ProjectScopePrompt } from "@/components/ui/project-scope-prompt";
+import { useProjectId } from "@/lib/use-project-id";
 
-  const load = useCallback(async () => {
-    if (!id || !scope.projectId) return;
-    try {
-      setLoading(true);
-      setError(null);
-      setNotFound(false);
-      const data = await fetchEvent(id, scope.projectId);
-      setEvent(data);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        setNotFound(true);
-      } else if (err instanceof ApiError && err.status === 403) {
-        setError(
-          "This portal session does not have permission to read raw event payloads. Ask a team admin for the read:payload scope.",
-        );
-      } else if (err instanceof ApiError && err.status === 401) {
-        setError(
-          "This portal session cannot read events yet — the data-plane API requires an API key, and web-session read access is not available on this server.",
-        );
-      } else if (err instanceof ApiError) {
-        setError(err.message);
-      } else {
-        setError("Failed to load event");
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [id, scope.projectId]);
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (scope.status === "ready") {
-      load();
-    }
-  }, [scope.status, load]);
+function formatFullDate(iso: string): string {
+  const date = new Date(iso);
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  });
+}
 
-  if (scope.status === "loading" || loading) {
-    return <EventDetailSkeleton />;
-  }
+function formatRelativeTime(iso: string): string {
+  const date = new Date(iso);
+  const now = Date.now();
+  const diff = now - date.getTime();
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
-  if (scope.status === "signed-out") {
-    return (
-      <div className="card">
-        <div className="empty-state py-16">
-          <div className="e-icon">
-            <AlertTriangle />
-          </div>
-          <h3>Sign in required</h3>
-          <p>You need to sign in with GitHub to view this event.</p>
-          <div className="e-actions">
-            <a className="btn btn-primary" href="/auth/github">
-              Sign in with GitHub
-            </a>
-          </div>
-        </div>
-      </div>
-    );
-  }
+function actorInitials(displayLogin?: string): string {
+  if (!displayLogin) return "?";
+  return displayLogin.slice(0, 2).toUpperCase();
+}
 
-  if (notFound) {
-    return <NotFound />;
-  }
+const sourceKindIcon: Record<string, typeof GitCommitHorizontal> = {
+  github_commit: GitCommitHorizontal,
+  github_pr: GitPullRequest,
+  github_issue: CircleDot,
+  github_pr_comment: MessageSquare,
+  cli_init: Terminal,
+  mcp_write: Sparkles,
+  external_event: Activity,
+};
 
-  if (error || !event) {
-    return (
-      <div>
-        <Link to="/events" className="btn btn-ghost btn-sm mb-4 inline-flex items-center gap-1.5">
-          <ArrowLeft className="w-4 h-4" /> Events
-        </Link>
-        <div className="banner error mb-4">
-          <AlertTriangle className="w-4 h-4" />
-          <div>{error ?? "Event not found"}</div>
-          <div className="b-actions">
-            <button className="btn btn-sm btn-outline" onClick={load}>
-              Retry
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+// ── JSON syntax highlighting (safe, no dangerouslySetInnerHTML) ──────────
 
-  const actor = event.actor;
-  const source = event.source;
-
+function JsonString({ children }: { children: string }) {
   return (
-    <div className="content wide">
-      <Link
-        to="/events"
-        className="btn btn-ghost btn-sm inline-flex items-center gap-1.5 mb-[14px]"
-      >
-        <ArrowLeft className="w-4 h-4" /> Events
-      </Link>
-
-      <div className="c-head">
-        <div className="c-badges">
-          <span className="badge">{source.kind}</span>
-          <span className="badge muted">{source.channel}</span>
-        </div>
-        <h1 className="c-title">Event {event.id}</h1>
-        <div className="c-meta">
-          <span className="copy-chip">
-            <Server className="w-3 h-3" />
-            {source.deliveryId}
-          </span>
-          <span title={formatFull(event.occurredAt)}>
-            <Clock className="w-3 h-3 inline mr-1" />
-            Occurred {formatFull(event.occurredAt)}
-          </span>
-          <span title={formatFull(event.createdAt)}>
-            Ingested {formatFull(event.createdAt)}
-          </span>
-        </div>
-      </div>
-
-      <div className="concept-grid">
-        <div className="card">
-          <div className="card-body" style={{ padding: "26px 30px" }}>
-            <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
-              <FileJson className="w-4 h-4" /> Redacted payload
-            </h3>
-            <pre className="code-block">
-              <code>{JSON.stringify(event.payload, null, 2)}</code>
-            </pre>
-          </div>
-        </div>
-
-        <div className="rail">
-          <div className="card">
-            <div className="card-body" style={{ padding: "16px" }}>
-              <h4 style={{ margin: "0 0 12px 0", fontSize: "14px" }}>Actor</h4>
-              {actor ? (
-                <div className="flex items-center gap-2">
-                  <User className="w-4 h-4 text-muted-foreground" />
-                  <div>
-                    <div className="font-medium">
-                      {actor.displayLogin ?? actor.providerUserId ?? "Unknown"}
-                    </div>
-                    <div className="small muted">{event.actorProvenance}</div>
-                  </div>
-                </div>
-              ) : (
-                <div className="small muted">No actor recorded</div>
-              )}
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-body" style={{ padding: "16px" }}>
-              <h4 style={{ margin: "0 0 12px 0", fontSize: "14px" }}>Ingested by</h4>
-              <div className="small muted">
-                {event.ingestedBy.credentialId && (
-                  <div>credential: {event.ingestedBy.credentialId}</div>
-                )}
-                {event.ingestedBy.principalId && (
-                  <div>principal: {event.ingestedBy.principalId}</div>
-                )}
-                {!event.ingestedBy.credentialId && !event.ingestedBy.principalId && (
-                  <div>System ingestion</div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <span className="json-string">
+      {JSON.stringify(children)}
+    </span>
   );
 }
 
-function EventDetailSkeleton() {
+function JsonValue({ value, indent = 0 }: { value: unknown; indent?: number }) {
+  const pad = "  ".repeat(indent);
+
+  if (value === null) {
+    return <span className="json-null">null</span>;
+  }
+  if (typeof value === "boolean") {
+    return <span className="json-bool">{value ? "true" : "false"}</span>;
+  }
+  if (typeof value === "number") {
+    return <span className="json-number">{String(value)}</span>;
+  }
+  if (typeof value === "string") {
+    return <JsonString>{value}</JsonString>;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <span>[]</span>;
+    }
+    return (
+      <span>
+        {"["}
+        {value.map((item, index) => (
+          <span key={index}>
+            {"\n"}{pad}{"  "}
+            <JsonValue value={item} indent={indent + 1} />
+            {index < value.length - 1 ? "," : ""}
+          </span>
+        ))}
+        {"\n"}{pad}{"]"}
+      </span>
+    );
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj);
+    if (keys.length === 0) {
+      return <span>{"{}"}</span>;
+    }
+    return (
+      <span>
+        {"{"}
+        {keys.map((key, index) => (
+          <span key={key}>
+            {"\n"}{pad}{"  "}
+            <span className="json-key">{JSON.stringify(key)}</span>
+            {": "}
+            <JsonValue value={obj[key]} indent={indent + 1} />
+            {index < keys.length - 1 ? "," : ""}
+          </span>
+        ))}
+        {"\n"}{pad}{"}"}
+      </span>
+    );
+  }
+  return <span>{JSON.stringify(value)}</span>;
+}
+
+function JsonViewer({ data }: { data: Record<string, unknown> }) {
   return (
-    <div className="content wide">
-      <Skeleton className="h-5 w-24 mb-[14px]" />
-      <div className="c-head">
-        <Skeleton className="h-[22px] w-[180px]" />
-        <Skeleton className="h-[30px] w-[64%]" />
-        <Skeleton className="h-[20px] w-[46%]" />
-      </div>
-      <div className="concept-grid">
+    <pre className="json-viewer">
+      <JsonValue value={data} />
+    </pre>
+  );
+}
+
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+function ActorDisplay({
+  actor,
+  provenance,
+}: {
+  actor: EventDetail["actor"];
+  provenance: ActorProvenance;
+}) {
+  const isVerified = provenance === "webhook_verified";
+  const hasActor = actor !== null;
+
+  if (!hasActor) {
+    return (
+      <span className="inline-flex items-center gap-2">
+        <span className="avatar unknown w-[22px] h-[22px] text-[9px]">?</span>
+        <span className="text-text-3">Unknown</span>
+      </span>
+    );
+  }
+
+  const displayLogin = actor.displayLogin;
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span
+        className="avatar w-[22px] h-[22px] text-[9px]"
+        style={{ background: "var(--emerald)" }}
+      >
+        {actorInitials(displayLogin)}
+      </span>
+      <span>{displayLogin ?? "Unknown"}</span>
+      {isVerified && (
+        <>
+          <ShieldCheck
+            className="w-[13px] h-[13px]"
+            style={{ color: "var(--green)" }}
+            aria-label="Identity verified by GitHub webhook signature"
+          />
+          <span className="text-[12.5px] text-text-3">webhook_verified</span>
+        </>
+      )}
+    </span>
+  );
+}
+
+// ── Main page ───────────────────────────────────────────────────────────────
+
+export function EventDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const { projectId, setProjectId, isReady: scopeReady } = useProjectId();
+
+  const [event, setEvent] = useState<EventDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  /** Audit-write failure → fail-closed lock state (distinct from generic errors). */
+  const [auditFailed, setAuditFailed] = useState(false);
+  const [auditRequestId, setAuditRequestId] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!id || !projectId || !scopeReady) return;
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setAuditFailed(false);
+    setAuditRequestId(null);
+
+    fetchEventDetail(id, projectId)
+      .then((result) => {
+        if (cancelled) return;
+        setEvent(result.data as EventDetail);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (err instanceof AuditWriteFailedError) {
+          setAuditFailed(true);
+          setAuditRequestId(err.requestId ?? null);
+        } else if (err instanceof ApiError) {
+          setError(err.message);
+        } else {
+          setError("Failed to load event detail");
+        }
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, projectId, scopeReady]);
+
+  const handleCopyJson = async () => {
+    if (!event) return;
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify(event.payload, null, 2),
+      );
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard write failed — silently ignore
+    }
+  };
+
+  const handleCopyId = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // silent
+    }
+  };
+
+  const backHref = projectId ? `/events?projectId=${projectId}` : "/events";
+
+  // ── Project scope prompt ────────────────────────────────────────────────
+  if (!projectId && scopeReady) {
+    return (
+      <div className="max-w-[860px]">
+        <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
+          <ArrowLeft /> Events
+        </a>
         <div className="card">
-          <div className="card-body" style={{ padding: "26px 30px" }}>
-            <Skeleton className="h-[200px] w-full" />
+          <ProjectScopePrompt onSet={setProjectId} />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="max-w-[860px]">
+        <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
+          <ArrowLeft /> Events
+        </a>
+        <div className="card">
+          <div className="card-body" style={{ padding: "48px 24px" }}>
+            <div className="skeleton h-5 w-[180px] mb-4" />
+            <div className="skeleton h-4 w-[300px] mb-2" />
+            <div className="skeleton h-4 w-[250px] mb-2" />
+            <div className="skeleton h-4 w-[200px]" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Fail-closed lock state (audit unavailable) ────────────────────────────
+  if (auditFailed) {
+    return (
+      <div className="max-w-[860px]">
+        <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
+          <ArrowLeft /> Events
+        </a>
+        <div className="card">
+          <div className="empty-state" style={{ padding: "48px 24px" }}>
+            <div className="e-icon" style={{ color: "var(--red)" }}>
+              <Lock />
+            </div>
+            <h3>Can&apos;t display payload right now</h3>
+            <p>
+              Audit logging is unavailable, and payload reads are blocked
+              until it recovers. This is intentional — reads are never
+              allowed to bypass the audit trail.
+            </p>
+            <div className="e-actions">
+              <button
+                className="btn btn-outline"
+                onClick={() => window.location.reload()}
+              >
+                Retry
+              </button>
+              {auditRequestId && (
+                <span className="small muted" style={{ alignSelf: "center" }}>
+                  Request ID <code className="mono">{auditRequestId}</code>
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Generic error ─────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <div className="max-w-[860px]">
+        <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
+          <ArrowLeft /> Events
+        </a>
+        <div className="card">
+          <div className="empty-state" style={{ padding: "48px 24px" }}>
+            <div className="e-icon" style={{ color: "var(--red)" }}>
+              <Info />
+            </div>
+            <h3>Failed to load event</h3>
+            <p>{error}</p>
+            <div className="e-actions">
+              <button
+                className="btn btn-outline"
+                onClick={() => window.location.reload()}
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Not found ─────────────────────────────────────────────────────────────
+  if (!event) {
+    return (
+      <div className="max-w-[860px]">
+        <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
+          <ArrowLeft /> Events
+        </a>
+        <div className="card">
+          <div className="empty-state" style={{ padding: "48px 24px" }}>
+            <div className="e-icon">
+              <Info />
+            </div>
+            <h3>Not found</h3>
+            <p>
+              This event doesn&apos;t exist, or the link is out of date.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Normal display ────────────────────────────────────────────────────────
+  return (
+    <div className="max-w-[860px]">
+      <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
+        <ArrowLeft /> Events
+      </a>
+
+      <div className="stack">
+        {/* Metadata card */}
+        <div className="card">
+          <div className="card-head">
+            <span className="pill">
+              {(() => {
+                const Icon = sourceKindIcon[event.source.kind] ?? Activity;
+                return <Icon />;
+              })()}
+              {event.source.kind}
+            </span>
+            <h3>{event.source.externalId || "Event"}</h3>
+          </div>
+          <div className="card-body">
+            <dl className="kv">
+              <dt>Event ID</dt>
+              <dd>
+                <button
+                  className="copy-chip"
+                  onClick={() => handleCopyId(event.id)}
+                >
+                  {event.id}
+                  <Copy />
+                </button>
+              </dd>
+              <dt>Actor</dt>
+              <dd>
+                <ActorDisplay actor={event.actor} provenance={event.actorProvenance} />
+              </dd>
+              <dt>Occurred</dt>
+              <dd>
+                {formatFullDate(event.occurredAt)}{" "}
+                <span className="text-text-3 text-[12.5px]">
+                  ({formatRelativeTime(event.occurredAt)}) · source time
+                </span>
+              </dd>
+              <dt>Received</dt>
+              <dd>{formatFullDate(event.createdAt)}</dd>
+              <dt>Project</dt>
+              <dd>{event.projectId}</dd>
+              <dt>External ID</dt>
+              <dd>
+                <code className="mono text-[12px]">{event.source.externalId}</code>
+              </dd>
+            </dl>
+          </div>
+        </div>
+
+        {/* Audit notice */}
+        <div className="banner info">
+          <Info className="ic" />
+          <div>
+            <span className="b-title">
+              Payload access is recorded in the audit log.
+            </span>
+            {" "}This payload was redacted at ingest — private segments were
+            removed before storage.
+          </div>
+        </div>
+
+        {/* Payload card */}
+        <div className="card">
+          <div className="card-head">
+            <h3>
+              Payload <span className="text-text-3 text-[12.5px] font-normal">redacted at ingest</span>
+            </h3>
+            <div className="ch-actions">
+              <button
+                className="btn btn-sm btn-outline"
+                onClick={handleCopyJson}
+              >
+                <Copy />
+                {copied ? "Copied" : "Copy JSON"}
+              </button>
+            </div>
+          </div>
+          <div
+            className="card-body"
+            style={{ background: "var(--surface-2)", borderRadius: "0 0 var(--r-lg) var(--r-lg)" }}
+          >
+            <JsonViewer data={event.payload} />
           </div>
         </div>
       </div>

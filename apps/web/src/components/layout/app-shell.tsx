@@ -9,13 +9,11 @@ import { ScopeProvider } from "@/lib/scope";
 export function AppShell() {
   return (
     <ScopeProvider>
-      <div className="flex min-h-screen">
+      <div className="app-shell flex min-h-screen flex-col lg:flex-row">
         <Sidebar />
-        {/* md:ml-sidebar offsets the fixed 252px sidebar; on small screens the
-            sidebar is hidden so content is never overlapped or scrolled. */}
-        <div className="flex-1 md:ml-sidebar min-w-0 flex flex-col">
+        <div className="flex-1 min-w-0 flex flex-col lg:ml-sidebar">
           <Topbar />
-          <main className="flex-1 px-8 py-7 max-w-[1180px] w-full mx-auto">
+          <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 lg:py-7 max-w-[1180px] w-full mx-auto">
             <Outlet />
           </main>
         </div>

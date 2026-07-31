@@ -28,7 +28,7 @@ import {
   getEventById,
   type EventRow,
 } from '../../db/repositories/events.js';
-import { requireAuth, requireScope, getAuth } from '../auth.js';
+import { requireAuthOrWebSession, requireScope, getAuth } from '../auth.js';
 import {
   getTeamId,
   getProjectId,
@@ -244,6 +244,7 @@ async function getEventDetailHandler(c: Context, deps: EventsReadDeps): Promise<
     if (err instanceof AuditWriteFailedError) {
       throw new InternalError('Payload read audit failed; access denied', {
         cause: err,
+        details: { audit_failed: true },
       });
     }
     throw err;
@@ -273,12 +274,12 @@ export function buildEventsReadRoutes(deps: EventsReadDeps): Hono {
   // GET /v1/events/:id — detail with payload (requires read:payload)
   // MUST be registered BEFORE the list route because /v1/events/:id is
   // more specific and Hono evaluates routes in registration order.
-  routes.use('/v1/events/:id', requireAuth(deps.db));
+  routes.use('/v1/events/:id', requireAuthOrWebSession(deps.db));
   routes.use('/v1/events/:id', requireScope('read', 'read:payload'));
   routes.get('/v1/events/:id', async (c) => getEventDetailHandler(c, deps));
 
   // GET /v1/events — scoped summary list (no payload)
-  routes.use('/v1/events', requireAuth(deps.db));
+  routes.use('/v1/events', requireAuthOrWebSession(deps.db));
   routes.use('/v1/events', requireScope('read'));
   routes.get('/v1/events', async (c) => getEventsListHandler(c, deps));
 

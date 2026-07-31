@@ -9,6 +9,9 @@ import { ContextPreviewPage } from "@/pages/context-preview-page";
 import { EventDetailPage } from "@/pages/event-detail-page";
 import { SoonPage } from "@/pages/soon-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
+import { EventsPage } from "@/pages/events-page";
+import { JobsPage } from "@/pages/jobs-page";
+import { JobDetailPage } from "@/pages/job-detail-page";
 import { LoginPage } from "@/pages/login";
 import { InvitePage } from "@/pages/invite";
 import { AppLanding } from "@/pages/app-landing";
@@ -40,25 +43,10 @@ export default function App() {
             <Route path="/knowledge" element={<KnowledgePage />} />
             <Route path="/concept/:uuid" element={<ConceptDetailPage />} />
             <Route path="/context-preview" element={<ContextPreviewPage />} />
-            <Route
-              path="/events"
-              element={
-                <PlaceholderPage
-                  title="Events"
-                  description="Raw development activity ingested from your sources."
-                />
-              }
-            />
+            <Route path="/events" element={<EventsPage />} />
             <Route path="/events/:id" element={<EventDetailPage />} />
-            <Route
-              path="/jobs"
-              element={
-                <PlaceholderPage
-                  title="Jobs"
-                  description="Compile jobs that turn events into knowledge pages."
-                />
-              }
-            />
+            <Route path="/jobs" element={<JobsPage />} />
+            <Route path="/jobs/:id" element={<JobDetailPage />} />
             <Route
               path="/members"
               element={

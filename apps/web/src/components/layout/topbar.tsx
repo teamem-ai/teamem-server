@@ -52,10 +52,10 @@ export function Topbar() {
   };
 
   return (
-    <header className="h-topbar border-b border-border bg-bg flex items-center gap-[10px] px-6 sticky top-0 z-30">
+    <header className="h-topbar border-b border-border bg-bg flex items-center gap-[6px] sm:gap-[10px] px-3 sm:px-6 sticky top-0 z-30 overflow-hidden">
       {/* Team indicator — the session's active team. Multi-team switching is
           not available yet, so this is a label, not a fake switcher. */}
-      <span className="inline-flex items-center gap-[7px] font-semibold text-[13.5px] py-[6px] px-[10px] text-text max-w-[220px] truncate">
+      <span className="inline-flex items-center gap-[7px] font-semibold text-[13px] sm:text-[13.5px] py-[6px] px-[8px] sm:px-[10px] text-text max-w-[100px] sm:max-w-[220px] truncate">
         <span
           className="avatar w-[18px] h-[18px] text-[9px] inline-flex items-center justify-center rounded-full text-white flex-none"
           style={{ background: "var(--accent)" }}
@@ -65,19 +65,19 @@ export function Topbar() {
         <span className="truncate">{teamName}</span>
       </span>
 
-      <span className="text-text-3 font-normal">/</span>
+      <span className="text-text-3 font-normal hidden sm:inline">/</span>
 
       {/* Project switcher — real projects from the session's team. */}
       <div className="relative" ref={projectMenuRef}>
         <button
-          className="switcher inline-flex items-center gap-[7px] font-semibold text-[13.5px] py-[6px] px-[10px] rounded-sm cursor-pointer text-text border border-transparent hover:bg-surface-2 max-w-[220px] transition-colors"
+          className="switcher inline-flex items-center gap-[7px] font-semibold text-[13px] sm:text-[13.5px] py-[6px] px-[8px] sm:px-[10px] rounded-sm cursor-pointer text-text border border-transparent hover:bg-surface-2 max-w-[100px] sm:max-w-[220px] transition-colors"
           onClick={() => setProjectMenuOpen(!projectMenuOpen)}
           disabled={scope.projects.length === 0}
         >
-          <Box className="w-[15px] h-[15px] text-text-3" />
+          <Box className="w-[15px] h-[15px] text-text-3 flex-none" />
           <span className="truncate">{activeProject?.name ?? "No project"}</span>
           {scope.projects.length > 1 && (
-            <ChevronDown className="w-[14px] h-[14px] text-text-3" />
+            <ChevronDown className="w-[14px] h-[14px] text-text-3 flex-none" />
           )}
         </button>
 
@@ -107,10 +107,10 @@ export function Topbar() {
       <span className="flex-1" />
 
       {/* Search button (⌘K placeholder) */}
-      <button className="search-btn hidden sm:inline-flex items-center gap-2 border border-border bg-surface text-text-3 rounded-sm py-[6px] px-[10px] text-[13px] cursor-pointer min-w-[200px] hover:border-border-strong transition-colors">
-        <Search className="w-4 h-4" />
-        Search knowledge…
-        <kbd className="ml-auto font-medium text-[11px] font-mono bg-surface-2 border border-border rounded px-[5px] py-px text-text-2">
+      <button className="search-btn inline-flex items-center gap-2 border border-border bg-surface text-text-3 rounded-sm py-[6px] px-[10px] text-[13px] cursor-pointer min-w-[40px] sm:min-w-[200px] hover:border-border-strong transition-colors">
+        <Search className="w-4 h-4 flex-none" />
+        <span className="hidden sm:inline">Search knowledge…</span>
+        <kbd className="ml-auto font-medium text-[11px] font-mono bg-surface-2 border border-border rounded px-[5px] py-px text-text-2 hidden sm:inline">
           ⌘K
         </kbd>
       </button>

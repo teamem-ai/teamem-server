@@ -27,39 +27,104 @@ import type {
   ContextResponse,
   ProjectEntry,
   EventDetail,
+  EventSummary,
+  Job,
+  JobEventResult,
+  JobStatus,
+  JobInitiator,
 } from "@teamem/schema";
 
+export type {
+  Actor,
+  ActorProvenance,
+  OccurredAtProvenance,
+} from "@teamem/schema";
+export type { Source, SourceKind, SourceChannel } from "@teamem/schema";
+
 const BASE = "/v1";
+
+interface ErrorEnvelope {
+  requestId?: string;
+  error?: {
+    code?: string;
+    message?: string;
+    details?: Record<string, unknown>;
+  };
+}
 
 /** Thrown on non-2xx API responses with a parsed error envelope. */
 export class ApiError extends Error {
   status: number;
   code: string;
-  details?: unknown;
+  details?: Record<string, unknown>;
+  requestId?: string;
 
-  constructor(status: number, code: string, message: string, details?: unknown) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    details?: Record<string, unknown>,
+    requestId?: string,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.details = details;
+    this.requestId = requestId;
+  }
+}
+
+/**
+ * Audit write failed → the server refuses to return the payload.
+ * This is the fail-closed lock state on event detail pages.
+ */
+export class AuditWriteFailedError extends ApiError {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    details?: Record<string, unknown>,
+    requestId?: string,
+  ) {
+    super(status, code, message, details, requestId);
+    this.name = "AuditWriteFailedError";
   }
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: "same-origin", ...init });
   if (!res.ok) {
-    let body: { error?: { code?: string; message?: string; details?: unknown } } = {};
+    let body: ErrorEnvelope = {};
     try {
-      body = await res.json();
+      body = (await res.json()) as ErrorEnvelope;
     } catch {
       // ignore parse failures
     }
+
+    // Detect fail-closed audit state: 500 + details.audit_failed === true.
+    // The backend normalizes the message to "Internal error" in production,
+    // so we must rely on the structured details flag.
+    const isAuditFailed =
+      res.status === 500 &&
+      (body.error?.details?.audit_failed === true ||
+        body.error?.details?.audit_failed === "true");
+    if (isAuditFailed) {
+      throw new AuditWriteFailedError(
+        res.status,
+        body.error?.code ?? "internal",
+        body.error?.message ?? "Internal error",
+        body.error?.details,
+        body.requestId,
+      );
+    }
+
     throw new ApiError(
       res.status,
       body.error?.code ?? "unknown",
       body.error?.message ?? `HTTP ${res.status}`,
       body.error?.details,
+      body.requestId,
     );
   }
   return res.json() as Promise<T>;
@@ -176,15 +241,80 @@ export async function fetchContext(projectId: string): Promise<ContextResponse> 
   return get("/context", { projectId });
 }
 
-// ── Events (itemResponse envelope) ─────────────────────────────────────────
+// ── Events (listResponse / itemResponse envelopes) ─────────────────────────
 
-export async function fetchEvent(eventId: string, projectId: string): Promise<EventDetail> {
-  const resp = await get<{ requestId: string; data: EventDetail }>(
-    `/events/${eventId}`,
+export interface EventListParams {
+  projectId: string;
+  sourceKind?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+interface ListEnvelope<T> {
+  requestId: string;
+  data: T[];
+  nextCursor: string | null;
+}
+
+interface ItemEnvelope<T> {
+  requestId: string;
+  data: T;
+}
+
+export async function fetchEvents(
+  params: EventListParams,
+): Promise<ListEnvelope<EventSummary>> {
+  const q: Record<string, string | undefined> = {
+    projectId: params.projectId,
+    sourceKind: params.sourceKind,
+    cursor: params.cursor,
+    limit: String(params.limit ?? 20),
+  };
+  return get<ListEnvelope<EventSummary>>("/events", q);
+}
+
+export async function fetchEventDetail(
+  eventId: string,
+  projectId: string,
+): Promise<ItemEnvelope<EventDetail>> {
+  return get<ItemEnvelope<EventDetail>>(
+    `/events/${encodeURIComponent(eventId)}`,
     { projectId },
   );
-  return resp.data;
 }
+
+// ── Jobs (listResponse / itemResponse envelopes) ─────────────────────────────
+
+export interface JobListParams {
+  projectId: string;
+  status?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export async function fetchJobs(
+  params: JobListParams,
+): Promise<ListEnvelope<Job>> {
+  const q: Record<string, string | undefined> = {
+    projectId: params.projectId,
+    status: params.status,
+    cursor: params.cursor,
+    limit: String(params.limit ?? 20),
+  };
+  return get<ListEnvelope<Job>>("/jobs", q);
+}
+
+export async function fetchJobDetail(
+  jobId: string,
+  projectId: string,
+): Promise<ItemEnvelope<Job>> {
+  return get<ItemEnvelope<Job>>(
+    `/jobs/${encodeURIComponent(jobId)}`,
+    { projectId },
+  );
+}
+
+export type { Job, JobEventResult, JobStatus, JobInitiator };
 
 // ── Session (used by login/invite flows, distinct from fetchMe: returns
 //    null on 401 instead of throwing, since "not logged in" is an expected
@@ -208,12 +338,11 @@ export async function getSession(): Promise<SessionUser | null> {
   const res = await fetch("/auth/me");
   if (res.status === 401) return null;
   if (!res.ok) throw new Error(`/auth/me returned ${res.status}`);
-  return res.json() as Promise<SessionUser>;
+  return (await res.json()) as SessionUser;
 }
 
-// ── GitHub status ────────────────────────────────────────────────────────
+// ── GitHub OAuth status ──────────────────────────────────────────────────
 
-/** Returned by GET /auth/github/status */
 export interface GitHubStatus {
   configured: boolean;
 }

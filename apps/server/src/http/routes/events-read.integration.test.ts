@@ -31,6 +31,7 @@ import { runBootstrap } from '../../commands/bootstrap.js';
 import { insertEvent, type EventInsertRequest } from '../../db/repositories/events.js';
 import { payloadHash } from '../../security/payload-hash.js';
 import { PAYLOAD_SCHEMA_VERSION, EVENT_ENVELOPE_VERSION } from '@teamem/schema';
+import { createTestSession, deleteTestSession } from '../../test/session.js';
 
 const url = process.env['TEST_DATABASE_URL'];
 
@@ -657,6 +658,82 @@ describe.skipIf(!url)('GET /v1/events and GET /v1/events/:id (live Postgres)', (
         expect(json.error.code).toBe('forbidden');
       } finally {
         await db.execute(`DELETE FROM projects WHERE id = '${project2}'`);
+      }
+    });
+  });
+
+  // ── Web session authentication ────────────────────────────────────────────
+
+  describe('web session auth', () => {
+    let session: Awaited<ReturnType<typeof createTestSession>>;
+
+    beforeAll(async () => {
+      session = await createTestSession(db, { teamId, role: 'owner' });
+    });
+
+    afterAll(async () => {
+      if (session) {
+        await deleteTestSession(db, session.userId);
+      }
+    });
+
+    const sessionHeader = () => ({
+      Cookie: session.cookieHeader,
+    });
+
+    it('GET /v1/events accepts a valid web session cookie', async () => {
+      await seedEvents(1);
+      const res = await app.request(
+        `/v1/events?projectId=${projectId}&limit=10`,
+        { headers: sessionHeader() },
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data).toHaveLength(1);
+    });
+
+    it('GET /v1/events/:id accepts a web session and writes a payload_read audit', async () => {
+      await seedEvents(1);
+      const { rows: eventRows } = await db.execute(
+        `SELECT id FROM events WHERE project_id = '${projectId}' ORDER BY created_at DESC LIMIT 1`,
+      );
+      const eventId = (eventRows[0] as Record<string, unknown>)['id'] as string;
+
+      const res = await app.request(
+        `/v1/events/${eventId}?projectId=${projectId}`,
+        { headers: sessionHeader() },
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data.payload).toBeDefined();
+
+      const { rows: auditRows } = await db.execute(
+        `SELECT action, resource_type, outcome, credential_id, principal_id
+         FROM audit_log
+         WHERE resource_id = '${eventId}'
+         ORDER BY created_at DESC LIMIT 1`,
+      );
+      const audit = auditRows[0] as Record<string, unknown>;
+      expect(audit['action']).toBe('event.payload_read');
+      expect(audit['resource_type']).toBe('event');
+      expect(audit['outcome']).toBe('success');
+      expect(audit['credential_id']).toBe(session.sessionId);
+      expect(audit['principal_id']).toBe(session.userId);
+    });
+
+    it('web session without team membership gets 404 (anti-enumeration)', async () => {
+      const noTeamSession = await createTestSession(db, {
+        teamId: 'team_unrelated',
+        skipMembership: true,
+      });
+      try {
+        const res = await app.request(
+          `/v1/events?projectId=${projectId}&limit=10`,
+          { headers: { Cookie: noTeamSession.cookieHeader } },
+        );
+        expect(res.status).toBe(404);
+      } finally {
+        await deleteTestSession(db, noTeamSession.userId);
       }
     });
   });
