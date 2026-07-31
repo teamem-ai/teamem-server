@@ -683,3 +683,24 @@ export const auditLog = pgTable(
     index('audit_project_cursor_idx').on(t.projectId, t.createdAt, t.id),
   ],
 );
+
+// ── LLM Configuration (DUA-237 M2-UI-07) ─────────────────────────────────
+// Per-team LLM provider settings. API key is stored as SHA-256 hash —
+// the plaintext is NEVER persisted and NEVER returned by the API.
+export const llmConfig = pgTable(
+  'llm_config',
+  {
+    teamId: text('team_id')
+      .notNull()
+      .primaryKey()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(), // 'anthropic' | 'openai' | 'openrouter' | 'custom'
+    apiKeyHash: text('api_key_hash'), // SHA-256 hex — null when not configured
+    embeddingAvailable: boolean('embedding_available').notNull().default(false),
+    lastTestOk: boolean('last_test_ok'),
+    lastTestLatencyMs: integer('last_test_latency_ms'),
+    lastTestAt: ts('last_test_at'),
+    createdAt: createdAt(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+);
