@@ -16,7 +16,7 @@
  */
 import { eq, and, isNull } from 'drizzle-orm';
 import { z } from 'zod';
-import { apiScope, type ApiScope } from '@teamem/schema';
+import { apiScope, type ApiScope, type TeamRole } from '@teamem/schema';
 import * as schema from '../../db/schema.js';
 import type { AppDb } from '../../db/client.js';
 import type { ScopeContext } from '../../auth/scope.js';
@@ -65,6 +65,12 @@ export interface AuthContext {
   readonly team: TeamSnapshot;
   /** When the key was created. */
   readonly createdAt: Date;
+  /**
+   * The team role from a web session membership.
+   * `undefined` for API key authentication — only set when the request
+   * was authenticated via a web session cookie.
+   */
+  readonly teamRole?: TeamRole;
 }
 
 // ── Scope validation (extracted for unit-testability) ────────────────────────

@@ -37,7 +37,7 @@ import {
 } from '@teamem/schema';
 import type { AppDb } from '../../db/client.js';
 import * as schema from '../../db/schema.js';
-import { requireAuth, requireScope, getAuth } from '../auth.js';
+import { requireAuthOrWebSession, requireScope, getAuth } from '../auth.js';
 import {
   isProjectScope,
   getTeamId,
@@ -45,6 +45,7 @@ import {
 } from '../../auth/scope.js';
 import {
   InvalidRequestError,
+  ForbiddenError,
   REQUEST_ID_KEY,
 } from '../errors.js';
 
@@ -248,6 +249,16 @@ async function getContextHandler(
   const teamId = getTeamId(auth.scope);
   const requestId = c.get(REQUEST_ID_KEY) as string;
 
+  // ── Viewer gate: web session viewer role cannot access context ────────
+  // Per AGENTS.md §8, context is a member+ capability. This check applies
+  // only to web sessions (API key auth has teamRole = undefined and passes
+  // through). We do NOT use read:payload scope as a viewer gate because
+  // real API keys with only 'read' scope must still be able to call
+  // /v1/search and /v1/context.
+  if (auth.teamRole === 'viewer') {
+    throw new ForbiddenError();
+  }
+
   // ── Parse & validate query params ─────────────────────────────────────
   const rawProjectId = c.req.query('projectId');
   if (!rawProjectId) {
@@ -355,7 +366,7 @@ async function getContextHandler(
 export function buildContextRoutes(deps: ContextRoutesDeps): Hono {
   const routes = new Hono();
 
-  routes.use('/v1/context', requireAuth(deps.db));
+  routes.use('/v1/context', requireAuthOrWebSession(deps.db));
   routes.use('/v1/context', requireScope('read'));
   routes.get('/v1/context', async (c) => {
     return getContextHandler(c, deps);

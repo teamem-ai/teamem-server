@@ -19,7 +19,7 @@ import { Hono, type Context } from 'hono';
 import { searchRequest, searchResponse } from '@teamem/schema';
 import type { AppDb } from '../../db/client.js';
 import type { EmbeddingClient } from '../../llm/embedding/port.js';
-import { requireAuth, requireScope, getAuth } from '../auth.js';
+import { requireAuthOrWebSession, requireScope, getAuth } from '../auth.js';
 import {
   search,
   SearchUseCaseError,
@@ -28,6 +28,7 @@ import {
 import {
   InvalidRequestError,
   CursorInvalidError,
+  ForbiddenError,
   InternalError,
   REQUEST_ID_KEY,
 } from '../errors.js';
@@ -47,6 +48,16 @@ export async function postSearchHandler(c: Context, deps: SearchRoutesDeps): Pro
   const requestId = c.get(REQUEST_ID_KEY) as string;
 
   const auth = getAuth(c);
+
+  // ── Viewer gate: web session viewer role cannot access search ─────────
+  // Per AGENTS.md §8, search is a member+ capability. This check applies
+  // only to web sessions (API key auth has teamRole = undefined and passes
+  // through). We do NOT use read:payload scope as a viewer gate because
+  // real API keys with only 'read' scope must still be able to call
+  // /v1/search.
+  if (auth.teamRole === 'viewer') {
+    throw new ForbiddenError();
+  }
 
   // ── Parse & validate request body against the frozen contract ─────────
   const rawBody = await c.req.json().catch(() => ({}));
@@ -132,7 +143,7 @@ export async function postSearchHandler(c: Context, deps: SearchRoutesDeps): Pro
 export function buildSearchRoutes(deps: SearchRoutesDeps): Hono {
   const routes = new Hono();
 
-  routes.use('/v1/search', requireAuth(deps.db));
+  routes.use('/v1/search', requireAuthOrWebSession(deps.db));
   routes.use('/v1/search', requireScope('read'));
   routes.post('/v1/search', async (c) => postSearchHandler(c, deps));
 
