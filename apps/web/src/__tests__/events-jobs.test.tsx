@@ -79,9 +79,14 @@ function renderEventDetail(eventId: string, projectId = "prj_demo000000000000000
 }
 
 /** Render JobDetailPage with proper route param. */
-function renderJobDetail(jobId: string) {
+function renderJobDetail(
+  jobId: string,
+  projectId = TEST_PROJECT_ID,
+) {
   return render(
-    <MemoryRouter initialEntries={[`/jobs/${jobId}`]}>
+    <MemoryRouter
+      initialEntries={[`/jobs/${jobId}?projectId=${projectId}`]}
+    >
       <Routes>
         <Route path="/jobs/:id" element={<JobDetailPage />} />
       </Routes>

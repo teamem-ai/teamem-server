@@ -12,7 +12,6 @@ import {
   isoDateTime,
   listLimit,
   listResponse,
-  principalId,
   projectId,
   requestId,
   teamId,
@@ -45,11 +44,18 @@ export const KNOWN_AUDIT_ACTIONS = [
 export const auditAction = z.string().min(1);
 export type KnownAuditAction = (typeof KNOWN_AUDIT_ACTIONS)[number];
 
+// Audit principalId can be a principals-row ID (pri_*) or, for web-session
+// actions, the user ID (usr_*). The wider regex is local to audit so the
+// general principalId contract elsewhere stays narrow.
+const auditPrincipalId = z.string().regex(
+  /^(pri_[A-Za-z0-9]+|usr_[A-Fa-f0-9]+)$/,
+);
+
 export const auditItem = z.strictObject({
   id: auditId,
   createdAt: isoDateTime,
   requestId,
-  principalId: principalId.nullable(),
+  principalId: auditPrincipalId.nullable(),
   credentialId: credentialId.nullable(),
   action: auditAction,
   resourceType: z.enum(['concept', 'event', 'job', 'audit', 'project', 'key']),
@@ -65,7 +71,7 @@ export const auditListResponse = listResponse(auditItem);
 /** Query params for GET /v1/audit. Sort: created_at desc (N8). */
 export const auditListQuery = z.strictObject({
   projectId: projectId.optional(),
-  actor: principalId.optional(),
+  actor: auditPrincipalId.optional(),
   action: auditAction.optional(),
   cursor: z.string().optional(),
   limit: listLimit,

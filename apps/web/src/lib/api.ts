@@ -167,8 +167,9 @@ export async function fetchJobs(
 
 export async function fetchJobDetail(
   jobId: string,
+  projectId: string,
 ): Promise<ItemEnvelope<unknown>> {
   return request<ItemEnvelope<unknown>>(
-    `/v1/jobs/${encodeURIComponent(jobId)}`,
+    `/v1/jobs/${encodeURIComponent(jobId)}?projectId=${encodeURIComponent(projectId)}`,
   );
 }

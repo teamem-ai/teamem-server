@@ -21,7 +21,11 @@ export const teamId = z.string().regex(/^team_[A-Za-z0-9]+$/);
 export const projectId = z.string().regex(/^prj_[A-Za-z0-9]+$/);
 export const eventId = z.string().regex(/^evt_[A-Za-z0-9]+$/);
 export const principalId = z.string().regex(/^pri_[A-Za-z0-9]+$/);
-export const credentialId = z.string().regex(/^key_[A-Za-z0-9]+$/);
+export const credentialId = z.string().regex(
+  // API key IDs (key_*) and web session IDs (ses_*). The session form is
+  // needed for audit records created by web-session-authenticated reads.
+  /^(key_[A-Za-z0-9]+|ses_[A-Fa-f0-9]+)$/,
+);
 export const jobId = z.uuid();
 export const conceptUuid = z.uuid();
 export const auditId = z.uuid();

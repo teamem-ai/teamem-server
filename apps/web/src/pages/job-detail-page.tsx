@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import type { Job, JobEventResult, JobStatus } from "@teamem/schema";
 import { fetchJobDetail, ApiError } from "@/lib/api";
+import { useProjectId } from "@/lib/use-project-id";
 import { JobStatusPill } from "@/components/ui/job-status-pill";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -195,19 +196,20 @@ function EventResultRow({ result }: { result: JobEventResult }) {
 
 export function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { projectId } = useProjectId();
 
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !projectId) return;
 
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    fetchJobDetail(id)
+    fetchJobDetail(id, projectId)
       .then((result) => {
         if (cancelled) return;
         setJob(result.data as Job);
@@ -226,7 +228,7 @@ export function JobDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, projectId]);
 
   const handleCopyId = async (text: string) => {
     try {

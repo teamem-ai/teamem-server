@@ -18,6 +18,7 @@ import {
 } from '../../test/database.js';
 import { runBootstrap } from '../../commands/bootstrap.js';
 import * as schema from '../../db/schema.js';
+import { createTestSession, deleteTestSession } from '../../test/session.js';
 
 const url = process.env['TEST_DATABASE_URL'];
 
@@ -663,6 +664,68 @@ describe.skipIf(!url)('GET /v1/jobs (live Postgres)', () => {
       const skipped = json.data.events.find((e) => e.status === 'skipped');
       expect(skipped).toBeDefined();
       expect(['no_knowledge', 'already_compiled']).toContain(skipped!.reason);
+    });
+  });
+
+  // ── Web session authentication ────────────────────────────────────────────
+
+  describe('web session auth', () => {
+    let session: Awaited<ReturnType<typeof createTestSession>>;
+
+    beforeAll(async () => {
+      session = await createTestSession(db, { teamId, role: 'owner' });
+    });
+
+    afterAll(async () => {
+      if (session) {
+        await deleteTestSession(db, session.userId);
+      }
+    });
+
+    const sessionHeader = () => ({
+      Cookie: session.cookieHeader,
+    });
+
+    it('GET /v1/jobs accepts a valid web session cookie', async () => {
+      await seedJob();
+      const res = await app.request(
+        `/v1/jobs?projectId=${projectId}`,
+        { method: 'GET', headers: sessionHeader() },
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data).toHaveLength(1);
+    });
+
+    it('GET /v1/jobs/:id accepts a valid web session cookie', async () => {
+      const jobId = await seedJob({ kind: 'compilation', status: 'completed' });
+      const eventId = `evt_${randomUUID().replace(/-/g, '')}`;
+      await seedEvent(eventId);
+      await seedJobEvent(jobId, eventId, { status: 'compiled' });
+
+      const res = await app.request(
+        `/v1/jobs/${jobId}?projectId=${projectId}`,
+        { method: 'GET', headers: sessionHeader() },
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data.id).toBe(jobId);
+    });
+
+    it('web session without team membership gets 404 (anti-enumeration)', async () => {
+      const noTeamSession = await createTestSession(db, {
+        teamId: 'team_unrelated',
+        skipMembership: true,
+      });
+      try {
+        const res = await app.request(
+          `/v1/jobs?projectId=${projectId}`,
+          { method: 'GET', headers: { Cookie: noTeamSession.cookieHeader } },
+        );
+        expect(res.status).toBe(404);
+      } finally {
+        await deleteTestSession(db, noTeamSession.userId);
+      }
     });
   });
 
