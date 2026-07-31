@@ -47,6 +47,7 @@ import { buildKeysRoutes } from './http/routes/keys.js';
 import { buildAuditRoutes } from './http/routes/audit.js';
 import { buildMembersRoutes } from './http/routes/members.js';
 import { buildInvitesRoutes } from './http/routes/invites.js';
+import { inviteLookupHandler } from './http/routes/invite-lookup.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
 
@@ -86,6 +87,14 @@ export function buildApp(deps: AppDeps = {}) {
   app.get('/healthz', healthzHandler);
   app.get('/readyz', readyzHandler);
 
+  // GitHub OAuth status — always mounted so the login page can determine
+  // whether the "Sign in with GitHub" button should be enabled.
+  app.get('/auth/github/status', (c) => {
+    return c.json({
+      configured: !!(deps.githubOAuth),
+    });
+  });
+
   // Auth routes — wired when OAuth config and db are both available.
   if (deps.githubOAuth && deps.db) {
     app.route('/', buildAuthRoutes(deps.githubOAuth, deps.db));
@@ -109,6 +118,14 @@ export function buildApp(deps: AppDeps = {}) {
     // Purge route — project-level data deletion (DUA-228).
     // Owner-only; requires web session + team membership.
     app.route('/', buildPurgeRoutes({ db: deps.db }));
+  }
+
+  // Invite lookup — public endpoint (no auth required).
+  // Mounted when db is available so the invite acceptance page can show
+  // what the user is joining before they sign in.
+  if (deps.db) {
+    const db = deps.db;
+    app.get('/invites/:token', (c) => inviteLookupHandler(c, db));
   }
 
   // Governance routes (teams, projects, keys) — wired when db is available.

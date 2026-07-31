@@ -195,7 +195,7 @@ describe("MembersPage", () => {
       expect(screen.getByText("memberuser")).toBeInTheDocument();
     });
 
-    const roleChips = document.querySelectorAll(".filter-chip");
+    const roleChips = document.querySelectorAll(".role-dropdown-chip");
     expect(roleChips.length).toBeGreaterThan(0);
   });
 
@@ -242,7 +242,7 @@ describe("MembersPage", () => {
     });
 
     expect(screen.queryByText("Remove")).toBeNull();
-    expect(document.querySelectorAll(".filter-chip").length).toBe(0);
+    expect(document.querySelectorAll(".role-dropdown-chip").length).toBe(0);
   });
 
   it("shows error state when fetch fails", async () => {

@@ -66,6 +66,8 @@ export interface ContextRoutesDeps {
 /** Lightweight concept row for context assembly — only the fields we render. */
 interface ContextConceptRow {
   uuid: string;
+  type: string;
+  path: string;
   title: string;
   body: string;
   confidence: 'high' | 'medium' | 'low';
@@ -114,15 +116,16 @@ function approxTokenCount(text: string): number {
 /**
  * Build a single concept's markdown entry.
  *
- * Format:
+ * Format (DUA-234: includes type and current path for the UI preview):
  *   ## {title}
+ *   **{type}** · {path}
  *   {one-line summary}
  *   [View details](teamem://concept/{uuid})
  */
 function renderConceptEntry(row: ContextConceptRow): string {
   const summary = extractOneLineSummary(row.body);
   const link = conceptLink(row.uuid);
-  return `## ${row.title}\n${summary}\n\n[View details](${link})\n`;
+  return `## ${row.title}\n**${row.type}** · ${row.path}\n${summary}\n\n[View details](${link})\n`;
 }
 
 /**
@@ -185,6 +188,8 @@ async function fetchContextConcepts(
   const rows = await db
     .select({
       uuid: schema.concepts.uuid,
+      type: schema.concepts.type,
+      path: schema.conceptPaths.path,
       title: schema.concepts.title,
       body: schema.concepts.body,
       confidence: schema.concepts.confidence,
@@ -218,6 +223,8 @@ async function fetchContextConcepts(
 
   return rows.map((r) => ({
     uuid: r.uuid,
+    type: r.type,
+    path: r.path,
     title: r.title,
     body: r.body,
     confidence: r.confidence as 'high' | 'medium' | 'low',

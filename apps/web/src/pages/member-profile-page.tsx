@@ -13,9 +13,9 @@ import type { ConceptType } from "@/components/ui";
 import type { ConfidenceLevel } from "@/components/ui";
 import {
   fetchMembers,
-  fetchCurrentUser,
+  fetchMe,
   fetchMemberConcepts,
-  ApiRequestError,
+  ApiError,
   type MemberEntry,
   type ConceptSummary,
 } from "@/lib/api";
@@ -163,7 +163,7 @@ export function MemberProfilePage() {
     try {
       const [membersData, userData] = await Promise.all([
         fetchMembers(),
-        fetchCurrentUser(),
+        fetchMe(),
       ]);
       const found = membersData.find((m) => m.userId === userId);
       if (!found) {
@@ -201,13 +201,13 @@ export function MemberProfilePage() {
         }
       }
     } catch (err) {
-      if (err instanceof ApiRequestError) {
+      if (err instanceof ApiError) {
         if (err.status === 401) {
           setError("You need to sign in to view this page.");
         } else if (err.status === 404) {
           setError("Member not found");
         } else {
-          setError(err.apiError?.message ?? err.message);
+          setError(err.message);
         }
       } else {
         setError("Failed to load member profile");

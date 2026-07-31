@@ -50,6 +50,25 @@ export function conceptLink(uuid: string): string {
   return `teamem://concept/${uuid}`;
 }
 
+// ── Contributors (Q5: principal references — list/detail must render a human
+//    or service identity, not just an opaque id) ─────────────────────────────
+export const principalRef = z.strictObject({
+  principalId,
+  kind: z.enum(['human', 'service']),
+  // The real provider identifier. For the built-in GitHub identity provider this
+  // is 'github'; for external/service principals it is the providerKind value
+  // (e.g. 'slack', 'github-action', 'teamem-worker') defined by the connector.
+  provider: z.string().min(1),
+  // Human: displayLogin (e.g. GitHub login) or a friendly fallback. Service: the
+  // providerKind label (e.g. 'github-action'). Missing only when the principal
+  // record is orphaned; the UI must render the principalId as a last resort.
+  displayName: z.string().min(1).optional(),
+  avatarUrl: z.string().url().optional(),
+  // For human principals bound to a GitHub user account.
+  githubLogin: z.string().optional(),
+});
+export type PrincipalRef = z.infer<typeof principalRef>;
+
 // ── Evidence (Q2: repo_file requires an immutable reference — a bare path ──
 //    drifts with branches and is insufficient as historical evidence) ────────
 // Explicit members — the union is contract text, spelled out per kind.
@@ -83,7 +102,13 @@ export const evidence = z.discriminatedUnion('kind', [
 export type Evidence = z.infer<typeof evidence>;
 
 // ── Concept DTOs ────────────────────────────────────────────────────────────
-/** List item — summary shape served by GET /v1/concepts (N7: lists are summaries). */
+/** List item — summary shape served by GET /v1/concepts (N7: lists are summaries).
+ *
+ * DUA-234 (v0.3 additive): evidenceCount + contributors display refs were added
+ * so the list row can render evidence count and contributor avatars as required
+ * by the knowledge UI. Existing consumers that do not read the new fields are
+ * unaffected; defaults are provided for parse-time compatibility.
+ */
 export const conceptSummary = z.strictObject({
   uuid: conceptUuid,
   path: conceptPath,
@@ -93,14 +118,22 @@ export const conceptSummary = z.strictObject({
   title: z.string().min(1),
   tags: z.array(z.string()),
   lastConfirmed: isoDateTime, // updated only on corroboration or human confirm (Q10)
+  evidenceCount: z.number().int().min(0).default(0),
+  contributors: z.array(principalRef).default([]),
 });
 export type ConceptSummary = z.infer<typeof conceptSummary>;
 
-/** Full detail served by GET /v1/concepts/:uuid. */
+/** Full detail served by GET /v1/concepts/:uuid.
+ *
+ * DUA-234 (v0.3 additive): contributors were promoted from opaque principalId[]
+ * to principalRef[] so the detail page can render the human/service identity in
+ * three forms (bound GitHub account, unbound human, service). evidenceCount is
+ * inherited from the summary shape.
+ */
 export const concept = conceptSummary.extend({
   schemaVersion: z.literal(CONCEPT_SCHEMA_VERSION), // N8: OKF format version
   firstSeen: isoDateTime,
-  contributors: z.array(principalId), // stable principal ids (Q5) — client_claimed actors excluded (N2)
+  contributors: z.array(principalRef), // Q5 resolved identities
   evidence: z.array(evidence).min(1), // red line: every page carries evidence
   supersedes: conceptUuid.nullable(), // decision archaeology — loser retained
   aliases: z.array(conceptPath), // previous paths after renames (N5)

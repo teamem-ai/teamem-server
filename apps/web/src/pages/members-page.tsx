@@ -12,15 +12,15 @@ import {
 import { RoleBadge, EmptyState, Banner, Skeleton } from "@/components/ui";
 import type { Role } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { ApiError } from "@/lib/api";
 import {
   fetchMembers,
-  fetchCurrentUser,
+  fetchMe,
   changeMemberRole,
   removeMember,
   createInvite,
-  ApiRequestError,
   type MemberEntry,
-  type CurrentUser,
+  type SessionInfo,
 } from "@/lib/api";
 
 // ── Role radio card descriptions ────────────────────────────────────────────
@@ -98,8 +98,8 @@ function InviteModal({
       setInviteLink(invite.inviteLink);
       setTargetRole(invite.targetRole);
     } catch (err) {
-      if (err instanceof ApiRequestError) {
-        setError(err.apiError?.message ?? err.message);
+      if (err instanceof ApiError) {
+        setError(err.message);
       } else {
         setError("Failed to create invite link");
       }
@@ -317,7 +317,7 @@ function RoleDropdown({
   return (
     <div className="relative" ref={ref}>
       <button
-        className="filter-chip"
+        className="role-dropdown-chip"
         onClick={() => setOpen(!open)}
         type="button"
         disabled={loading}
@@ -398,8 +398,8 @@ function RemoveConfirmDialog({
     try {
       await onConfirm();
     } catch (err) {
-      if (err instanceof ApiRequestError) {
-        setError(err.apiError?.message ?? err.message);
+      if (err instanceof ApiError) {
+        setError(err.message);
       } else {
         setError("Failed to remove member");
       }
@@ -516,7 +516,7 @@ function MemberAvatar({
 
 export function MembersPage() {
   const [members, setMembers] = useState<MemberEntry[]>([]);
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<SessionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -528,16 +528,16 @@ export function MembersPage() {
     try {
       const [membersData, userData] = await Promise.all([
         fetchMembers(),
-        fetchCurrentUser(),
+        fetchMe(),
       ]);
       setMembers(membersData);
       setCurrentUser(userData);
     } catch (err) {
-      if (err instanceof ApiRequestError) {
+      if (err instanceof ApiError) {
         if (err.status === 401) {
           setError("You need to sign in to view this page.");
         } else {
-          setError(err.apiError?.message ?? err.message);
+          setError(err.message);
         }
       } else {
         setError("Failed to load members");

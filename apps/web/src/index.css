@@ -690,8 +690,8 @@
     color: var(--text-3);
   }
 
-  /* ---------- filter chip (role dropdown trigger) ---------- */
-  .filter-chip {
+  /* ---------- role dropdown chip (trigger for role change dropdown) ---------- */
+  .role-dropdown-chip {
     @apply inline-flex items-center gap-[6px] rounded-sm px-[9px] py-[4px] cursor-pointer;
     font-size: 13px;
     background: var(--surface-2);
@@ -699,11 +699,11 @@
     color: var(--text);
     transition: border-color 0.15s, background 0.15s;
   }
-  .filter-chip:hover {
+  .role-dropdown-chip:hover {
     border-color: var(--border-strong);
     background: var(--surface-3);
   }
-  .filter-chip:disabled {
+  .role-dropdown-chip:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
@@ -772,4 +772,349 @@
       animation: none;
     }
   }
+  /* ---------- page headings ---------- */
+  .page-head {
+    @apply flex items-start gap-4 mb-5 flex-wrap;
+  }
+  .page-head .ph-text {
+    @apply min-w-0;
+  }
+  .page-head h1 {
+    @apply text-[22px] font-bold tracking-[-0.02em] m-0;
+  }
+  .page-head .sub {
+    @apply text-[13.5px] leading-relaxed max-w-[640px] mt-1;
+    color: var(--text-2);
+  }
+  .page-head .ph-actions {
+    @apply ml-auto flex gap-2 items-center flex-wrap;
+  }
+
+  /* ---------- filter row & chips ---------- */
+  .filter-row {
+    @apply flex gap-2 items-center flex-wrap my-4;
+  }
+  .filter-chip {
+    @apply inline-flex items-center gap-[6px] font-medium text-[12.5px] border rounded-full px-[11px] py-[6px] cursor-pointer;
+    background: var(--surface);
+    border-color: var(--border-strong);
+    color: var(--text-2);
+    transition: all 0.15s;
+  }
+  .filter-chip:hover {
+    border-color: var(--text-3);
+  }
+  .filter-chip.on {
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+    border-color: var(--btn-bg);
+  }
+  .filter-chip svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  /* ---------- tables ---------- */
+  .table {
+    @apply w-full border-collapse text-[13.5px];
+  }
+  .table th {
+    @apply text-left font-semibold text-[11.5px] tracking-[0.04em] uppercase whitespace-nowrap px-[14px] py-[10px];
+    color: var(--text-3);
+    border-bottom: 1px solid var(--border);
+  }
+  .table td {
+    @apply px-[14px] py-[12px] align-middle;
+    border-bottom: 1px solid var(--border);
+  }
+  .table tr:last-child td {
+    border-bottom: 0;
+  }
+  .table tbody tr {
+    transition: background 0.12s;
+  }
+  .table tbody tr.clickable {
+    cursor: pointer;
+  }
+  .table tbody tr.clickable:hover {
+    background: var(--surface-2);
+  }
+  .table .num {
+    @apply text-right;
+    font-variant-numeric: tabular-nums;
+  }
+  .table-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    overflow-x: auto;
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* ---------- key-value grid ---------- */
+  .kv {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 9px 16px;
+    font-size: 13.5px;
+    align-items: center;
+  }
+  .kv dt {
+    color: var(--text-3);
+    font-size: 12.5px;
+  }
+  .kv dd {
+    margin: 0;
+    min-width: 0;
+  }
+
+  /* ---------- stack layout ---------- */
+  .stack {
+    @apply flex flex-col gap-4;
+  }
+
+  /* ---------- pager ---------- */
+  .pager {
+    @apply flex justify-center py-4;
+  }
+
+  /* ---------- cards ---------- */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-sm);
+  }
+  .card-pad {
+    padding: 20px;
+  }
+  .card-head {
+    @apply flex items-center gap-[10px] px-5 py-4;
+    border-bottom: 1px solid var(--border);
+  }
+  .card-head h3 {
+    font-size: 14.5px;
+  }
+  .card-head .sub {
+    font-size: 12.5px;
+    color: var(--text-3);
+    font-weight: 400;
+    margin-top: 2px;
+  }
+  .card-head .ch-actions {
+    @apply ml-auto flex gap-2 items-center;
+  }
+  .card-body {
+    padding: 20px;
+  }
+
+  /* ---------- content widths ---------- */
+  .content {
+    @apply px-8 py-7 max-w-[1180px] w-full mx-auto;
+  }
+  .content.narrow {
+    max-width: 860px;
+  }
+
+  /* ---------- avatars ---------- */
+  .avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 99px;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: 600 10.5px/1 var(--font-sans);
+    color: #fff;
+    background: var(--slate);
+    overflow: hidden;
+    border: 2px solid var(--surface);
+  }
+  .avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .avatar.unknown {
+    background: var(--surface-3);
+    color: var(--text-3);
+    border-style: dashed;
+  }
+
+  /* ---------- text utilities ---------- */
+  .muted {
+    color: var(--text-3);
+  }
+  .muted-2 {
+    color: var(--text-2);
+  }
+  .small {
+    font-size: 12.5px;
+  }
+  .mono {
+    font-family: var(--font-mono);
+  }
+
+  /* ---------- buttons ---------- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-[7px] font-medium text-[13.5px] px-[14px] py-[9px] rounded-sm border border-transparent cursor-pointer whitespace-nowrap;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+    color: var(--text);
+    background: transparent;
+    text-decoration: none;
+  }
+  .btn:hover {
+    text-decoration: none;
+  }
+  .btn:focus-visible,
+  .input:focus-visible,
+  .search-input:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .btn-primary {
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+    box-shadow: var(--shadow-sm);
+  }
+  .btn-primary:hover {
+    background: var(--btn-bg-hover);
+  }
+  .btn-outline {
+    background: var(--surface);
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-sm);
+  }
+  .btn-outline:hover {
+    background: var(--surface-2);
+  }
+  .btn-ghost {
+    color: var(--text-2);
+  }
+  .btn-ghost:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .btn-sm {
+    padding: 6px 10px;
+    font-size: 12.5px;
+  }
+  .btn[disabled],
+  .btn.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* ---------- pulse dot animation ---------- */
+  .pulse-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 99px;
+    background: currentColor;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pulse-dot {
+      animation: none;
+    }
+  }
+
+  /* ---------- job detail result rows ---------- */
+  .jr-row {
+    @apply flex gap-[14px] py-[13px] items-start;
+    border-bottom: 1px solid var(--border);
+  }
+  .jr-row:last-child {
+    border-bottom: 0;
+  }
+  .jr-event {
+    @apply flex-1 min-w-0;
+  }
+  .jr-result {
+    @apply flex-none max-w-[380px] text-left;
+  }
+  .jr-tag {
+    @apply inline-flex items-center gap-[6px] font-semibold text-xs leading-none px-[9px] py-1 rounded-full;
+  }
+  .jr-tag svg {
+    width: 12px;
+    height: 12px;
+  }
+  .jr-tag.compiled {
+    color: var(--green);
+    background: var(--green-soft);
+  }
+  .jr-tag.skipped {
+    color: var(--text-2);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+  }
+  .jr-tag.failed {
+    color: var(--red);
+    background: var(--red-soft);
+  }
+  .jr-tag.pending {
+    color: var(--text-3);
+    background: transparent;
+    border: 1.5px dashed var(--border-strong);
+  }
+
+  /* ---------- JSON viewer ---------- */
+  .json-viewer {
+    font: 400 12.5px/1.75 var(--font-mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+  }
+  .json-key {
+    color: var(--sky);
+  }
+  .json-string {
+    color: var(--emerald);
+  }
+  .json-number {
+    color: var(--amber);
+  }
+  .json-bool {
+    color: var(--violet);
+  }
+  .json-null {
+    color: var(--text-3);
+  }
+
+  /* ---------- search input ---------- */
+  .search-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 240px;
+    max-width: 520px;
+  }
+  .search-input {
+    @apply w-full text-sm pl-9 pr-3 py-[9px] rounded border;
+    color: var(--text);
+    background: var(--surface);
+    border-color: var(--border-strong);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .search-input::placeholder {
+    color: var(--text-3);
+  }
+
 }

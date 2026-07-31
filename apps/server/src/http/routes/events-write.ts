@@ -351,13 +351,17 @@ import { Hono } from 'hono';
 export function buildEventsWriteRoutes(deps: EventsWriteDeps): Hono {
   const routes = new Hono();
 
-  // Middleware chain: body limit → auth → scope → handler
-  routes.use('/v1/events', enforceBodyLimit());
-  routes.use('/v1/events', requireAuth(deps.db));
-  routes.use('/v1/events', requireScope('events:write'));
-  routes.post('/v1/events', async (c) => {
-    return postEventsHandler(c, deps);
-  });
+  // Middleware chain applies only to POST /v1/events. Using `routes.use`
+  // for all methods would intercept GET /v1/events before it reaches the
+  // read routes mounted later in the app, so the auth/scope/body-limit
+  // middleware is wired inline to the POST handler.
+  routes.post(
+    '/v1/events',
+    enforceBodyLimit(),
+    requireAuth(deps.db),
+    requireScope('events:write'),
+    async (c) => postEventsHandler(c, deps),
+  );
 
   return routes;
 }
