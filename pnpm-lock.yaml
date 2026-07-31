@@ -69,6 +69,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@teamem/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -127,6 +130,9 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@26.1.1)(jiti@1.21.7)(jsdom@26.1.0)(msw@2.15.0(@types/node@26.1.1)(typescript@5.9.3))(tsx@4.23.1)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/schema:
     dependencies:

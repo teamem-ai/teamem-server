@@ -146,13 +146,15 @@ import { Hono } from 'hono';
 export function buildEventsBatchRoutes(deps: EventsBatchDeps): Hono {
   const routes = new Hono();
 
-  // Middleware chain: body limit → auth → scope → handler
-  routes.use('/v1/events/batch', enforceBodyLimit());
-  routes.use('/v1/events/batch', requireAuth(deps.db));
-  routes.use('/v1/events/batch', requireScope('events:write'));
-  routes.post('/v1/events/batch', async (c) => {
-    return postBatchHandler(c, deps);
-  });
+  // Middleware chain applies only to POST /v1/events/batch. Wired inline
+  // to the POST handler so it cannot intercept other methods.
+  routes.post(
+    '/v1/events/batch',
+    enforceBodyLimit(),
+    requireAuth(deps.db),
+    requireScope('events:write'),
+    async (c) => postBatchHandler(c, deps),
+  );
 
   return routes;
 }

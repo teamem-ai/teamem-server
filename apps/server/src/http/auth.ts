@@ -22,7 +22,9 @@
  *   routes.use('/v1/events', requireScope('events:write'));
  */
 import type { Context, Next, MiddlewareHandler } from 'hono';
-import type { ApiScope } from '@teamem/schema';
+import type { ApiScope, TeamRole } from '@teamem/schema';
+import * as schema from '../db/schema.js';
+import { eq, and } from 'drizzle-orm';
 import { hashToken, parseBearerToken } from '../auth/api-key.js';
 import {
   resolveTokenHash,
@@ -34,7 +36,11 @@ import {
   UnauthorizedError,
   ForbiddenError,
   InternalError,
+  NotFoundError,
 } from './errors.js';
+import { allProjectsScope } from '../auth/scope.js';
+import { parseSessionCookie, verifySession } from '../auth/oauth-github.js';
+import { checkRole } from '../auth/rbac.js';
 
 // ── Hono context keys ──────────────────────────────────────────────────────
 
@@ -100,6 +106,139 @@ export function requireAuth(db: AppDb): MiddlewareHandler {
     // Step 3: Attach AuthContext to the Hono context
     c.set(AUTH_KEY, auth);
 
+    await next();
+  };
+}
+
+// ── requireAuthOrWebSession middleware ─────────────────────────────────────────
+
+/**
+ * Middleware that accepts either a Bearer API key OR a valid web session cookie.
+ *
+ * Web sessions are converted into an AuthContext with an `allProjects` scope
+ * for the user's team, so the existing scoped handlers and `requireScope`
+ * checks work unchanged. This lets the SPA read event/job data using the same
+ * cookie it received during GitHub OAuth login.
+ *
+ * API keys remain the primary auth mechanism for ingestion, MCP, and CLI use.
+ * Web sessions are allowed only for read endpoints that the portal UI needs.
+ *
+ * Security invariants:
+ * - The project ID is taken from the query string; the team is looked up from
+ *   the project, and membership is verified against the session user. No
+ *   cross-team access: no membership or missing project → 404.
+ * - Session scopes are derived from the team role (viewer/member/admin/owner).
+ * - Unknown/revoked API keys and missing/invalid sessions all return the same
+ *   401 envelope.
+ */
+export function requireAuthOrWebSession(db: AppDb): MiddlewareHandler {
+  return async (c: Context, next: Next) => {
+    // ── Try API key first ───────────────────────────────────────────────────
+    const authHeader = c.req.header('authorization') ?? null;
+    const apiToken = parseBearerToken(authHeader);
+    if (apiToken) {
+      const tokenHash = hashToken(apiToken);
+      let auth: AuthContext;
+      try {
+        auth = await resolveTokenHash(db, tokenHash);
+      } catch (err) {
+        if (err instanceof AuthenticationError) {
+          throw new UnauthorizedError('invalid or revoked API key');
+        }
+        throw new InternalError('authentication lookup failed', { cause: err });
+      }
+      c.set(AUTH_KEY, auth);
+      await next();
+      return;
+    }
+
+    // ── Fall back to web session cookie ──────────────────────────────────────
+    const cookieHeader = c.req.header('cookie') ?? null;
+    const sessionToken = parseSessionCookie(cookieHeader);
+    if (!sessionToken) {
+      throw new UnauthorizedError('Missing or invalid authentication');
+    }
+
+    const session = await verifySession(db, sessionToken);
+    if (!session) {
+      throw new UnauthorizedError('Missing or invalid authentication');
+    }
+
+    const userResult = await db.$client.query(
+      'SELECT id, github_login, avatar_url FROM users WHERE id = $1 LIMIT 1',
+      [session.userId],
+    );
+    const userRow = userResult.rows[0] as Record<string, unknown> | undefined;
+    if (!userRow) {
+      throw new UnauthorizedError('Missing or invalid authentication');
+    }
+
+    const projectId2 = c.req.query('projectId') ?? c.req.param('projectId');
+    if (!projectId2) {
+      throw new UnauthorizedError('Missing or invalid authentication');
+    }
+
+    // Resolve project → team and verify membership in one query.
+    const projectRows = await db
+      .select({
+        teamId: schema.projects.teamId,
+        teamName: schema.teams.name,
+      })
+      .from(schema.projects)
+      .innerJoin(schema.teams, eq(schema.projects.teamId, schema.teams.id))
+      .where(eq(schema.projects.id, projectId2))
+      .limit(1);
+
+    if (projectRows.length === 0) {
+      // Same 404 as genuinely missing project — no team probe leak.
+      throw new NotFoundError();
+    }
+
+    const { teamId, teamName } = projectRows[0]!;
+
+    const membershipRows = await db
+      .select({ role: schema.memberships.role })
+      .from(schema.memberships)
+      .where(
+        and(
+          eq(schema.memberships.userId, session.userId),
+          eq(schema.memberships.teamId, teamId),
+        ),
+      )
+      .limit(1);
+
+    if (membershipRows.length === 0) {
+      // Indistinguishable from missing project.
+      throw new NotFoundError();
+    }
+
+    const teamRole = membershipRows[0]!.role as TeamRole;
+
+    // Role → data-plane scopes. Viewer can read lists; member+ can read
+    // payloads (event detail). Admin/owner inherit member capabilities.
+    const scopes: ApiScope[] = ['read'];
+    if (checkRole(teamRole, 'member')) {
+      scopes.push('read:payload');
+    }
+
+    const auth: AuthContext = {
+      credentialId: session.sessionId,
+      keyName: 'Web Session',
+      scopes,
+      scope: allProjectsScope(teamId),
+      principal: {
+        id: session.userId,
+        kind: 'user',
+        provider: 'github',
+        providerKind: 'github',
+        providerUserId: (userRow['github_login'] as string) ?? '',
+        displayLogin: (userRow['github_login'] as string) ?? null,
+      },
+      team: { id: teamId, name: teamName },
+      createdAt: new Date(),
+    };
+
+    c.set(AUTH_KEY, auth);
     await next();
   };
 }

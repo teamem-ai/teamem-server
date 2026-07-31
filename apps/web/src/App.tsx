@@ -4,19 +4,39 @@ import { AppShell } from "@/components/layout/app-shell";
 import { NotFound } from "@/components/ui/not-found";
 import { ComponentShowcase } from "@/pages/component-showcase";
 import { KnowledgePage } from "@/pages/knowledge-page";
+import { MembersPage } from "@/pages/members-page";
+import { MemberProfilePage } from "@/pages/member-profile-page";
+import { ConceptDetailPage } from "@/pages/concept-detail-page";
+import { ContextPreviewPage } from "@/pages/context-preview-page";
+import { EventDetailPage } from "@/pages/event-detail-page";
 import { SoonPage } from "@/pages/soon-page";
 import { AuditPage } from "@/pages/audit-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
+import { EventsPage } from "@/pages/events-page";
+import { JobsPage } from "@/pages/jobs-page";
+import { JobDetailPage } from "@/pages/job-detail-page";
+import { LoginPage } from "@/pages/login";
+import { InvitePage } from "@/pages/invite";
+import { AppLanding } from "@/pages/app-landing";
+import { OnboardingPage } from "@/components/onboarding/onboarding-page";
 
 export default function App() {
   return (
     <ThemeProvider>
       <BrowserRouter>
         <Routes>
+          {/* Public auth entry pages (no AppShell) */}
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/join" element={<InvitePage />} />
+          <Route path="/app" element={<AppLanding />} />
+
           {/* Component showcase (design system self-check) */}
           <Route path="/components" element={<AppShell />}>
             <Route index element={<ComponentShowcase />} />
           </Route>
+
+          {/* Onboarding wizard — focused flow, no app shell */}
+          <Route path="/onboarding" element={<OnboardingPage />} />
 
           {/* Redirect root to knowledge */}
           <Route path="/" element={<Navigate to="/knowledge" replace />} />
@@ -24,42 +44,14 @@ export default function App() {
           {/* Main app routes */}
           <Route element={<AppShell />}>
             <Route path="/knowledge" element={<KnowledgePage />} />
-            <Route
-              path="/context-preview"
-              element={
-                <PlaceholderPage
-                  title="Context preview"
-                  description="Preview what your agent sees at the start of each session."
-                />
-              }
-            />
-            <Route
-              path="/events"
-              element={
-                <PlaceholderPage
-                  title="Events"
-                  description="Raw development activity ingested from your sources."
-                />
-              }
-            />
-            <Route
-              path="/jobs"
-              element={
-                <PlaceholderPage
-                  title="Jobs"
-                  description="Compile jobs that turn events into knowledge pages."
-                />
-              }
-            />
-            <Route
-              path="/members"
-              element={
-                <PlaceholderPage
-                  title="Members"
-                  description="Team members and their roles."
-                />
-              }
-            />
+            <Route path="/concept/:uuid" element={<ConceptDetailPage />} />
+            <Route path="/context-preview" element={<ContextPreviewPage />} />
+            <Route path="/events" element={<EventsPage />} />
+            <Route path="/events/:id" element={<EventDetailPage />} />
+            <Route path="/jobs" element={<JobsPage />} />
+            <Route path="/jobs/:id" element={<JobDetailPage />} />
+            <Route path="/members" element={<MembersPage />} />
+            <Route path="/members/:userId" element={<MemberProfilePage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/soon" element={<SoonPage />} />
             <Route

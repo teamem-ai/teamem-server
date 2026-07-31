@@ -4,14 +4,11 @@
  */
 import { z } from 'zod';
 import {
-  confidence,
-  conceptPath,
   conceptStatus,
   conceptType,
+  conceptSummary,
 } from './concept.js';
 import {
-  conceptUuid,
-  isoDateTime,
   listLimit,
   projectId,
   requestId,
@@ -29,15 +26,7 @@ export const searchRequest = z.strictObject({
 export type SearchRequest = z.infer<typeof searchRequest>;
 
 // ── Search result item — concept summary + relevance + FTS degradation ─────
-export const searchResult = z.strictObject({
-  uuid: conceptUuid,
-  path: conceptPath,
-  type: conceptType,
-  status: conceptStatus,
-  confidence,
-  title: z.string().min(1),
-  tags: z.array(z.string()),
-  lastConfirmed: isoDateTime,
+export const searchResult = conceptSummary.extend({
   /** Relevance score [0, 1] — higher is more relevant. */
   relevance: z.number().min(0).max(1),
   /** True when this result was produced by FTS rather than semantic vector search. */

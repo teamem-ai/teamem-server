@@ -75,9 +75,17 @@ function validateAgainstConceptDto(input: ToConceptInput): void {
     lastConfirmed: ci.lastConfirmed.toISOString(),
     schemaVersion: ci.schemaVersion,
     firstSeen: ci.firstSeen.toISOString(),
+    // After persistence, the read layer resolves each contributor to a
+    // PrincipalRef. The F1 mapper emits candidate {principalId, provenance};
+    // this test verifies the resolved DTO shape is compatible.
     contributors: (ci.contributors ?? [])
       .filter((c) => ['webhook_verified', 'credential_bound'].includes(c.provenance))
-      .map((c) => c.principalId),
+      .map((c) => ({
+        principalId: c.principalId,
+        kind: 'human' as const,
+        provider: 'github',
+        displayName: 'test',
+      })),
     evidence: ci.evidence.map((ev) => ({
       ...ev,
       at: ev.at instanceof Date ? ev.at.toISOString() : ev.at,

@@ -56,7 +56,7 @@ const navGroups: NavGroup[] = [
 
 export function Sidebar() {
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-sidebar bg-surface border-r border-border flex flex-col z-40">
+    <aside className="static top-0 w-full bg-surface border-b border-border flex flex-col z-40 lg:fixed lg:left-0 lg:top-0 lg:bottom-0 lg:w-sidebar lg:border-r lg:border-b-0">
       {/* Brand */}
       <div className="flex items-center gap-[9px] px-4 py-[14px] font-bold text-[15px] tracking-[-0.02em]">
         <svg
@@ -91,24 +91,35 @@ export function Sidebar() {
             <div className="font-semibold text-[11px] leading-none tracking-[0.07em] text-text-3 uppercase px-[10px] pt-4 pb-[6px]">
               {group.label}
             </div>
-            {group.items.map((item, ii) => (
-              <NavLink
-                key={ii}
-                to={item.to}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center gap-[9px] py-[7px] px-[10px] my-px rounded-sm font-medium text-[13.5px] transition-colors relative",
-                    isActive
-                      ? "bg-accent-soft text-accent font-semibold"
-                      : "text-text-2 hover:bg-surface-2 hover:text-text"
-                  )
-                }
-              >
-                <item.icon className="w-[17px] h-[17px]" />
-                {item.label}
-                {item.soon && <SoonBadge className="ml-auto" />}
-              </NavLink>
-            ))}
+            {group.items.map((item, ii) =>
+              item.soon ? (
+                <div
+                  key={ii}
+                  className="flex items-center gap-[9px] py-[7px] px-[10px] my-px rounded-sm font-medium text-[13.5px] text-text-3 cursor-not-allowed"
+                  title="Coming soon"
+                >
+                  <item.icon className="w-[17px] h-[17px]" />
+                  {item.label}
+                  <SoonBadge className="ml-auto" />
+                </div>
+              ) : (
+                <NavLink
+                  key={ii}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-[9px] py-[7px] px-[10px] my-px rounded-sm font-medium text-[13.5px] transition-colors relative",
+                      isActive
+                        ? "bg-accent-soft text-accent font-semibold"
+                        : "text-text-2 hover:bg-surface-2 hover:text-text"
+                    )
+                  }
+                >
+                  <item.icon className="w-[17px] h-[17px]" />
+                  {item.label}
+                </NavLink>
+              )
+            )}
           </div>
         ))}
       </nav>

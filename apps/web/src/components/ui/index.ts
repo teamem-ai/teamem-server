@@ -22,3 +22,5 @@ export { DangerConfirmDialog } from "./danger-confirm-dialog";
 export type { DangerLevel } from "./danger-confirm-dialog";
 export { SoonPlaceholder } from "./soon-placeholder";
 export type { SoonPlaceholderProps } from "./soon-placeholder";
+export { MarkdownBody } from "./markdown-body";
+export { AvatarStack } from "./avatar-stack";

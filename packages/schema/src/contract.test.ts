@@ -16,6 +16,7 @@ import {
   evidence,
   ingestEventRequest,
   invite,
+  inviteLookupResponse,
   jobEventResult,
   membership,
   principalId,
@@ -538,5 +539,153 @@ describe('auth identity DTOs (v0.3 — DUA-222)', () => {
 
   it('CONTRACT_ADDITIVE_CHANGES includes DUA-222', () => {
     expect(CONTRACT_ADDITIVE_CHANGES.some((c) => c.change.includes('DUA-222'))).toBe(true);
+  });
+});
+
+describe('invite-lookup DTOs (v0.3 — DUA-232)', () => {
+  const validInviteLookup = {
+    status: 'valid',
+    invite: {
+      id: 'inv_abc123',
+      teamId: 'team_abc',
+      teamName: 'Acme Corp',
+      targetRole: 'member',
+      invitedByLogin: 'k.zhang',
+      invitedByRole: 'admin',
+      expiresAt: '2026-07-24T00:00:00.000Z',
+      usedAt: null,
+    },
+  } as const;
+
+  it('accepts a valid invite lookup response for each found status', () => {
+    const statuses = ['valid', 'expired', 'used'] as const;
+    for (const status of statuses) {
+      const result = inviteLookupResponse.safeParse({
+        ...validInviteLookup,
+        status,
+      });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it('accepts a not_found response without an invite object', () => {
+    const result = inviteLookupResponse.safeParse({
+      status: 'not_found',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts invite lookup with null teamName and inviter fields', () => {
+    expect(
+      inviteLookupResponse.safeParse({
+        status: 'valid',
+        invite: {
+          ...validInviteLookup.invite,
+          teamName: null,
+          invitedByLogin: null,
+          invitedByRole: null,
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('accepts invite lookup with usedAt set (used invite)', () => {
+    expect(
+      inviteLookupResponse.safeParse({
+        ...validInviteLookup,
+        status: 'used',
+        invite: {
+          ...validInviteLookup.invite,
+          usedAt: '2026-07-18T00:00:00.000Z',
+        },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects not_found branch with an invite object', () => {
+    // not_found is a discriminated branch; carrying an invite object is
+    // invalid because the invite is unknown.
+    expect(
+      inviteLookupResponse.safeParse({
+        status: 'not_found',
+        invite: validInviteLookup.invite,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects invite lookup with invalid status', () => {
+    expect(
+      inviteLookupResponse.safeParse({
+        ...validInviteLookup,
+        status: 'cancelled',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects invite lookup with invalid id prefix', () => {
+    expect(
+      inviteLookupResponse.safeParse({
+        ...validInviteLookup,
+        invite: {
+          ...validInviteLookup.invite,
+          id: 'invite_1',
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects invite lookup with invalid targetRole', () => {
+    expect(
+      inviteLookupResponse.safeParse({
+        ...validInviteLookup,
+        invite: {
+          ...validInviteLookup.invite,
+          targetRole: 'superadmin',
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects invite lookup with missing required invite fields', () => {
+    // invite must be a complete object — {} is not valid
+    expect(
+      inviteLookupResponse.safeParse({
+        status: 'valid',
+        invite: {},
+      }).success,
+    ).toBe(false);
+    // missing expiresAt
+    expect(
+      inviteLookupResponse.safeParse({
+        status: 'valid',
+        invite: {
+          id: 'inv_abc123',
+          teamId: 'team_abc',
+          teamName: 'Acme Corp',
+          targetRole: 'member',
+          invitedByLogin: 'k.zhang',
+          invitedByRole: 'admin',
+          usedAt: null,
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects invite lookup with non-string teamName', () => {
+    expect(
+      inviteLookupResponse.safeParse({
+        ...validInviteLookup,
+        invite: {
+          ...validInviteLookup.invite,
+          teamName: 42,
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('CONTRACT_ADDITIVE_CHANGES includes DUA-232', () => {
+    expect(
+      CONTRACT_ADDITIVE_CHANGES.some((c) => c.change.includes('DUA-232')),
+    ).toBe(true);
   });
 });
