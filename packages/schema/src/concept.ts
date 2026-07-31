@@ -66,6 +66,9 @@ export const principalRef = z.strictObject({
   avatarUrl: z.string().url().optional(),
   // For human principals bound to a GitHub user account.
   githubLogin: z.string().optional(),
+  // For human principals that have signed into the portal — their internal
+  // user ID so the UI can link to the member profile page (/members/:userId).
+  userId: z.string().regex(/^usr_[A-Za-z0-9]+$/).optional(),
 });
 export type PrincipalRef = z.infer<typeof principalRef>;
 

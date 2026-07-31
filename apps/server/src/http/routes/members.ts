@@ -126,6 +126,103 @@ export function buildMembersRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
     return c.json({ data: members });
   });
 
+  // ── GET /v1/members/:userId/concepts ─────────────────────────────────────
+  // Returns concepts contributed by this member's linked principal.
+  // Requires a projectId query parameter (concepts are project-scoped).
+
+  routes.get('/v1/members/:userId/concepts', async (c) => {
+    const session = getSession(c);
+
+    if (!session.teamId) {
+      throw new NotFoundError('Member not found');
+    }
+
+    const targetUserId = c.req.param('userId');
+    if (!targetUserId) {
+      throw new InvalidRequestError('Missing userId parameter');
+    }
+
+    // Parse projectId from query
+    const projectId = c.req.query('projectId');
+    if (!projectId) {
+      throw new InvalidRequestError('projectId query parameter is required');
+    }
+    if (!/^prj_[A-Za-z0-9]+$/.test(projectId)) {
+      throw new InvalidRequestError('Invalid projectId format');
+    }
+    const rawLimit = c.req.query('limit');
+    const limit = rawLimit ? Math.min(Math.max(parseInt(rawLimit, 10) || 20, 1), 100) : 20;
+
+    // Look up the member to get their linked principal.
+    const memberResult = await db.$client.query(
+      `SELECT m.role, u.github_login, u.github_id
+       FROM memberships m
+       JOIN users u ON u.id = m.user_id
+       WHERE m.user_id = $1 AND m.team_id = $2`,
+      [targetUserId, session.teamId],
+    );
+
+    if (memberResult.rows.length === 0) {
+      throw new NotFoundError('Member not found');
+    }
+
+    const githubId = memberResult.rows[0]!['github_id'] as number;
+
+    // Find the principal linked to this user's github_id.
+    const principalResult = await db.$client.query(
+      `SELECT p.id, p.display_login
+       FROM principals p
+       WHERE p.team_id = $1
+         AND p.provider = 'github'
+         AND p.provider_user_id = $2::text
+       LIMIT 1`,
+      [session.teamId, String(githubId)],
+    );
+
+    const principalId = principalResult.rows[0]?.['id'] as string | undefined;
+
+    if (!principalId) {
+      // No linked principal — this member has no verified contributions.
+      return c.json({ data: [], nextCursor: null });
+    }
+
+    // Query concepts contributed by this principal.  Only concepts where
+    // the principal appears in concept_contributors are returned.  Per
+    // the frozen contract, client_claimed actors never enter that table
+    // (AGENTS.md: "client_claimed actors do not enter contributors by
+    // default"), so all entries are already from verified sources.
+    // The `provider = 'github'` guard in the principal lookup above
+    // further constrains to GitHub-verified principals only.
+    const conceptRows = await db.$client.query(
+      `SELECT DISTINCT c.uuid, c.type, c.status, c.confidence, c.title,
+              c.tags, c.last_confirmed, cp.path
+       FROM concepts c
+       JOIN concept_contributors cc
+         ON cc.concept_uuid = c.uuid
+        AND cc.team_id = $1 AND cc.project_id = $2 AND cc.principal_id = $3
+       LEFT JOIN concept_paths cp
+         ON cp.concept_uuid = c.uuid AND cp.is_current = true
+        AND cp.team_id = $1 AND cp.project_id = $2
+       WHERE c.team_id = $1 AND c.project_id = $2
+       ORDER BY c.last_confirmed DESC
+       LIMIT $4`,
+      [session.teamId, projectId, principalId, limit],
+    );
+
+    const data = conceptRows.rows.map((row) => ({
+      uuid: row['uuid'] as string,
+      path: (row['path'] as string) ?? '',
+      type: row['type'] as string,
+      status: row['status'] as string,
+      confidence: row['confidence'] as string,
+      title: row['title'] as string,
+      tags: row['tags'] as string[],
+      lastConfirmed: (row['last_confirmed'] as Date).toISOString(),
+    }));
+
+    return c.json({ data, nextCursor: null });
+  });
+
   // ── PATCH /v1/members/:userId ────────────────────────────────────────────
   // Change a member's role. Owner-only. Last-owner protection enforced.
 

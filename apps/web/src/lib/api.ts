@@ -38,6 +38,7 @@ export type {
   Actor,
   ActorProvenance,
   OccurredAtProvenance,
+  ConceptSummary,
 } from "@teamem/schema";
 export type { Source, SourceKind, SourceChannel } from "@teamem/schema";
 
@@ -103,8 +104,6 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     }
 
     // Detect fail-closed audit state: 500 + details.audit_failed === true.
-    // The backend normalizes the message to "Internal error" in production,
-    // so we must rely on the structured details flag.
     const isAuditFailed =
       res.status === 500 &&
       (body.error?.details?.audit_failed === true ||
@@ -148,6 +147,11 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+// Thin wrapper for endpoints that are NOT under /v1 (e.g. /auth/me, /teams/:id/invites).
+async function rawRequest<T>(url: string, init?: RequestInit): Promise<T> {
+  return request<T>(url, init);
+}
+
 // ── Session / scope (web-session authenticated) ────────────────────────────
 
 /** GET /auth/me response (flat, no envelope — see apps/server auth routes). */
@@ -161,7 +165,7 @@ export interface SessionInfo {
 }
 
 export async function fetchMe(): Promise<SessionInfo> {
-  return request<SessionInfo>("/auth/me");
+  return rawRequest<SessionInfo>("/auth/me");
 }
 
 /** GET /v1/teams/:teamId/projects — listResponse envelope. */
@@ -380,9 +384,6 @@ export async function lookupInvite(token: string): Promise<InviteLookup> {
   const res = await fetch(`/invites/${encodeURIComponent(token)}`);
 
   if (res.status === 404) {
-    // The server returns 404 for unknown or malformed tokens (by design
-    // these are indistinguishable). The contract represents this as the
-    // not_found branch with no invite object.
     return { status: "not_found" };
   }
 
@@ -420,4 +421,86 @@ export async function acceptInvite(
     throw new Error(msg ?? `Accept invite failed (${res.status})`);
   }
   return res.json();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Members & Roles (DUA-236) — session-authenticated, not under /v1
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type Role = "owner" | "admin" | "member" | "viewer";
+
+export interface MemberEntry {
+  userId: string;
+  githubLogin: string;
+  avatarUrl: string | null;
+  role: Role;
+  joinedAt: string;
+  principalId: string | null;
+  principalDisplayLogin: string | null;
+}
+
+export interface InviteResponse {
+  id: string;
+  inviteLink: string;
+  targetRole: Role;
+  expiresAt: string;
+}
+
+export interface RoleChangeResponse {
+  userId: string;
+  role: Role;
+  githubLogin: string;
+}
+
+export interface RemoveResponse {
+  removed: boolean;
+  userId: string;
+  githubLogin: string;
+}
+
+/** List all team members (requires web session). */
+export async function fetchMembers(): Promise<MemberEntry[]> {
+  const json = await rawRequest<{ data: MemberEntry[] }>("/v1/members");
+  return json.data;
+}
+
+/** Change a member's role (owner only). */
+export async function changeMemberRole(
+  userId: string,
+  role: Role,
+): Promise<RoleChangeResponse> {
+  return rawRequest<RoleChangeResponse>(`/v1/members/${userId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+}
+
+/** Remove a member from the team (owner only). */
+export async function removeMember(userId: string): Promise<RemoveResponse> {
+  return rawRequest<RemoveResponse>(`/v1/members/${userId}`, {
+    method: "DELETE",
+  });
+}
+
+/** Generate an invite link (admin+). */
+export async function createInvite(
+  teamId: string,
+  targetRole: Role,
+): Promise<InviteResponse> {
+  return rawRequest<InviteResponse>(`/teams/${teamId}/invites`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targetRole }),
+  });
+}
+
+/** List concepts contributed by a member (session-based, scoped to project). */
+export async function fetchMemberConcepts(
+  userId: string,
+  projectId: string,
+  limit = 20,
+): Promise<ConceptListResponse> {
+  const qs = new URLSearchParams({ projectId, limit: String(limit) }).toString();
+  return rawRequest<ConceptListResponse>(`/v1/members/${userId}/concepts?${qs}`);
 }

@@ -4,6 +4,8 @@ import { AppShell } from "@/components/layout/app-shell";
 import { NotFound } from "@/components/ui/not-found";
 import { ComponentShowcase } from "@/pages/component-showcase";
 import { KnowledgePage } from "@/pages/knowledge-page";
+import { MembersPage } from "@/pages/members-page";
+import { MemberProfilePage } from "@/pages/member-profile-page";
 import { ConceptDetailPage } from "@/pages/concept-detail-page";
 import { ContextPreviewPage } from "@/pages/context-preview-page";
 import { EventDetailPage } from "@/pages/event-detail-page";
@@ -47,15 +49,8 @@ export default function App() {
             <Route path="/events/:id" element={<EventDetailPage />} />
             <Route path="/jobs" element={<JobsPage />} />
             <Route path="/jobs/:id" element={<JobDetailPage />} />
-            <Route
-              path="/members"
-              element={
-                <PlaceholderPage
-                  title="Members"
-                  description="Team members and their roles."
-                />
-              }
-            />
+            <Route path="/members" element={<MembersPage />} />
+            <Route path="/members/:userId" element={<MemberProfilePage />} />
             <Route
               path="/audit"
               element={
