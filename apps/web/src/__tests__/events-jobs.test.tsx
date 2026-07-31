@@ -349,6 +349,7 @@ describe("EventDetailPage", () => {
   it("shows fail-closed lock state when audit write fails", async () => {
     mockFetchError(
       new AuditWriteFailedError(500, {
+        requestId: "req-audit-fail-001",
         error: {
           code: "internal",
           message: "Payload read audit failed; access denied",
@@ -357,8 +358,17 @@ describe("EventDetailPage", () => {
     );
     renderEventDetail("evt_failClosed");
     await waitFor(() => {
-      // When audit fails, the entire request fails — we can't show metadata
-      expect(screen.getByText(/Failed to load event/)).toBeInTheDocument();
+      // Must show the specific fail-closed lock state, NOT generic error
+      expect(
+        screen.getByText(/Can't display payload right now/),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/reads are never allowed to bypass the audit trail/),
+      ).toBeInTheDocument();
+      // Must show the request ID for diagnostics
+      expect(screen.getByText(/req-audit-fail-001/)).toBeInTheDocument();
+      // Must show Retry button
+      expect(screen.getByText("Retry")).toBeInTheDocument();
     });
   });
 
@@ -390,6 +400,22 @@ describe("JobsPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Failed")).toBeInTheDocument();
       expect(screen.getByText("Processing")).toBeInTheDocument();
+      // Kind column removed — the API doesn't expose job kind yet;
+      // we must not fabricate a value like "compilation"
+    });
+  });
+
+  it("does not fabricate a Kind column value", async () => {
+    // The @teamem/schema job DTO has no `kind` field yet (DUA-156 gap).
+    // We must not hardcode "compilation" as a placeholder.  The column
+    // is omitted until the API exposes the real value.
+    mockFetchResponse(mockJobsListResponse);
+    renderListPage(<JobsPage />);
+    await waitFor(() => {
+      // "compilation" should not appear as a table cell value
+      const cells = document.querySelectorAll("td code");
+      const values = Array.from(cells).map((el) => el.textContent?.trim());
+      expect(values).not.toContain("compilation");
     });
   });
 

@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   Copy,
   ShieldCheck,
+  Lock,
   Info,
   GitCommitHorizontal,
   GitPullRequest,
@@ -159,6 +160,9 @@ export function EventDetailPage() {
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Audit-write failure → fail-closed lock state (distinct from generic errors). */
+  const [auditFailed, setAuditFailed] = useState(false);
+  const [auditRequestId, setAuditRequestId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -167,6 +171,8 @@ export function EventDetailPage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setAuditFailed(false);
+    setAuditRequestId(null);
 
     fetchEventDetail(id, projectId)
       .then((result) => {
@@ -177,7 +183,8 @@ export function EventDetailPage() {
       .catch((err) => {
         if (cancelled) return;
         if (err instanceof AuditWriteFailedError) {
-          setError("Payload read audit failed; access denied");
+          setAuditFailed(true);
+          setAuditRequestId(err.requestId ?? null);
         } else if (err instanceof ApiError) {
           setError(err.message);
         } else {
@@ -231,7 +238,44 @@ export function EventDetailPage() {
     );
   }
 
-  // ── Error ───────────────────────────────────────────────────────────────
+  // ── Fail-closed lock state (audit unavailable) ────────────────────────────
+  if (auditFailed) {
+    return (
+      <div className="max-w-[860px]">
+        <a className="btn btn-ghost btn-sm" href="/events" style={{ marginBottom: "14px" }}>
+          <ArrowLeft /> Events
+        </a>
+        <div className="card">
+          <div className="empty-state" style={{ padding: "48px 24px" }}>
+            <div className="e-icon" style={{ color: "var(--red)" }}>
+              <Lock />
+            </div>
+            <h3>Can&apos;t display payload right now</h3>
+            <p>
+              Audit logging is unavailable, and payload reads are blocked
+              until it recovers. This is intentional — reads are never
+              allowed to bypass the audit trail.
+            </p>
+            <div className="e-actions">
+              <button
+                className="btn btn-outline"
+                onClick={() => window.location.reload()}
+              >
+                Retry
+              </button>
+              {auditRequestId && (
+                <span className="small muted" style={{ alignSelf: "center" }}>
+                  Request ID <code className="mono">{auditRequestId}</code>
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Generic error ─────────────────────────────────────────────────────────
   if (error) {
     return (
       <div className="max-w-[860px]">

@@ -102,7 +102,6 @@ function initiatedByIcon(job: Job) {
 function JobRowSkeleton() {
   return (
     <tr>
-      <td><div className="skeleton h-3 w-[80px]" /></td>
       <td><div className="skeleton h-4 w-[80px]" /></td>
       <td className="num"><div className="skeleton h-3 w-[20px] ml-auto" /></td>
       <td><div className="skeleton h-3 w-[90px]" /></td>
@@ -269,7 +268,6 @@ export function JobsPage() {
           <table className="table">
             <thead>
               <tr>
-                <th style={{ width: "160px" }}>Kind</th>
                 <th style={{ width: "150px" }}>Status</th>
                 <th style={{ width: "90px" }} className="num">
                   Events
@@ -296,9 +294,6 @@ export function JobsPage() {
                           window.location.href = `/jobs/${job.id}`;
                         }}
                       >
-                        <td>
-                          <code className="mono text-[12px]">{job.error ? "compilation" : "compilation"}</code>
-                        </td>
                         <td>
                           <JobStatusPill status={job.status as JobStatus} />
                         </td>
