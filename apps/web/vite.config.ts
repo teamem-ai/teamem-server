@@ -23,6 +23,14 @@ export default defineConfig({
         target: apiTarget,
         changeOrigin: true,
       },
+      "/invites": {
+        target: apiTarget,
+        changeOrigin: true,
+      },
+      "/teams": {
+        target: apiTarget,
+        changeOrigin: true,
+      },
     },
   },
   build: {

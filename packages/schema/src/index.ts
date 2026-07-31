@@ -201,6 +201,40 @@ export const CONTRACT_ADDITIVE_CHANGES = [
         'published npm release of @teamem/schema exists yet.',
     },
   },
+  {
+    change: 'DUA-232: public invite-lookup response DTO',
+    summary:
+      'New inviteLookupResponse DTO for the public GET /invites/:token ' +
+      'endpoint. It is a discriminated union: found tokens (valid | expired | ' +
+      'used) carry an inviteLookupInfo object enriched with team name and ' +
+      'inviter identity (login + role from memberships); not_found is a ' +
+      'status-only branch with no invite object. The web UI maps the HTTP 404 ' +
+      'response to the not_found branch and never fabricates fake data.',
+    impact: {
+      database:
+        'None — the lookup reads existing teams, users, and memberships ' +
+        'tables. The inviteLookupInfo DTO is a superset of the internal ' +
+        'invite DTO with display-only fields (teamName, invitedByLogin, ' +
+        'invitedByRole) that are computed at read time, not stored.',
+      api:
+        'New public GET /invites/:token endpoint (no auth required). ' +
+        'Server validates the found (HTTP 200) response against ' +
+        'inviteFoundResponse; a schema mismatch is treated as InternalError. ' +
+        'Unknown or malformed tokens return HTTP 404 with no response body.',
+      cli: 'None — the CLI does not manage invitations.',
+      mcp: 'None — the MCP endpoint does not consume this DTO.',
+      ui: 'apps/web consumes this DTO in the invite acceptance page. The web ' +
+        'validates the HTTP 200 response with inviteLookupResponse.parse; ' +
+        'HTTP 404 maps directly to the not_found branch without fake data.',
+      compiler: 'None — invitations are an auth-layer concern.',
+      export: 'None — OKF export is an M3 concern.',
+      externalTsConsumers:
+        'Fully additive: new exports (inviteFoundStatus, inviteLookupInfo, ' +
+        'inviteLookupResponse, inviteFoundResponse) alongside existing auth ' +
+        'exports. No existing types changed or removed. ' +
+        'No published npm release of @teamem/schema exists yet.',
+    },
+  },
 ] as const;
 
 export * from './common.js';
