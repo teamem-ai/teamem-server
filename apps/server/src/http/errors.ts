@@ -209,9 +209,15 @@ export class RateLimitedError extends AppError {
 }
 
 export class InternalError extends AppError {
-  constructor(message = DEFAULT_MESSAGE.internal, options?: { cause?: unknown }) {
+  readonly details?: Record<string, unknown>;
+
+  constructor(
+    message = DEFAULT_MESSAGE.internal,
+    options?: { cause?: unknown; details?: Record<string, unknown> },
+  ) {
     super('internal', message, options);
     this.name = 'InternalError';
+    this.details = options?.details;
   }
 }
 
@@ -272,7 +278,10 @@ export function globalErrorHandler(err: Error, c: Context): Response {
   // default message — err.message is NEVER echoed to the client.
   if (err instanceof AppError) {
     const status = errorCodeToStatus[err.code] as number;
-    const body: ErrorResponse = err instanceof InvalidRequestError || err instanceof CursorInvalidError
+    const body: ErrorResponse =
+    err instanceof InvalidRequestError ||
+    err instanceof CursorInvalidError ||
+    (err instanceof InternalError && err.details)
       ? buildErrorResponse(requestId, err.code, err.details)
       : buildErrorResponse(requestId, err.code);
     return c.json(body, status as never);

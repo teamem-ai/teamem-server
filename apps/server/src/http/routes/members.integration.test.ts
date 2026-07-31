@@ -732,4 +732,213 @@ describe.skipIf(!url)('Member & Role Management API (live Postgres)', () => {
       expect(res.status).toBe(401);
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GET /v1/members/:userId/concepts — member-contributed concepts
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('GET /v1/members/:userId/concepts', () => {
+    /** Helper: create a project in a team. Returns project id. */
+    async function createProject(teamId: string, name: string): Promise<string> {
+      const id = `prj_${randomBytes(12).toString('hex')}`;
+      await db.execute(
+        `INSERT INTO projects (id, team_id, name) VALUES ('${id}', '${teamId}', '${name}')`,
+      );
+      return id;
+    }
+
+    /** Helper: create a concept and link it to a contributor. */
+    async function createConceptWithContributor(
+      teamId: string,
+      projectId: string,
+      principalId: string,
+      overrides?: { uuid?: string; path?: string; type?: string; title?: string },
+    ): Promise<string> {
+      const uuid = overrides?.uuid ?? crypto.randomUUID();
+      const title = overrides?.title ?? 'Test Concept';
+      const type = overrides?.type ?? 'decision';
+      const path = overrides?.path ?? `test/${randomBytes(6).toString('hex')}`;
+      const now = new Date().toISOString();
+
+      await db.execute(
+        `INSERT INTO concepts (uuid, team_id, project_id, schema_version, type, status, confidence, title, body, tags, first_seen, last_confirmed, created_at, updated_at)
+         VALUES ('${uuid}', '${teamId}', '${projectId}', 1, '${type}', 'active', 'high', '${title}', 'Test body', '{test}', '${now}', '${now}', '${now}', '${now}')`,
+      );
+      await db.execute(
+        `INSERT INTO concept_paths (concept_uuid, team_id, project_id, path, is_current)
+         VALUES ('${uuid}', '${teamId}', '${projectId}', '${path}', true)`,
+      );
+      await db.execute(
+        `INSERT INTO concept_contributors (concept_uuid, team_id, project_id, principal_id)
+         VALUES ('${uuid}', '${teamId}', '${projectId}', '${principalId}')`,
+      );
+      return uuid;
+    }
+
+    it('returns concepts contributed by the member', async () => {
+      const { teamId, ownerSession } = await setupTeam();
+
+      // Create a member with a linked principal
+      const member = await createUser(9001, 'contributor');
+      await addMembership(member.id, teamId, 'member');
+      const principalId = await createPrincipal(teamId, String(member.githubId), 'contributor');
+
+      const projectId = await createProject(teamId, 'Test Project');
+      const uuid = await createConceptWithContributor(teamId, projectId, principalId, {
+        title: 'Use PostgreSQL as primary database',
+        path: 'decisions/use-postgres',
+        type: 'decision',
+      });
+
+      const res = await appRequest(
+        `/v1/members/${member.id}/concepts?projectId=${projectId}`,
+        { headers: sessionHeader(ownerSession) },
+      );
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data).toHaveLength(1);
+      expect(json.data[0]).toMatchObject({
+        uuid,
+        path: 'decisions/use-postgres',
+        type: 'decision',
+        title: 'Use PostgreSQL as primary database',
+      });
+    });
+
+    it('returns empty list when member has no linked principal', async () => {
+      const { teamId, ownerSession } = await setupTeam();
+
+      const member = await createUser(9002, 'noprincipal');
+      await addMembership(member.id, teamId, 'viewer');
+      // No principal created for this user
+
+      const projectId = await createProject(teamId, 'Test Project');
+
+      const res = await appRequest(
+        `/v1/members/${member.id}/concepts?projectId=${projectId}`,
+        { headers: sessionHeader(ownerSession) },
+      );
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data).toEqual([]);
+      expect(json.nextCursor).toBeNull();
+    });
+
+    it('returns 400 when projectId is missing', async () => {
+      const { teamId, ownerSession } = await setupTeam();
+
+      const res = await appRequest(
+        `/v1/members/${teamId}/concepts`,
+        { headers: sessionHeader(ownerSession) },
+      );
+
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error.code).toBe('invalid_request');
+    });
+
+    it('returns 404 for cross-team member (indistinguishable from missing)', async () => {
+      const { ownerSession } = await setupTeam();
+
+      // Create a member in another team
+      const teamB = await createTeam('Team B');
+      const memberB = await createUser(9003, 'crossteam');
+      await addMembership(memberB.id, teamB, 'member');
+      const projectB = await createProject(teamB, 'Project B');
+
+      const res = await appRequest(
+        `/v1/members/${memberB.id}/concepts?projectId=${projectB}`,
+        { headers: sessionHeader(ownerSession) },
+      );
+
+      expect(res.status).toBe(404);
+      const json = await res.json();
+      expect(json.error.code).toBe('not_found');
+    });
+
+    it('returns 404 for non-existent user (same shape as cross-team)', async () => {
+      const { teamId, ownerSession } = await setupTeam();
+      const projectId = await createProject(teamId, 'Test Project');
+
+      const res = await appRequest(
+        `/v1/members/usr_nonexistent_999/concepts?projectId=${projectId}`,
+        { headers: sessionHeader(ownerSession) },
+      );
+
+      expect(res.status).toBe(404);
+      const json = await res.json();
+      expect(json.error.code).toBe('not_found');
+    });
+
+    it('returns 401 without session', async () => {
+      const res = await appRequest(
+        '/v1/members/usr_any/concepts?projectId=prj_any',
+      );
+
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 401 with fake session token', async () => {
+      const res = await appRequest(
+        '/v1/members/usr_any/concepts?projectId=prj_any',
+        { headers: sessionHeader('fake_token') },
+      );
+
+      expect(res.status).toBe(401);
+    });
+
+    it('respects limit parameter', async () => {
+      const { teamId, ownerSession } = await setupTeam();
+
+      const member = await createUser(9004, 'manyconcepts');
+      await addMembership(member.id, teamId, 'member');
+      const principalId = await createPrincipal(teamId, String(member.githubId), 'manyconcepts');
+      const projectId = await createProject(teamId, 'Test Project');
+
+      // Create 3 concepts
+      for (let i = 0; i < 3; i++) {
+        await createConceptWithContributor(teamId, projectId, principalId, {
+          title: `Concept ${i + 1}`,
+          path: `test/concept-${i + 1}`,
+        });
+      }
+
+      const res = await appRequest(
+        `/v1/members/${member.id}/concepts?projectId=${projectId}&limit=2`,
+        { headers: sessionHeader(ownerSession) },
+      );
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data).toHaveLength(2);
+    });
+
+    it('concepts are scoped to the requested project (team member cannot see another project)', async () => {
+      const { teamId, ownerSession } = await setupTeam();
+
+      const member = await createUser(9005, 'scopedcontributor');
+      await addMembership(member.id, teamId, 'member');
+      const principalId = await createPrincipal(teamId, String(member.githubId), 'scopedcontributor');
+
+      const projectA = await createProject(teamId, 'Project A');
+      const projectB = await createProject(teamId, 'Project B');
+
+      // Add a concept in project A only
+      await createConceptWithContributor(teamId, projectA, principalId, {
+        title: 'Only in Project A',
+      });
+
+      // Query project B — should return empty
+      const res = await appRequest(
+        `/v1/members/${member.id}/concepts?projectId=${projectB}`,
+        { headers: sessionHeader(ownerSession) },
+      );
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data).toEqual([]);
+    });
+  });
 });

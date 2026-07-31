@@ -1,5 +1,5 @@
 import { Copy, Check } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /** One-time key reveal block: dark background, amber monospace token,
@@ -47,7 +47,7 @@ export function CommandBlock({
   className,
 }: {
   command: string;
-  description?: string;
+  description?: ReactNode;
   className?: string;
 }) {
   const [copied, setCopied] = useState(false);
@@ -62,7 +62,7 @@ export function CommandBlock({
   return (
     <div className={cn("space-y-2", className)}>
       {description && (
-        <p className="text-[13px] text-text-2">{description}</p>
+        <div className="cmd-label">{description}</div>
       )}
       <div className="cmd-block">
         <code>{command}</code>

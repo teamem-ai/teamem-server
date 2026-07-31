@@ -34,7 +34,7 @@ import {
   type JobEventRow,
 } from '../../db/repositories/jobs.js';
 import { isProjectScope, getTeamId, getProjectId } from '../../auth/scope.js';
-import { requireAuth, requireScope, getAuth } from '../auth.js';
+import { requireAuthOrWebSession, requireScope, getAuth } from '../auth.js';
 import {
   InvalidRequestError,
   NotFoundError,
@@ -309,11 +309,11 @@ async function getJobDetailHandler(
 export function buildJobsReadRoutes(deps: JobsReadDeps): Hono {
   const routes = new Hono();
 
-  routes.use('/v1/jobs', requireAuth(deps.db));
+  routes.use('/v1/jobs', requireAuthOrWebSession(deps.db));
   routes.use('/v1/jobs', requireScope('read'));
   routes.get('/v1/jobs', async (c) => listJobsHandler(c, deps));
 
-  routes.use('/v1/jobs/:id', requireAuth(deps.db));
+  routes.use('/v1/jobs/:id', requireAuthOrWebSession(deps.db));
   routes.use('/v1/jobs/:id', requireScope('read'));
   routes.get('/v1/jobs/:id', async (c) => getJobDetailHandler(c, deps));
 
