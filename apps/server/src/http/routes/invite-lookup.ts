@@ -17,21 +17,8 @@
 import type { Context } from "hono";
 import type { AppDb } from "../../db/client.js";
 import { lookupInviteByToken } from "../../auth/invites.js";
-import { InvalidRequestError, NotFoundError } from "../errors.js";
-
-export interface InviteLookupResponse {
-  status: "valid" | "expired" | "used" | "not_found";
-  invite: {
-    id: string;
-    teamId: string;
-    teamName: string | null;
-    targetRole: string;
-    invitedByLogin: string | null;
-    invitedByRole: string | null;
-    expiresAt: Date | string;
-    usedAt: Date | string | null;
-  };
-}
+import { inviteLookupResponse } from "@teamem/schema";
+import { InvalidRequestError, NotFoundError, InternalError } from "../errors.js";
 
 /**
  * Handler for GET /invites/:token.
@@ -89,7 +76,16 @@ export async function inviteLookupHandler(
     inviterRole = (roleRow?.["role"] as string) ?? null;
   }
 
-  return c.json({
+  // Normalize dates to ISO 8601 strings with millisecond precision — the
+  // Zod schema (isoDateTime) rejects raw Date objects.
+  const toIso = (d: Date | string | null): string | null => {
+    if (d === null || d === undefined) return null;
+    if (d instanceof Date) return d.toISOString();
+    // Already a string — ensure it parses as a date (pass-through)
+    return d;
+  };
+
+  const payload = {
     status: lookupResult.status,
     invite: {
       id: invite.id,
@@ -98,8 +94,24 @@ export async function inviteLookupHandler(
       targetRole: invite.targetRole,
       invitedByLogin: inviterLogin,
       invitedByRole: inviterRole,
-      expiresAt: invite.expiresAt,
-      usedAt: invite.usedAt,
+      expiresAt: toIso(invite.expiresAt),
+      usedAt: toIso(invite.usedAt as Date | null),
     },
-  } satisfies InviteLookupResponse);
+  };
+
+  // Validate against the contract DTO before shipping — a mismatch here
+  // is a server bug (wrong field name, invalid enum, etc.), not a client
+  // mistake.
+  const parsed = inviteLookupResponse.safeParse(payload);
+  if (!parsed.success) {
+    console.error(
+      JSON.stringify({
+        event: "invite_lookup_response_validation_failed",
+        errors: parsed.error.flatten(),
+      }),
+    );
+    throw new InternalError("invite lookup response validation failed");
+  }
+
+  return c.json(parsed.data);
 }

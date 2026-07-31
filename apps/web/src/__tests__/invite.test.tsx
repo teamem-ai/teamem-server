@@ -1,18 +1,28 @@
 import { describe, it, expect, afterEach, vi, type Mock } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  cleanup,
+  fireEvent,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
-// Mock the api module
+// ── Mocks ───────────────────────────────────────────────────────────────────
+
 let mockGetSession: Mock;
 let mockLookupInvite: Mock;
+let mockAcceptInvite: Mock;
 
 vi.mock("@/lib/api", () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
   lookupInvite: (...args: unknown[]) => mockLookupInvite(...args),
-  acceptInvite: vi.fn(),
+  acceptInvite: (...args: unknown[]) => mockAcceptInvite(...args),
 }));
 
 import { InvitePage } from "@/pages/invite";
+
+// ── Test data ───────────────────────────────────────────────────────────────
 
 const validInvite = {
   status: "valid" as const,
@@ -43,11 +53,20 @@ const notFoundInvite = {
   invite: {} as typeof validInvite.invite,
 };
 
+const loggedInSession = {
+  userId: "user_1",
+  githubLogin: "dli",
+  avatarUrl: null,
+  teamId: null,
+  teamName: null,
+  role: null,
+};
+
 function renderInvite(token: string = "inv_test123") {
   return render(
     <MemoryRouter initialEntries={[`/join?token=${token}`]}>
       <InvitePage />
-    </MemoryRouter>
+    </MemoryRouter>,
   );
 }
 
@@ -62,16 +81,17 @@ describe("InvitePage", () => {
   it("shows expired state when no token is provided", async () => {
     mockGetSession = vi.fn().mockResolvedValue(null);
     mockLookupInvite = vi.fn().mockResolvedValue(notFoundInvite);
+    mockAcceptInvite = vi.fn();
 
     render(
       <MemoryRouter initialEntries={["/join"]}>
         <InvitePage />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     await waitFor(() => {
       expect(
-        screen.getByText("This invite link is no longer valid")
+        screen.getByText("This invite link is no longer valid"),
       ).toBeInTheDocument();
     });
   });
@@ -81,12 +101,12 @@ describe("InvitePage", () => {
   it("shows invite details for a guest user", async () => {
     mockGetSession = vi.fn().mockResolvedValue(null);
     mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite();
 
     await waitFor(() => {
       expect(screen.getByText("Join Acme Corp")).toBeInTheDocument();
-      // k.zhang appears in both the tagline and the invited-by row
       const matches = screen.getAllByText(/k.zhang/);
       expect(matches.length).toBeGreaterThanOrEqual(1);
     });
@@ -95,6 +115,7 @@ describe("InvitePage", () => {
   it("shows Sign in with GitHub button for guests", async () => {
     mockGetSession = vi.fn().mockResolvedValue(null);
     mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite();
 
@@ -105,9 +126,36 @@ describe("InvitePage", () => {
     });
   });
 
+  it("stores invite token in sessionStorage when guest clicks sign-in", async () => {
+    mockGetSession = vi.fn().mockResolvedValue(null);
+    mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    mockAcceptInvite = vi.fn();
+
+    // Mock sessionStorage
+    const storageSet = vi.fn();
+    vi.stubGlobal("sessionStorage", {
+      getItem: vi.fn().mockReturnValue(null),
+      setItem: storageSet,
+      removeItem: vi.fn(),
+    });
+
+    renderInvite("inv_persisted_token");
+
+    await waitFor(() => {
+      expect(screen.getByText("Sign in with GitHub to join")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Sign in with GitHub to join"));
+    expect(storageSet).toHaveBeenCalledWith(
+      "teamem_invite_token",
+      "inv_persisted_token",
+    );
+  });
+
   it("shows role badge in invite summary for guests", async () => {
     mockGetSession = vi.fn().mockResolvedValue(null);
     mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite();
 
@@ -119,26 +167,23 @@ describe("InvitePage", () => {
   it("shows expiry and single-use footer text for guests", async () => {
     mockGetSession = vi.fn().mockResolvedValue(null);
     mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite();
 
     await waitFor(() => {
-      expect(screen.getByText(/Invite link expires in 7 days/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Invite link expires in 7 days/),
+      ).toBeInTheDocument();
     });
   });
 
   // ── Signed in ────────────────────────────────────────────────────────
 
   it("shows Join team button for signed-in users", async () => {
-    mockGetSession = vi.fn().mockResolvedValue({
-      userId: "user_1",
-      githubLogin: "dli",
-      avatarUrl: null,
-      teamId: null,
-      teamName: null,
-      role: null,
-    });
+    mockGetSession = vi.fn().mockResolvedValue(loggedInSession);
     mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite();
 
@@ -148,15 +193,9 @@ describe("InvitePage", () => {
   });
 
   it('shows "Joining as" row with signed-in user', async () => {
-    mockGetSession = vi.fn().mockResolvedValue({
-      userId: "user_1",
-      githubLogin: "dli",
-      avatarUrl: null,
-      teamId: null,
-      teamName: null,
-      role: null,
-    });
+    mockGetSession = vi.fn().mockResolvedValue(loggedInSession);
     mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite();
 
@@ -167,23 +206,92 @@ describe("InvitePage", () => {
   });
 
   it('shows "Not you? Switch GitHub account" for signed-in users', async () => {
-    mockGetSession = vi.fn().mockResolvedValue({
-      userId: "user_1",
-      githubLogin: "dli",
-      avatarUrl: null,
-      teamId: null,
-      teamName: null,
-      role: null,
-    });
+    mockGetSession = vi.fn().mockResolvedValue(loggedInSession);
     mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite();
 
     await waitFor(() => {
       expect(
-        screen.getByText("Not you? Switch GitHub account")
+        screen.getByText("Not you? Switch GitHub account"),
       ).toBeInTheDocument();
     });
+  });
+
+  // ── Acceptance action ────────────────────────────────────────────────
+
+  it("calls acceptInvite with correct args when Join team is clicked", async () => {
+    mockGetSession = vi.fn().mockResolvedValue(loggedInSession);
+    mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    mockAcceptInvite = vi.fn().mockResolvedValue({
+      membership: { role: "member" },
+      invite: { id: "inv_abc123" },
+    });
+
+    renderInvite("inv_accept_test");
+
+    await waitFor(() => {
+      expect(screen.getByText("Join team")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Join team"));
+
+    await waitFor(() => {
+      expect(mockAcceptInvite).toHaveBeenCalledWith(
+        "team_xyz",
+        "inv_accept_test",
+      );
+    });
+  });
+
+  it("disables Join team button while accepting", async () => {
+    mockGetSession = vi.fn().mockResolvedValue(loggedInSession);
+    mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    // Never resolves — simulates a slow request
+    mockAcceptInvite = vi.fn().mockImplementation(
+      () => new Promise(() => {}),
+    );
+
+    renderInvite();
+
+    await waitFor(() => {
+      expect(screen.getByText("Join team")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Join team"));
+
+    await waitFor(() => {
+      // Button should show "Joining…" and be disabled
+      const btn = screen.getByText("Joining…");
+      expect(btn).toBeInTheDocument();
+      expect(btn.closest("button")?.hasAttribute("disabled")).toBe(true);
+    });
+  });
+
+  it("shows error banner when acceptInvite fails", async () => {
+    mockGetSession = vi.fn().mockResolvedValue(loggedInSession);
+    mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    mockAcceptInvite = vi.fn().mockRejectedValue(
+      new Error("This invite link has already been used"),
+    );
+
+    renderInvite();
+
+    await waitFor(() => {
+      expect(screen.getByText("Join team")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Join team"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("This invite link has already been used"),
+      ).toBeInTheDocument();
+    });
+
+    // Button should be re-enabled after failure
+    expect(screen.getByText("Join team")).toBeInTheDocument();
   });
 
   // ── Expired invite ───────────────────────────────────────────────────
@@ -191,16 +299,16 @@ describe("InvitePage", () => {
   it("shows expired state when invite is expired", async () => {
     mockGetSession = vi.fn().mockResolvedValue(null);
     mockLookupInvite = vi.fn().mockResolvedValue(expiredInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite();
 
     await waitFor(() => {
       expect(
-        screen.getByText("This invite link is no longer valid")
+        screen.getByText("This invite link is no longer valid"),
       ).toBeInTheDocument();
-      // Should not blame the user
       expect(
-        screen.getByText(/Ask your admin to send you a fresh invite link/)
+        screen.getByText(/Ask your admin to send you a fresh invite link/),
       ).toBeInTheDocument();
     });
   });
@@ -208,12 +316,13 @@ describe("InvitePage", () => {
   it("shows expired state when invite is already used", async () => {
     mockGetSession = vi.fn().mockResolvedValue(null);
     mockLookupInvite = vi.fn().mockResolvedValue(usedInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite();
 
     await waitFor(() => {
       expect(
-        screen.getByText("This invite link is no longer valid")
+        screen.getByText("This invite link is no longer valid"),
       ).toBeInTheDocument();
     });
   });
@@ -221,6 +330,7 @@ describe("InvitePage", () => {
   it("shows Go to sign in link on expired invite page", async () => {
     mockGetSession = vi.fn().mockResolvedValue(null);
     mockLookupInvite = vi.fn().mockResolvedValue(expiredInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite();
 
@@ -236,12 +346,13 @@ describe("InvitePage", () => {
   it("shows invalid state when invite token is not found", async () => {
     mockGetSession = vi.fn().mockResolvedValue(null);
     mockLookupInvite = vi.fn().mockResolvedValue(notFoundInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite("inv_bogus");
 
     await waitFor(() => {
       expect(
-        screen.getByText("This invite link is no longer valid")
+        screen.getByText("This invite link is no longer valid"),
       ).toBeInTheDocument();
     });
   });
@@ -251,6 +362,7 @@ describe("InvitePage", () => {
   it("does not contain mock or demo content in guest state", async () => {
     mockGetSession = vi.fn().mockResolvedValue(null);
     mockLookupInvite = vi.fn().mockResolvedValue(validInvite);
+    mockAcceptInvite = vi.fn();
 
     renderInvite();
 

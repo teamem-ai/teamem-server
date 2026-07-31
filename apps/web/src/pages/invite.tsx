@@ -310,6 +310,13 @@ export function InvitePage() {
               <a
                 href="/auth/github"
                 className="btn btn-primary btn-lg btn-block"
+                onClick={() => {
+                  // Persist the invite token so the post-OAuth landing
+                  // page can redirect back here after sign-in completes.
+                  try {
+                    sessionStorage.setItem("teamem_invite_token", token);
+                  } catch { /* storage unavailable — best-effort */ }
+                }}
               >
                 <GitHubIcon className="ic lg" />
                 Sign in with GitHub to join
