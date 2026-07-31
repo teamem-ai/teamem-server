@@ -139,7 +139,8 @@ async function assembleConcept(
       provider: schema.principals.provider,
       providerKind: schema.principals.providerKind,
       displayLogin: schema.principals.displayLogin,
-      userId: schema.users.id,
+      // Only resolve userId when the user is actually a member of this team.
+      userId: schema.memberships.userId,
     })
     .from(schema.conceptContributors)
     .innerJoin(
@@ -368,7 +369,8 @@ export async function enrichConceptRows<T extends { uuid: string; teamId: string
         provider: schema.principals.provider,
         providerKind: schema.principals.providerKind,
         displayLogin: schema.principals.displayLogin,
-        userId: schema.users.id,
+        // Only resolve userId when the user is a member of this team.
+        userId: schema.memberships.userId,
       })
       .from(schema.conceptContributors)
       .innerJoin(

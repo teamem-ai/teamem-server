@@ -199,12 +199,16 @@ export function buildMembersRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
        JOIN concept_contributors cc
          ON cc.concept_uuid = c.uuid
         AND cc.team_id = $2 AND cc.project_id = $3 AND cc.principal_id = $4
+       -- Only include concepts where THIS principal has a webhook-verified
+       -- evidence event (not just any other contributor's verified event).
        JOIN concept_evidence ce
          ON ce.concept_uuid = c.uuid
         AND ce.team_id = $2 AND ce.project_id = $3
        JOIN events e
          ON e.id = ce.event_id
-        AND e.team_id = $2 AND e.actor_provenance = 'webhook_verified'
+        AND e.team_id = $2
+        AND e.actor_provenance = 'webhook_verified'
+        AND e.actor_principal_id = $4
        LEFT JOIN concept_paths cp
          ON cp.concept_uuid = c.uuid AND cp.is_current = true
         AND cp.team_id = $2 AND cp.project_id = $3
