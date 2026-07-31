@@ -201,6 +201,37 @@ export const CONTRACT_ADDITIVE_CHANGES = [
         'published npm release of @teamem/schema exists yet.',
     },
   },
+  {
+    change: 'DUA-232: public invite-lookup response DTO',
+    summary:
+      'New inviteLookupStatus discriminated-union enum (valid | expired | ' +
+      'used | not_found) and inviteLookupResponse DTO for the public ' +
+      'GET /invites/:token endpoint. The response enriches the internal ' +
+      'invite row with team name and inviter identity (login + role from ' +
+      'memberships) so the invite acceptance page can render a meaningful ' +
+      'summary before the user commits to joining.',
+    impact: {
+      database:
+        'None — the lookup reads existing teams, users, and memberships ' +
+        'tables. The DTO is a superset of the internal invite DTO with ' +
+        'display-only fields (teamName, invitedByLogin, invitedByRole) ' +
+        'that are computed at read time, not stored.',
+      api:
+        'New public GET /invites/:token endpoint (no auth required). ' +
+        'Server validates the response against inviteLookupResponse before ' +
+        'returning — a schema mismatch is treated as InternalError.',
+      cli: 'None — the CLI does not manage invitations.',
+      mcp: 'None — the MCP endpoint does not consume this DTO.',
+      ui: 'apps/web consumes this DTO in the invite acceptance page. The web ' +
+        'validates the response shape before rendering (Zod safeParse).',
+      compiler: 'None — invitations are an auth-layer concern.',
+      export: 'None — OKF export is an M3 concern.',
+      externalTsConsumers:
+        'Fully additive: new exports (inviteLookupStatus, inviteLookupResponse) ' +
+        'alongside existing auth exports. No existing types changed or removed. ' +
+        'No published npm release of @teamem/schema exists yet.',
+    },
+  },
 ] as const;
 
 export * from './common.js';

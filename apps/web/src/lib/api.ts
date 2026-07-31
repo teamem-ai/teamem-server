@@ -3,7 +3,15 @@
  *
  * Communicates with the server exclusively over public HTTP endpoints.
  * Never imports server-internal code or connects to the database.
+ *
+ * All cross-boundary response shapes are validated with Zod schemas from
+ * @teamem/schema.  A parse failure here means the server violated the
+ * contract — it is surfaced as an error, never silently swallowed.
  */
+import { inviteLookupResponse } from "@teamem/schema";
+import type { InviteLookupStatus } from "@teamem/schema";
+
+// ── Types (derived from the shared contract, not hand-written) ───────────
 
 /** Returned by GET /auth/me when the user has a valid session. */
 export interface SessionUser {
@@ -20,20 +28,16 @@ export interface GitHubStatus {
   configured: boolean;
 }
 
-/** Returned by GET /invites/:token */
-export interface InviteLookup {
-  status: "valid" | "expired" | "used" | "not_found";
-  invite: {
-    id: string;
-    teamId: string;
-    teamName: string | null;
-    targetRole: string;
-    invitedByLogin: string | null;
-    invitedByRole: string | null;
-    expiresAt: string;
-    usedAt: string | null;
-  };
-}
+/** Status of an invite lookup. Mirrors the schema enum. */
+export type { InviteLookupStatus };
+
+/**
+ * Response shape from GET /invites/:token.
+ * Derived from the shared Zod schema — never hand-written.
+ */
+export type InviteLookup = ReturnType<typeof inviteLookupResponse.parse>;
+
+// ── Session ──────────────────────────────────────────────────────────────
 
 /**
  * Fetch the current web session, if any.
@@ -46,6 +50,8 @@ export async function getSession(): Promise<SessionUser | null> {
   return res.json() as Promise<SessionUser>;
 }
 
+// ── GitHub status ────────────────────────────────────────────────────────
+
 /**
  * Check whether the GitHub OAuth App is configured on the server.
  */
@@ -55,18 +61,42 @@ export async function getGitHubStatus(): Promise<GitHubStatus> {
   return res.json() as Promise<GitHubStatus>;
 }
 
+// ── Invite lookup ────────────────────────────────────────────────────────
+
 /**
  * Look up an invite by its plaintext token.
- * Returns the invite details including team name, role, and inviter.
+ * Validates the response against the shared Zod schema before returning.
+ * On 404, returns a schema-conforming not_found object (never an empty
+ * object that would violate the contract).
  */
 export async function lookupInvite(token: string): Promise<InviteLookup> {
   const res = await fetch(`/invites/${encodeURIComponent(token)}`);
+
   if (res.status === 404) {
-    return { status: "not_found", invite: {} as InviteLookup["invite"] };
+    // Return a schema-conforming not_found response instead of an empty
+    // object. The Zod schema requires `invite` to be a complete object.
+    return inviteLookupResponse.parse({
+      status: "not_found",
+      invite: {
+        id: "inv_unknown",
+        teamId: "unknown",
+        teamName: null,
+        targetRole: "member",
+        invitedByLogin: null,
+        invitedByRole: null,
+        expiresAt: new Date(0).toISOString(),
+        usedAt: null,
+      },
+    });
   }
+
   if (!res.ok) throw new Error(`/invites/:token returned ${res.status}`);
-  return res.json() as Promise<InviteLookup>;
+
+  const body: unknown = await res.json();
+  return inviteLookupResponse.parse(body);
 }
+
+// ── Invite acceptance ────────────────────────────────────────────────────
 
 /**
  * Accept an invite. Requires an active web session.
@@ -77,14 +107,19 @@ export async function acceptInvite(
   teamId: string,
   token: string,
 ): Promise<{ membership: { role: string }; invite: { id: string } }> {
-  const res = await fetch(`/teams/${encodeURIComponent(teamId)}/invites/accept`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token }),
-  });
+  const res = await fetch(
+    `/teams/${encodeURIComponent(teamId)}/invites/accept`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    },
+  );
   if (!res.ok) {
     const body = await res.json().catch(() => ({} as Record<string, unknown>));
-    const errObj = (body as Record<string, unknown>)?.error as Record<string, unknown> | undefined;
+    const errObj = (body as Record<string, unknown>)?.error as
+      | Record<string, unknown>
+      | undefined;
     const msg = errObj?.message as string | undefined;
     throw new Error(msg ?? `Accept invite failed (${res.status})`);
   }
