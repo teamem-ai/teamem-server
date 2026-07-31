@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const baseURL = process.env["E2E_BASE_URL"] ?? "http://localhost:8080";
 const e2eSecret = process.env["TEAMEM_E2E_SECRET"];
+const authDir = join(__dirname, ".auth");
+const ownerStatePath = join(authDir, "owner.json");
+const viewerStatePath = join(authDir, "viewer.json");
 
 interface E2eSetupResponse {
   ownerCookie: string;
@@ -14,6 +17,11 @@ interface E2eSetupResponse {
   projectName: string;
 }
 
+const emptyStorageState = {
+  cookies: [],
+  origins: [],
+};
+
 function cookieToStorageState(cookie: string) {
   const [name, value] = cookie.split("=");
   return {
@@ -21,7 +29,7 @@ function cookieToStorageState(cookie: string) {
       {
         name: name!,
         value: value!,
-        domain: "localhost",
+        domain: new URL(baseURL).hostname,
         path: "/",
         expires: Math.floor(Date.now() / 1000) + 86400,
         httpOnly: true,
@@ -34,8 +42,12 @@ function cookieToStorageState(cookie: string) {
 }
 
 export default async function globalSetup() {
+  await mkdir(authDir, { recursive: true });
+
   if (!e2eSecret) {
     console.log("TEAMEM_E2E_SECRET is not set; skipping E2E session setup.");
+    await writeFile(ownerStatePath, JSON.stringify(emptyStorageState, null, 2));
+    await writeFile(viewerStatePath, JSON.stringify(emptyStorageState, null, 2));
     return;
   }
 
@@ -51,15 +63,8 @@ export default async function globalSetup() {
 
   const data = (await res.json()) as E2eSetupResponse;
 
-  await mkdir(join(__dirname, ".auth"), { recursive: true });
-  await writeFile(
-    join(__dirname, ".auth/owner.json"),
-    JSON.stringify(cookieToStorageState(data.ownerCookie), null, 2),
-  );
-  await writeFile(
-    join(__dirname, ".auth/viewer.json"),
-    JSON.stringify(cookieToStorageState(data.viewerCookie), null, 2),
-  );
+  await writeFile(ownerStatePath, JSON.stringify(cookieToStorageState(data.ownerCookie), null, 2));
+  await writeFile(viewerStatePath, JSON.stringify(cookieToStorageState(data.viewerCookie), null, 2));
 
   console.log("E2E sessions created: owner + viewer");
 }

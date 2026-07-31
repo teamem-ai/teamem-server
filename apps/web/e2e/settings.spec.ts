@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 const baseURL = process.env["E2E_BASE_URL"] ?? "http://localhost:8080";
+const hasE2eSecret = Boolean(process.env["TEAMEM_E2E_SECRET"]);
 
 /**
  * E2E settings-area acceptance tests.
@@ -13,9 +14,12 @@ const baseURL = process.env["E2E_BASE_URL"] ?? "http://localhost:8080";
  *   TEAMEM_E2E_SECRET=dev-secret
  */
 
-test.describe("Settings area — owner flows", () => {
-  test.use({ storageState: "./e2e/.auth/owner.json" });
+test.skip(
+  !hasE2eSecret,
+  "Set TEAMEM_E2E_SECRET and start the server with the E2E setup route enabled.",
+);
 
+test.describe("Settings area — owner flows @owner", () => {
   test("minted key plaintext is not shown after page refresh", async ({ page }) => {
     await page.goto(`${baseURL}/settings/keys`);
     await page.waitForURL("**/settings/keys");
@@ -61,9 +65,7 @@ test.describe("Settings area — owner flows", () => {
   });
 });
 
-test.describe("Settings area — viewer permissions", () => {
-  test.use({ storageState: "./e2e/.auth/viewer.json" });
-
+test.describe("Settings area — viewer permissions @viewer", () => {
   test("viewer role hides key management actions", async ({ page }) => {
     await page.goto(`${baseURL}/settings/keys`);
     await page.waitForURL("**/settings/keys");

@@ -30,6 +30,7 @@ export default defineConfig({
   projects: [
     {
       name: "owner",
+      grep: /@owner/,
       use: {
         ...devices["Desktop Chrome"],
         storageState: "./e2e/.auth/owner.json",
@@ -37,6 +38,7 @@ export default defineConfig({
     },
     {
       name: "viewer",
+      grep: /@viewer/,
       use: {
         ...devices["Desktop Chrome"],
         storageState: "./e2e/.auth/viewer.json",
