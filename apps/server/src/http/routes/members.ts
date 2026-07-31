@@ -16,7 +16,7 @@
  *   - Missing/invalid session returns 401.
  */
 import { z } from 'zod';
-import { teamRole, conceptListQuery } from '@teamem/schema';
+import { teamRole } from '@teamem/schema';
 import type { Context, Next, MiddlewareHandler } from 'hono';
 import { Hono } from 'hono';
 import type { AppDb } from '../../db/client.js';
@@ -143,17 +143,15 @@ export function buildMembersRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
     }
 
     // Parse projectId from query
-    const rawQuery: Record<string, string | string[] | undefined> = {};
-    const allQuery = c.req.queries();
-    for (const [key, values] of Object.entries(allQuery)) {
-      rawQuery[key] = values?.[0];
+    const projectId = c.req.query('projectId');
+    if (!projectId) {
+      throw new InvalidRequestError('projectId query parameter is required');
     }
-
-    const parsed = conceptListQuery.pick({ projectId: true, limit: true }).safeParse(rawQuery);
-    if (!parsed.success) {
-      throw new InvalidRequestError('Invalid query parameters');
+    if (!/^prj_[A-Za-z0-9]+$/.test(projectId)) {
+      throw new InvalidRequestError('Invalid projectId format');
     }
-    const { projectId, limit = 20 } = parsed.data;
+    const rawLimit = c.req.query('limit');
+    const limit = rawLimit ? Math.min(Math.max(parseInt(rawLimit, 10) || 20, 1), 100) : 20;
 
     // Look up the member to get their linked principal.
     const memberResult = await db.$client.query(
@@ -208,7 +206,7 @@ export function buildMembersRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
        WHERE c.team_id = $2 AND c.project_id = $3
        ORDER BY c.last_confirmed DESC
        LIMIT $5`,
-      [targetUserId, session.teamId, projectId, principalId, String(limit)],
+      [targetUserId, session.teamId, projectId, principalId, limit],
     );
 
     const data = conceptRows.rows.map((row) => ({
