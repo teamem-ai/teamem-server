@@ -220,7 +220,7 @@ describe("AuditPage", () => {
     expect(bodyText).not.toContain("expand");
   });
 
-  it("shows filter chips for actor, action, project, and time range", async () => {
+  it("shows filter chip buttons for actor, action, project, and time range", async () => {
     render(
       <MemoryRouter>
         <AuditPage />
@@ -229,10 +229,11 @@ describe("AuditPage", () => {
 
     await screen.findByText("Audit log");
 
-    expect(screen.getByText("Actor")).toBeInTheDocument();
-    expect(screen.getByText("Action")).toBeInTheDocument();
-    expect(screen.getByText("Project")).toBeInTheDocument();
-    expect(screen.getByText("Time range")).toBeInTheDocument();
+    // Filter chips are buttons; use role-based selectors to avoid matching the loading skeleton's table headers.
+    expect(screen.getByRole("button", { name: "Actor" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Action" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Project" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Time range" })).toBeInTheDocument();
 
     // Hint about mcp.* actions
     expect(
