@@ -1013,13 +1013,6 @@
     @apply text-right;
     font-variant-numeric: tabular-nums;
   }
-  .table-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    overflow-x: auto;
-    box-shadow: var(--shadow-sm);
-  }
 
   /* ---------- key-value grid ---------- */
   .kv {
@@ -1286,4 +1279,31 @@
   .search-input::placeholder {
     color: var(--text-3);
   }
+/* ---------- ghost card (soon placeholder) ---------- */
+  .ghost-card {
+    border: 1.5px dashed var(--border-strong);
+    border-radius: var(--r-lg);
+    padding: 18px 20px;
+    background: var(--surface);
+  }
+  .ghost-card .g-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 0;
+    color: var(--text-3);
+    font-size: 13px;
+  }
+
+  /* ---------- avatar variants ---------- */
+  .avatar.service {
+    border-radius: 6px;
+  }
+
+  /* ---------- inline flex row helper ---------- */
+  .row {
+    display: flex;
+    align-items: center;
+  }
+
 }

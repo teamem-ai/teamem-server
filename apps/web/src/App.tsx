@@ -10,7 +10,7 @@ import { ConceptDetailPage } from "@/pages/concept-detail-page";
 import { ContextPreviewPage } from "@/pages/context-preview-page";
 import { EventDetailPage } from "@/pages/event-detail-page";
 import { SoonPage } from "@/pages/soon-page";
-import { PlaceholderPage } from "@/pages/placeholder-page";
+import { AuditPage } from "@/pages/audit-page";
 import { EventsPage } from "@/pages/events-page";
 import { JobsPage } from "@/pages/jobs-page";
 import { JobDetailPage } from "@/pages/job-detail-page";
@@ -57,15 +57,7 @@ export default function App() {
             <Route path="/jobs/:id" element={<JobDetailPage />} />
             <Route path="/members" element={<MembersPage />} />
             <Route path="/members/:userId" element={<MemberProfilePage />} />
-            <Route
-              path="/audit"
-              element={
-                <PlaceholderPage
-                  title="Audit log"
-                  description="Who read what, and when. Metadata only — query text and payloads are never stored."
-                />
-              }
-            />
+            <Route path="/audit" element={<AuditPage />} />
             <Route path="/soon" element={<SoonPage />} />
             {/* Settings area with shared tab layout */}
             <Route path="/settings" element={<SettingsLayout />}>
