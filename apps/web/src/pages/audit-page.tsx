@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
-import { Shield, Copy, ChevronDown, Key } from "lucide-react";
+import { Shield, Copy, ChevronDown, Key, Bot } from "lucide-react";
 import { EmptyState, PermissionDenied } from "@/components/ui";
+import type { KeyEntry } from "@teamem/schema";
+import {
+  fetchMe,
+  fetchMembers,
+  fetchKeys,
+  type MemberEntry,
+} from "@/lib/api";
 
 // ── Known audit actions (open registry — unknown values rendered as-is) ────
 
@@ -95,60 +102,125 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+// ── Actor lookups ─────────────────────────────────────────────────────────
+
+interface ActorLookups {
+  /** principalId -> display name (githubLogin or principalDisplayLogin) */
+  principalName: Map<string, string>;
+  /** principalId -> isKnownMember (true if present in members list) */
+  principalKnown: Set<string>;
+  /** credentialId -> key name */
+  keyName: Map<string, string>;
+}
+
+function buildLookups(members: MemberEntry[], keys: KeyEntry[]): ActorLookups {
+  const principalName = new Map<string, string>();
+  const principalKnown = new Set<string>();
+  const keyName = new Map<string, string>();
+
+  for (const member of members) {
+    if (member.principalId) {
+      principalKnown.add(member.principalId);
+      principalName.set(
+        member.principalId,
+        member.principalDisplayLogin ??
+          member.githubLogin ??
+          member.userId ??
+          shortId(member.principalId),
+      );
+    }
+  }
+
+  for (const key of keys) {
+    keyName.set(key.id, key.name);
+  }
+
+  return { principalName, principalKnown, keyName };
+}
+
+function initialsFromName(name: string): string {
+  const parts = name.trim().split(/[^a-zA-Z0-9]+/).filter(Boolean);
+  if (parts.length === 0) return "??";
+  const first = parts[0]!;
+  if (parts.length === 1) {
+    return first.slice(0, 2).toUpperCase();
+  }
+  const last = parts[parts.length - 1]!;
+  return ((first[0] ?? "") + (last[0] ?? "")).toUpperCase();
+}
+
 // ── Actor display ───────────────────────────────────────────────────────────
 
 function ActorDisplay({
   principalId,
   credentialId,
+  lookups,
 }: {
   principalId: string | null;
   credentialId: string | null;
+  lookups: ActorLookups;
 }) {
-  // Neither → Unknown
-  if (!principalId && !credentialId) {
-    return (
-      <span className="row gap-2 text-text-3 text-[13px]">
-        <span
-          className="avatar w-[22px] h-[22px] text-[9px]"
-          style={{ background: "var(--zinc)", color: "#fff" }}
-        >
-          ?
-        </span>
-        Unknown
-      </span>
-    );
-  }
-
-  // Credential-only → API key or service account
+  // API key authenticated → show key name
   if (!principalId && credentialId) {
+    const keyName = lookups.keyName.get(credentialId);
     return (
       <span className="row gap-2">
         <span className="avatar service w-[22px] h-[22px] text-[9px]" style={{ background: "var(--slate)", color: "#fff" }}>
           <Key className="w-[11px] h-[11px]" />
         </span>
         <span className="text-[13px] truncate max-w-[160px]" title={credentialId}>
-          {shortId(credentialId)}
+          {keyName ?? shortId(credentialId)}
         </span>
         <span className="text-[11px] text-text-3">key</span>
       </span>
     );
   }
 
-  // Principal present → human user (or service if labeled elsewhere)
-  const displayId = principalId ?? "";
-  const initials = displayId.slice(0, 2).toUpperCase().replace(/[^A-Z]/g, "X") || "??";
+  // Known member / human user
+  if (principalId && lookups.principalKnown.has(principalId)) {
+    const name = lookups.principalName.get(principalId) ?? shortId(principalId);
+    const initials = initialsFromName(name);
+    return (
+      <span className="row gap-2">
+        <span
+          className="avatar w-[22px] h-[22px] text-[9px] text-white"
+          style={{ background: agentColor(principalId) }}
+        >
+          {initials}
+        </span>
+        <span className="text-[13px] truncate max-w-[160px]" title={principalId}>
+          {name}
+        </span>
+      </span>
+    );
+  }
 
+  // Principal present but not a known portal member → service account
+  if (principalId) {
+    const name = lookups.principalName.get(principalId) ?? shortId(principalId);
+    return (
+      <span className="row gap-2">
+        <span className="avatar service w-[22px] h-[22px] text-[9px]" style={{ background: "var(--slate)", color: "#fff" }}>
+          <Bot className="w-[11px] h-[11px]" />
+        </span>
+        <span className="text-[13px] truncate max-w-[160px]" title={principalId}>
+          {name}
+        </span>
+        <span className="text-[11px] text-text-3">service</span>
+      </span>
+    );
+  }
+
+  // Neither → Unknown
   return (
-    <span className="row gap-2">
+    <span className="row gap-2 text-text-3 text-[13px]">
       <span
-        className="avatar w-[22px] h-[22px] text-[9px] text-white"
-        style={{ background: agentColor(displayId) }}
+        className="avatar w-[22px] h-[22px] text-[9px]"
+        style={{ background: "var(--zinc)", color: "#fff" }}
       >
-        {initials}
+        ?
       </span>
-      <span className="text-[13px] truncate max-w-[160px]" title={displayId}>
-        {displayId.length > 34 ? shortId(displayId) : displayId}
-      </span>
+      Unknown
     </span>
   );
 }
@@ -272,6 +344,12 @@ export function AuditPage() {
   // 403 forbidden (role too low)
   const [forbidden, setForbidden] = useState(false);
 
+  // Actor resolution: members/keys give display names
+  const [members, setMembers] = useState<MemberEntry[]>([]);
+  const [keys, setKeys] = useState<KeyEntry[]>([]);
+
+  const lookups = buildLookups(members, keys);
+
   const toggleFilter = (name: string) => {
     setOpenFilter((prev) => (prev === name ? null : name));
   };
@@ -321,6 +399,29 @@ export function AuditPage() {
     setLoading(true);
     fetchData().finally(() => setLoading(false));
   }, [fetchData]);
+
+  // Load members/keys once for actor resolution (and actor filter dropdown)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = await fetchMe();
+        if (cancelled) return;
+        const [memberList, keyList] = await Promise.all([
+          fetchMembers(),
+          fetchKeys(me.teamId),
+        ]);
+        if (cancelled) return;
+        setMembers(memberList);
+        setKeys(keyList);
+      } catch {
+        // Resolution lookups are best-effort; actor renders IDs if unavailable
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load more
   const handleLoadMore = async () => {
@@ -410,11 +511,41 @@ export function AuditPage() {
             <ChevronDown className="w-[12px] h-[12px]" />
           </button>
           {openFilter === "actor" && (
-            <div className="absolute top-full left-0 mt-1 bg-surface border border-border rounded-lg shadow-lg z-40 p-3 min-w-[200px]">
+            <div className="absolute top-full left-0 mt-1 bg-surface border border-border rounded-lg shadow-lg z-40 p-2 min-w-[220px] max-h-[280px] overflow-y-auto">
+              <button
+                className={`w-full text-left px-3 py-[5px] text-[13px] rounded hover:bg-surface-2 ${
+                  actorFilter === "" ? "font-semibold text-text" : "text-text-2"
+                }`}
+                onClick={() => { setActorFilter(""); setOpenFilter(null); }}
+              >
+                All actors
+              </button>
+              {members
+                .filter((m) => m.principalId)
+                .map((member) => {
+                  const name = member.principalDisplayLogin ?? member.githubLogin;
+                  return (
+                    <button
+                      key={member.userId}
+                      className={`w-full text-left px-3 py-[5px] text-[13px] rounded hover:bg-surface-2 ${
+                        actorFilter === member.principalId
+                          ? "font-semibold text-accent bg-accent-soft"
+                          : "text-text-2"
+                      }`}
+                      onClick={() => {
+                        setActorFilter(member.principalId ?? "");
+                        setOpenFilter(null);
+                      }}
+                    >
+                      {name}
+                    </button>
+                  );
+                })}
+              <div className="border-t border-border my-1" />
               <input
                 className="w-full border border-border rounded px-3 py-[5px] text-[13px] bg-surface-2"
-                placeholder="Filter by actor…"
-                value={actorFilter}
+                placeholder="Or type principal ID…"
+                value={members.some((m) => m.principalId === actorFilter) ? "" : actorFilter}
                 onChange={(e) => { setActorFilter(e.target.value); }}
               />
             </div>
@@ -567,6 +698,7 @@ export function AuditPage() {
                         <ActorDisplay
                           principalId={item.principalId}
                           credentialId={item.credentialId}
+                          lookups={lookups}
                         />
                       </td>
                       <td>

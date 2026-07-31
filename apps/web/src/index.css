@@ -1013,13 +1013,6 @@
     @apply text-right;
     font-variant-numeric: tabular-nums;
   }
-  .table-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--r-lg);
-    overflow-x: auto;
-    box-shadow: var(--shadow-sm);
-  }
 
   /* ---------- key-value grid ---------- */
   .kv {

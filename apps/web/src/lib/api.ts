@@ -32,6 +32,7 @@ import type {
   JobEventResult,
   JobStatus,
   JobInitiator,
+  KeyEntry,
 } from "@teamem/schema";
 
 export type {
@@ -462,6 +463,11 @@ export interface RemoveResponse {
 export async function fetchMembers(): Promise<MemberEntry[]> {
   const json = await rawRequest<{ data: MemberEntry[] }>("/v1/members");
   return json.data;
+}
+
+/** List API keys for the current team (requires web session, admin+). */
+export async function fetchKeys(teamId: string): Promise<KeyEntry[]> {
+  return rawRequest<KeyEntry[]>(`/v1/teams/${encodeURIComponent(teamId)}/keys`);
 }
 
 /** Change a member's role (owner only). */

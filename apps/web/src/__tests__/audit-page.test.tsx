@@ -10,6 +10,29 @@ import { NotFound } from "@/components/ui/not-found";
 
 // ── MSW server for API mocking ─────────────────────────────────────────────
 
+const MOCK_TEAM_ID = "team_0000000000000001";
+const MOCK_MEMBER = {
+  userId: "usr_4f2a91bc12345678",
+  githubLogin: "dli",
+  avatarUrl: null,
+  role: "owner",
+  joinedAt: "2026-07-01T00:00:00Z",
+  principalId: "11111111-1111-1111-1111-111111111111",
+  principalDisplayLogin: "dli",
+};
+const MOCK_KEY = {
+  id: "key_ci-readonly-id",
+  name: "ci-readonly",
+  scopes: ["read"],
+  allProjects: false,
+  projectId: "44444444-4444-4444-4444-444444444444",
+  projectName: "web-app",
+  createdAt: "2026-07-01T00:00:00Z",
+  lastUsedAt: null,
+  revoked: false,
+  revokedAt: null,
+};
+
 const server = setupServer(
   http.get("/v1/audit", () => {
     return HttpResponse.json({
@@ -17,6 +40,22 @@ const server = setupServer(
       data: [],
       nextCursor: null,
     });
+  }),
+  http.get("/auth/me", () => {
+    return HttpResponse.json({
+      userId: "usr_me",
+      githubLogin: "admin",
+      avatarUrl: null,
+      teamId: MOCK_TEAM_ID,
+      teamName: "Acme Corp",
+      role: "owner",
+    });
+  }),
+  http.get("/v1/members", () => {
+    return HttpResponse.json({ data: [MOCK_MEMBER] });
+  }),
+  http.get(`/v1/teams/${encodeURIComponent(MOCK_TEAM_ID)}/keys`, () => {
+    return HttpResponse.json([MOCK_KEY]);
   })
 );
 
@@ -96,6 +135,9 @@ describe("AuditPage", () => {
     expect(await screen.findByText("concept.read")).toBeInTheDocument();
     // Verify table structure
     expect(screen.getByText("success")).toBeInTheDocument();
+
+    // Actor column must resolve principalId to the mocked human-readable name
+    expect(screen.getByText("dli")).toBeInTheDocument();
   });
 
   it("shows denied outcome as a red pill", async () => {
@@ -243,6 +285,82 @@ describe("AuditPage", () => {
 
     // 500 should NOT render PermissionDenied
     expect(screen.queryByText("Higher role required")).toBeNull();
+  });
+
+  it("shows API key name when credentialId is present", async () => {
+    server.use(
+      http.get("/v1/audit", () => {
+        return HttpResponse.json({
+          requestId: "test-req-key",
+          data: [
+            {
+              id: "aud_0000000000000005",
+              createdAt: new Date().toISOString(),
+              requestId: "3f8e2a9112345678",
+              principalId: null,
+              credentialId: "key_ci-readonly-id",
+              action: "mcp.search",
+              resourceType: "project",
+              resourceId: null,
+              teamId: "33333333-3333-3333-3333-333333333333",
+              projectId: "44444444-4444-4444-4444-444444444444",
+              outcome: "success",
+            },
+          ],
+          nextCursor: null,
+        });
+      })
+    );
+
+    render(
+      <MemoryRouter>
+        <AuditPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("mcp.search")).toBeInTheDocument();
+
+    // Must show the human-readable key name, not the raw credential ID
+    expect(screen.getByText("ci-readonly")).toBeInTheDocument();
+    expect(screen.getByText("key")).toBeInTheDocument();
+    expect(screen.queryByText("key_ci-readonly-id")).toBeNull();
+  });
+
+  it("shows service account label for an unknown principalId", async () => {
+    server.use(
+      http.get("/v1/audit", () => {
+        return HttpResponse.json({
+          requestId: "test-req-svc",
+          data: [
+            {
+              id: "aud_0000000000000006",
+              createdAt: new Date().toISOString(),
+              requestId: "9d3e7f0512345678",
+              principalId: "svc_m1-semrecall-id",
+              credentialId: null,
+              action: "mcp.search",
+              resourceType: "project",
+              resourceId: null,
+              teamId: "33333333-3333-3333-3333-333333333333",
+              projectId: "44444444-4444-4444-4444-444444444444",
+              outcome: "success",
+            },
+          ],
+          nextCursor: null,
+        });
+      })
+    );
+
+    render(
+      <MemoryRouter>
+        <AuditPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("mcp.search")).toBeInTheDocument();
+
+    // Unknown principal (not a portal member) is a service account
+    expect(screen.getByText("service")).toBeInTheDocument();
   });
 
   it("shows Unknown actor when both principalId and credentialId are null", async () => {
