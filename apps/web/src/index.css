@@ -508,4 +508,639 @@
     height: 12px;
     color: var(--text-3);
   }
+
+  /* ---------- monospace inline ---------- */
+  code,
+  kbd,
+  .mono {
+    font-family: var(--font-mono);
+  }
+
+  /* ---------- icon sizing ---------- */
+  svg.ic {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    vertical-align: -3px;
+  }
+  svg.ic.lg {
+    width: 20px;
+    height: 20px;
+  }
+  svg.ic.sm {
+    width: 13px;
+    height: 13px;
+  }
+
+  /* ---------- buttons ---------- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-[7px] font-semibold rounded-sm px-4 py-[7px] cursor-pointer;
+    font-size: 13.5px;
+    line-height: 1.3;
+    border: 1.5px solid transparent;
+    transition:
+      background 0.15s,
+      border-color 0.15s,
+      box-shadow 0.15s;
+    white-space: nowrap;
+    text-decoration: none;
+  }
+  .btn:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--btn-bg);
+    color: var(--btn-fg);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: var(--btn-bg-hover);
+  }
+  .btn-outline {
+    background: var(--surface);
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .btn-outline:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+  .btn-ghost {
+    color: var(--text-2);
+    background: transparent;
+    border-color: transparent;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+  .btn-sm {
+    padding: 6px 10px;
+    font-size: 12.5px;
+  }
+
+  /* ---------- form fields ---------- */
+  .field {
+    margin-bottom: 16px;
+  }
+  .label {
+    display: block;
+    font-weight: 500;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .label .req {
+    color: var(--red);
+    margin-left: 2px;
+  }
+  .hint {
+    font-size: 12.5px;
+    color: var(--text-3);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+  .hint.error {
+    color: var(--red);
+  }
+  .input,
+  .select {
+    width: 100%;
+    font: 400 13.5px/1.5 var(--font-sans);
+    color: var(--text);
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: var(--r);
+    padding: 8px 11px;
+    transition: border-color 0.15s;
+    box-sizing: border-box;
+  }
+  .input:focus,
+  .select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .input.mono {
+    font-size: 13px;
+    font-family: var(--font-mono);
+  }
+  .input::placeholder {
+    color: var(--text-3);
+  }
+  .input[disabled] {
+    background: var(--surface-2);
+    color: var(--text-3);
+    cursor: not-allowed;
+  }
+  .input:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+
+  /* ---------- layout utilities ---------- */
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ---------- card ---------- */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* ---------- card sub-components ---------- */
+  .card-pad {
+    padding: 20px;
+  }
+  .card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .card-head h3 {
+    font-size: 14.5px;
+  }
+  .card-head .sub {
+    font-size: 12.5px;
+    color: var(--text-3);
+    font-weight: 400;
+    margin-top: 2px;
+  }
+  .card-head .ch-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .card-body {
+    padding: 20px;
+  }
+  .divider {
+    height: 1px;
+    background: var(--border);
+    border: 0;
+    margin: 16px 0;
+  }
+
+  /* ---------- avatar ---------- */
+  .avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 99px;
+    font-weight: 600;
+    flex: none;
+    overflow: hidden;
+  }
+  .avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* ---------- stats ---------- */
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stat .num {
+    font:
+      700 26px/1.1 var(--font-sans);
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .lbl {
+    font-size: 12.5px;
+    color: var(--text-3);
+  }
+  .stat-row {
+    display: flex;
+    gap: 28px;
+    padding: 4px 0;
+  }
+
+  /* ---------- provider selection ---------- */
+  .provider-pick {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .provider-opt {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 13px 14px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--r);
+    cursor: pointer;
+    transition:
+      border-color 0.15s,
+      background 0.15s;
+    background: var(--surface);
+    text-align: left;
+    font: inherit;
+    color: inherit;
+  }
+  .provider-opt:hover {
+    border-color: var(--border-strong);
+  }
+  .provider-opt.sel {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .provider-opt .po-name {
+    font-weight: 600;
+    font-size: 13.5px;
+  }
+  .provider-opt .po-sub {
+    font-size: 12px;
+    color: var(--text-3);
+    margin-top: 2px;
+    line-height: 1.45;
+  }
+  .provider-opt .radio {
+    width: 16px;
+    height: 16px;
+    border-radius: 99px;
+    border: 1.5px solid var(--border-strong);
+    flex: none;
+    margin-top: 2px;
+    position: relative;
+    background: transparent;
+  }
+  .provider-opt.sel .radio {
+    border-color: var(--accent);
+  }
+  .provider-opt.sel .radio::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: 99px;
+    background: var(--accent);
+  }
+
+  /* ---------- repo row ---------- */
+  .repo-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13.5px;
+  }
+  .repo-row:last-child {
+    border-bottom: 0;
+  }
+  .repo-row code {
+    font-size: 12.5px;
+  }
+
+  /* ---------- command label ---------- */
+  .cmd-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-2);
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+  .cmd-label svg.ic {
+    color: var(--text-3);
+  }
+
+  /* ---------- muted / small helpers ---------- */
+  .muted {
+    color: var(--text-3);
+  }
+  .muted-2 {
+    color: var(--text-2);
+  }
+  .small {
+    font-size: 12.5px;
+  }
+
+  /* ---------- concept list rows (used in step 5) ---------- */
+  .krow {
+    display: flex;
+    gap: 14px;
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border);
+    align-items: flex-start;
+    transition: background 0.12s;
+    cursor: pointer;
+  }
+  .krow:last-child {
+    border-bottom: 0;
+  }
+  .krow:hover {
+    background: var(--surface-2);
+  }
+  .krow .k-main {
+    flex: 1;
+    min-width: 0;
+  }
+  .krow .k-title {
+    font-weight: 600;
+    font-size: 14.5px;
+    line-height: 1.4;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+  .krow .k-meta {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin-top: 7px;
+    flex-wrap: wrap;
+    font-size: 12.5px;
+    color: var(--text-3);
+  }
+  .krow .k-meta .path {
+    font:
+      400 12px var(--font-mono);
+    color: var(--text-2);
+  }
+
+  /* ---------- wizard steps ---------- */
+  .wizard {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+  }
+  .wiz-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .wiz-top .logo-mark {
+    width: 24px;
+    height: 24px;
+  }
+  .steps {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 0 auto;
+  }
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--text-3);
+    font-weight: 500;
+  }
+  .step .s-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 99px;
+    border: 1.5px solid var(--border-strong);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font:
+      600 11.5px var(--font-sans);
+    background: var(--surface);
+    color: var(--text-3);
+    flex: none;
+  }
+  .step.done {
+    color: var(--text-2);
+  }
+  .step.done .s-dot {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+  }
+  .step.now {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .step.now .s-dot {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .step .s-dot .ck {
+    display: none;
+  }
+  .step.done .s-dot .ck {
+    display: block;
+  }
+  .step.done .s-dot .num {
+    display: none;
+  }
+  .step-line {
+    width: 36px;
+    height: 1.5px;
+    background: var(--border-strong);
+    margin: 0 10px;
+  }
+  .wiz-body {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    padding: 40px 24px 24px;
+  }
+  .wiz-card {
+    width: 100%;
+    max-width: 640px;
+  }
+  .wiz-card h1 {
+    font-size: 20px;
+    letter-spacing: -0.02em;
+  }
+  .wiz-card .wiz-sub {
+    color: var(--text-2);
+    margin-top: 6px;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+  .wiz-foot {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 24px;
+  }
+  .wiz-foot .spacer {
+    flex: 1;
+  }
+
+  /* ---------- page head ---------- */
+  .page-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .page-head .ph-text {
+    min-width: 0;
+  }
+  .page-head h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .page-head .sub {
+    color: var(--text-2);
+    margin-top: 4px;
+    font-size: 13.5px;
+    max-width: 640px;
+  }
+  .page-head .ph-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  /* ---------- search ---------- */
+  .search-wrap {
+    position: relative;
+    flex: 1;
+  }
+  .search-wrap svg.ic {
+    position: absolute;
+    left: 11px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-3);
+  }
+  .search-input {
+    width: 100%;
+    font:
+      400 14px var(--font-sans);
+    color: var(--text);
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: var(--r);
+    padding: 8px 11px 8px 34px;
+  }
+  .search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .search-input::placeholder {
+    color: var(--text-3);
+  }
+
+  /* ---------- team / project switcher ---------- */
+  .switcher {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-weight: 600;
+    font-size: 13.5px;
+    padding: 6px 10px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text);
+    transition: background 0.15s;
+    max-width: 220px;
+  }
+  .switcher:hover {
+    background: var(--surface-2);
+  }
+  .switcher .avatar {
+    width: 18px;
+    height: 18px;
+    font-size: 9px;
+  }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 900px) {
+    .provider-pick {
+      grid-template-columns: 1fr;
+    }
+    .steps .step .s-label {
+      display: none;
+    }
+  }
+
+  /* Narrow wizard topbar: hide brand wordmark, keep logo only */
+  @media (max-width: 700px) {
+    .wiz-top > strong {
+      display: none;
+    }
+    .wiz-top {
+      gap: 8px;
+      padding: 14px 16px;
+    }
+    .step-line {
+      width: 20px;
+      margin: 0 6px;
+    }
+  }
+
+  /* Very narrow: shrink step dots, hide middle steps, ensure Exit visible */
+  @media (max-width: 480px) {
+    .wiz-top {
+      padding: 12px 10px;
+      gap: 4px;
+    }
+    .wiz-top .logo-mark {
+      width: 20px;
+      height: 20px;
+      flex: none;
+    }
+    .steps {
+      flex: 1;
+      min-width: 0;
+      justify-content: center;
+    }
+    .step .s-dot {
+      width: 20px;
+      height: 20px;
+      font-size: 10px;
+    }
+    .step-line {
+      width: 14px;
+      margin: 0 4px;
+    }
+    /* Only show current step dot + neighbours, hide remote dots */
+    .step:not(.now):not(.done) {
+      display: none;
+    }
+    /* Keep done steps visible for context but smaller */
+    .step.done .s-dot {
+      width: 16px;
+      height: 16px;
+    }
+    /* Exit button: compact */
+    .wiz-top .btn-sm {
+      padding: 4px 8px;
+      font-size: 11.5px;
+    }
+    .wiz-body {
+      padding: 24px 12px 16px;
+    }
+  }
 }

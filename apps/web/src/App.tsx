@@ -6,6 +6,7 @@ import { ComponentShowcase } from "@/pages/component-showcase";
 import { KnowledgePage } from "@/pages/knowledge-page";
 import { SoonPage } from "@/pages/soon-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
+import { OnboardingPage } from "@/components/onboarding/onboarding-page";
 
 export default function App() {
   return (
@@ -16,6 +17,9 @@ export default function App() {
           <Route path="/components" element={<AppShell />}>
             <Route index element={<ComponentShowcase />} />
           </Route>
+
+          {/* Onboarding wizard — focused flow, no app shell */}
+          <Route path="/onboarding" element={<OnboardingPage />} />
 
           {/* Redirect root to knowledge */}
           <Route path="/" element={<Navigate to="/knowledge" replace />} />
