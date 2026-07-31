@@ -80,6 +80,8 @@ function toConceptSummary(row: ConceptRow): ConceptSummary {
     title: row.title,
     tags: row.tags,
     lastConfirmed: row.lastConfirmed.toISOString(),
+    evidenceCount: row.evidenceCount,
+    contributors: row.contributors,
   };
 }
 

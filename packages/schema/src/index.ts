@@ -202,6 +202,53 @@ export const CONTRACT_ADDITIVE_CHANGES = [
     },
   },
   {
+    change: 'DUA-234: concept contributor/evidence display refs (M2 UI knowledge pages)',
+    summary:
+      'ConceptSummary gains evidenceCount and contributors (PrincipalRef[]) ' +
+      'so the knowledge list can render evidence counts and contributor avatars. ' +
+      'Concept detail contributors were promoted from principalId[] to ' +
+      'PrincipalRef[] to support the required human-bound / human-unbound / ' +
+      'service three-form display. Context markdown now includes the concept ' +
+      'type and current path on each entry. A new PrincipalRef DTO exposes ' +
+      'principalId, kind, provider, displayName, avatarUrl, and optional ' +
+      'githubLogin. All changes are additive: defaults are provided for ' +
+      'parse-time compatibility and no existing field was removed or retyped.',
+    impact: {
+      database:
+        'None — evidenceCount and contributors are computed at read time from ' +
+        'existing concept_evidence, concept_contributors, principals, and users ' +
+        'tables. No new columns or migrations required.',
+      api:
+        'GET /v1/concepts and GET /v1/concepts/:uuid responses now include the ' +
+        'new summary/detail fields. Existing consumers that ignore them are ' +
+        'unaffected. GET /v1/context markdown output format changed only to ' +
+        'add `**type** · path` line under each concept heading — still plain ' +
+        'markdown and parseable by existing regex consumers.',
+      cli:
+        'None — the standalone CLI (M1) does not consume these read endpoints.',
+      mcp:
+        'None — MCP tools consume detail via get_page; the richer contributor ' +
+        'shape is additive. The context markdown format change is compatible.',
+      ui:
+        'apps/web knowledge list, concept detail, and context preview pages now ' +
+        'render evidence counts, contributor avatars, contributor identities, ' +
+        'and context type/path lines per the design specs.',
+      compiler:
+        'None — the compiler already stores contributors and evidence; only the ' +
+        'read-side projection changed.',
+      export:
+        'None — OKF export (M3) is unaffected; the new summary fields are not ' +
+        'part of the OKF archive format.',
+      externalTsConsumers:
+        'Fully additive: new fields have default values for parse, and the ' +
+        'contributor type was widened to include display metadata. No existing ' +
+        'type was removed. The only narrowing risk is code that exhaustively ' +
+        'switched on ConceptDetail contributors being exactly a string; it ' +
+        'must now switch on the object shape. No published npm release exists ' +
+        'yet.',
+    },
+  },
+  {
     change: 'DUA-232: public invite-lookup response DTO',
     summary:
       'New inviteLookupResponse DTO for the public GET /invites/:token ' +

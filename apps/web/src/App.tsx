@@ -4,6 +4,9 @@ import { AppShell } from "@/components/layout/app-shell";
 import { NotFound } from "@/components/ui/not-found";
 import { ComponentShowcase } from "@/pages/component-showcase";
 import { KnowledgePage } from "@/pages/knowledge-page";
+import { ConceptDetailPage } from "@/pages/concept-detail-page";
+import { ContextPreviewPage } from "@/pages/context-preview-page";
+import { EventDetailPage } from "@/pages/event-detail-page";
 import { SoonPage } from "@/pages/soon-page";
 import { PlaceholderPage } from "@/pages/placeholder-page";
 import { LoginPage } from "@/pages/login";
@@ -35,15 +38,8 @@ export default function App() {
           {/* Main app routes */}
           <Route element={<AppShell />}>
             <Route path="/knowledge" element={<KnowledgePage />} />
-            <Route
-              path="/context-preview"
-              element={
-                <PlaceholderPage
-                  title="Context preview"
-                  description="Preview what your agent sees at the start of each session."
-                />
-              }
-            />
+            <Route path="/concept/:uuid" element={<ConceptDetailPage />} />
+            <Route path="/context-preview" element={<ContextPreviewPage />} />
             <Route
               path="/events"
               element={
@@ -53,6 +49,7 @@ export default function App() {
                 />
               }
             />
+            <Route path="/events/:id" element={<EventDetailPage />} />
             <Route
               path="/jobs"
               element={

@@ -56,7 +56,7 @@ const navGroups: NavGroup[] = [
 
 export function Sidebar() {
   return (
-    <aside className="fixed left-0 top-0 bottom-0 w-sidebar bg-surface border-r border-border flex flex-col z-40">
+    <aside className="fixed left-0 top-0 bottom-0 w-sidebar bg-surface border-r border-border hidden md:flex flex-col z-40">
       {/* Brand */}
       <div className="flex items-center gap-[9px] px-4 py-[14px] font-bold text-[15px] tracking-[-0.02em]">
         <svg

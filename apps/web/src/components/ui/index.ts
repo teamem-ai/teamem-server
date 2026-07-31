@@ -20,3 +20,5 @@ export { NotFound } from "./not-found";
 export { PermissionDenied, ViewerInfoBanner } from "./permission-denied";
 export { DangerConfirmDialog } from "./danger-confirm-dialog";
 export type { DangerLevel } from "./danger-confirm-dialog";
+export { MarkdownBody } from "./markdown-body";
+export { AvatarStack } from "./avatar-stack";
