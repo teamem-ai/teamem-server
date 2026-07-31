@@ -3,17 +3,21 @@ import { defineConfig, devices } from "@playwright/test";
 /**
  * Full-stack browser acceptance tests for the teamem web UI.
  *
- * These tests require a running server (default http://localhost:8080).
- * Point the server at an empty test database and run with:
+ * These tests require a running server (default http://localhost:8080) with
+ * the E2E setup route enabled. Start the server with:
  *
- *   pnpm exec playwright install
- *   DATABASE_URL=... pnpm --filter @teamem/web exec playwright test
+ *   TEAMEM_E2E_SECRET=dev-secret pnpm --filter @teamem/server dev
  *
- * The tests skip gracefully if the server is unreachable, so CI does not
- * fail when no server is running.
+ * Then run the E2E suite:
+ *
+ *   TEAMEM_E2E_SECRET=dev-secret pnpm --filter @teamem/web exec playwright test
+ *
+ * Install browsers first:
+ *   pnpm --filter @teamem/web exec playwright install
  */
 export default defineConfig({
   testDir: "./e2e",
+  globalSetup: "./e2e/setup.ts",
   fullyParallel: false,
   forbidOnly: !!process.env["CI"],
   retries: process.env["CI"] ? 2 : 0,
@@ -25,8 +29,18 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      name: "owner",
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: "./e2e/.auth/owner.json",
+      },
+    },
+    {
+      name: "viewer",
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: "./e2e/.auth/viewer.json",
+      },
     },
   ],
 });
