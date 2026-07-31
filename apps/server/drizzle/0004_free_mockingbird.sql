@@ -1,12 +1,13 @@
--- Migration 0004: llm_config table for per-team LLM provider settings (DUA-237)
-CREATE TABLE IF NOT EXISTS "llm_config" (
-  "team_id" TEXT NOT NULL PRIMARY KEY REFERENCES "teams"("id") ON DELETE CASCADE,
-  "provider" TEXT NOT NULL,
-  "api_key_encrypted" TEXT,
-  "embedding_available" BOOLEAN NOT NULL DEFAULT FALSE,
-  "last_test_ok" BOOLEAN,
-  "last_test_latency_ms" INTEGER,
-  "last_test_at" TIMESTAMPTZ,
-  "created_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
-  "updated_at" TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE TABLE "llm_config" (
+	"team_id" text PRIMARY KEY NOT NULL,
+	"provider" text NOT NULL,
+	"api_key_encrypted" text,
+	"embedding_available" boolean DEFAULT false NOT NULL,
+	"last_test_ok" boolean,
+	"last_test_latency_ms" integer,
+	"last_test_at" timestamp (3) with time zone,
+	"created_at" timestamp (3) with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp (3) with time zone DEFAULT now() NOT NULL
 );
+--> statement-breakpoint
+ALTER TABLE "llm_config" ADD CONSTRAINT "llm_config_team_id_teams_id_fk" FOREIGN KEY ("team_id") REFERENCES "public"."teams"("id") ON DELETE cascade ON UPDATE no action;

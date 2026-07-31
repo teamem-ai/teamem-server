@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { SettingsLayout } from "@/pages/settings-layout";
 import { SettingsKeysPage } from "@/pages/settings-keys-page";
@@ -177,6 +177,89 @@ describe("SettingsKeysPage", () => {
       expect(screen.getByText(/Higher role required/)).toBeInTheDocument();
     });
     expect(screen.queryByText("Mint API key")).toBeNull();
+  });
+
+  it("plaintext token disappears after the reveal modal is closed and list refreshes", async () => {
+    const token = "tm_test_secret_token_12345";
+    let minted = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation((url: string | URL | Request, init?: RequestInit) => {
+      const urlStr =
+        typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      if (urlStr.endsWith("/keys") && urlStr.includes("/teams/") && init?.method === "POST") {
+        minted = true;
+        return Promise.resolve(
+          mockFetchResponse({
+            id: "key_new",
+            name: "Refresh Test Key",
+            token,
+            mcpCommand: `claude mcp add teamem ${token}`,
+            scopes: ["read"],
+            allProjects: false,
+            projectId: "prj_test",
+            createdAt: new Date().toISOString(),
+          }) as Response
+        );
+      }
+      if (urlStr.endsWith("/keys") && urlStr.includes("/teams/")) {
+        return Promise.resolve(
+          mockFetchResponse(
+            minted
+              ? [
+                  {
+                    id: "key_new",
+                    name: "Refresh Test Key",
+                    scopes: ["read"],
+                    allProjects: false,
+                    projectId: "prj_test",
+                    projectName: "Test Project",
+                    createdAt: new Date().toISOString(),
+                    lastUsedAt: null,
+                    revoked: false,
+                    revokedAt: null,
+                  },
+                ]
+              : []
+          ) as Response
+        );
+      }
+      if (urlStr.includes("/projects")) {
+        return Promise.resolve(
+          mockFetchResponse([
+            { id: "prj_test", name: "Test Project", createdAt: new Date().toISOString() },
+          ]) as Response
+        );
+      }
+      return Promise.resolve(mockFetchResponse([]) as Response);
+    });
+    renderPage(SettingsKeysPage);
+    await waitFor(() => {
+      expect(screen.getByText("Mint API key")).toBeInTheDocument();
+    });
+    screen.getByText("Mint API key").click();
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    const nameInput = screen.getByPlaceholderText('e.g. "claude-code-laptop" or "ci-readonly"') as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: "Refresh Test Key" } });
+
+    const projectSelect = screen.getByLabelText("Project") as HTMLSelectElement;
+    fireEvent.change(projectSelect, { target: { value: "prj_test" } });
+
+    screen.getByText("Mint key").click();
+
+    await waitFor(() => {
+      expect(screen.getByText("Key minted")).toBeInTheDocument();
+      expect(screen.getByTestId("key-token")).toHaveTextContent(token);
+    });
+
+    // Close the reveal modal
+    screen.getByText("Done — I've saved the key").click();
+
+    // After the list refreshes, the plaintext token must NOT be present.
+    await waitFor(() => {
+      expect(screen.queryByText(token)).not.toBeInTheDocument();
+    });
   });
 
   it("shows no keys when teamId is null (not in a team)", async () => {
@@ -400,6 +483,47 @@ describe("SettingsProjectPage", () => {
       expect(screen.getByText("Danger zone")).toBeInTheDocument();
     });
     expect(screen.queryByText(/Purge…/)).toBeNull();
+  });
+
+  it("disables purge confirm until the correct project name is typed", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((url: string | URL | Request) => {
+      const urlStr =
+        typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      if (urlStr.includes("/projects")) {
+        return Promise.resolve(
+          mockFetchResponse([
+            { id: "prj_test", name: "Test Project", createdAt: new Date().toISOString() },
+          ]) as Response
+        );
+      }
+      if (urlStr.includes("/connectors")) {
+        return Promise.resolve(
+          mockFetchResponse({
+            github: { connected: false, appName: null, installedOn: null, repositories: [], webhookSecretConfigured: false, recentDeliveries: [] },
+            cli: { lastInit: { at: null, repo: null, commitSha: null, eventsCount: 0, pagesCount: 0 }, activeKeysWithWrite: 0 },
+            mcp: { endpointHealthy: true, activeKeysWithWrite: 0 },
+          }) as Response
+        );
+      }
+      return Promise.resolve(mockFetchResponse([]) as Response);
+    });
+    renderPage(SettingsProjectPage);
+    await waitFor(() => {
+      expect(screen.getByText(/Purge…/)).toBeInTheDocument();
+    });
+    screen.getByText(/Purge…/).click();
+    await waitFor(() => {
+      expect(screen.getByText("Purge project data?")).toBeInTheDocument();
+    });
+    const confirm = screen.getByRole("button", { name: "Purge project data" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+
+    const input = screen.getByPlaceholderText("Test Project") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Wrong name" } });
+    expect(confirm.disabled).toBe(true);
+
+    fireEvent.change(input, { target: { value: "Test Project" } });
+    expect(confirm.disabled).toBe(false);
   });
 });
 

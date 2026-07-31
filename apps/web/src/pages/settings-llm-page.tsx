@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   Check,
+  X,
   Zap,
   Eye,
   EyeOff,
@@ -128,20 +129,26 @@ export function SettingsLlmPage() {
     }
   };
 
-  // Test connection
-  const handleTest = async () => {
-    if (!apiKey.trim()) return;
+  // Test connection using the key in the input, or the stored key
+  const handleTest = async (useStored: boolean) => {
+    if (!useStored && !apiKey.trim()) return;
     setTesting(true);
     setTestResult(null);
     try {
+      const body = useStored
+        ? { provider: selectedProvider, apiKey: "__STORED__" }
+        : { provider: selectedProvider, apiKey };
       const data = await fetchJson<{ ok: boolean; latencyMs: number }>(
         `/v1/teams/${teamId}/llm/test`,
         {
           method: "POST",
-          body: JSON.stringify({ provider: selectedProvider, apiKey }),
+          body: JSON.stringify(body),
         }
       );
       setTestResult(data);
+      // Refresh config so lastTest summary updates
+      const cfg = await fetchJson<LlmConfigResponse>(`/v1/teams/${teamId}/llm`);
+      setConfig(cfg);
     } catch {
       setTestResult({ ok: false, latencyMs: 0 });
     } finally {
@@ -268,12 +275,23 @@ export function SettingsLlmPage() {
                   <div className="flex items-center gap-3">
                     <button
                       className="btn btn-outline btn-sm"
-                      onClick={handleTest}
+                      onClick={() => handleTest(false)}
                       disabled={testing || !apiKey.trim()}
                     >
                       <Zap className="w-3.5 h-3.5" />
                       {testing ? "Testing…" : "Test connection"}
                     </button>
+                    {hasExistingKey && (
+                      <button
+                        className="btn btn-outline btn-sm"
+                        onClick={() => handleTest(true)}
+                        disabled={testing}
+                        title="Test using the key currently saved in the database"
+                      >
+                        <Zap className="w-3.5 h-3.5" />
+                        Test saved key
+                      </button>
+                    )}
                     {testResult && (
                       <span
                         className={cn(
@@ -287,7 +305,10 @@ export function SettingsLlmPage() {
                             Connection OK · {testResult.latencyMs}ms
                           </>
                         ) : (
-                          <>Connection failed</>
+                          <>
+                            <X className="w-3 h-3" />
+                            Connection failed
+                          </>
                         )}
                       </span>
                     )}
@@ -298,8 +319,17 @@ export function SettingsLlmPage() {
                           config.lastTest.ok ? "green" : "red"
                         )}
                       >
-                        <Check className="w-3 h-3" />
-                        Last OK · {config.lastTest.latencyMs}ms
+                        {config.lastTest.ok ? (
+                          <>
+                            <Check className="w-3 h-3" />
+                            Last OK · {config.lastTest.latencyMs}ms
+                          </>
+                        ) : (
+                          <>
+                            <X className="w-3 h-3" />
+                            Last failed · {config.lastTest.latencyMs}ms
+                          </>
+                        )}
                       </span>
                     )}
                   </div>
