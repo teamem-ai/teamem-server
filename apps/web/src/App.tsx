@@ -1,6 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
-import { SessionProvider } from "@/lib/session";
 import { AppShell } from "@/components/layout/app-shell";
 import { NotFound } from "@/components/ui/not-found";
 import { ComponentShowcase } from "@/pages/component-showcase";
@@ -29,7 +28,6 @@ import { SettingsTeamPage } from "@/pages/settings-team-page";
 export default function App() {
   return (
     <ThemeProvider>
-      <SessionProvider value={{ teamId: null, role: null, projectId: null }}>
       <BrowserRouter>
         <Routes>
           {/* Public auth entry pages (no AppShell) */}
@@ -86,7 +84,6 @@ export default function App() {
           </Route>
         </Routes>
       </BrowserRouter>
-      </SessionProvider>
     </ThemeProvider>
   );
 }

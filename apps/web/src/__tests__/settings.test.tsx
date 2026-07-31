@@ -1,7 +1,6 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi, beforeEach } from "vitest";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { SessionProvider } from "@/lib/session";
 import { SettingsLayout } from "@/pages/settings-layout";
 import { SettingsKeysPage } from "@/pages/settings-keys-page";
 import { SettingsSourcesPage } from "@/pages/settings-sources-page";
@@ -9,32 +8,22 @@ import { SettingsLlmPage } from "@/pages/settings-llm-page";
 import { SettingsProjectPage } from "@/pages/settings-project-page";
 import { SettingsTeamPage } from "@/pages/settings-team-page";
 
-// ── Wrapper ─────────────────────────────────────────────────────────────────
+// ── Mock useSession — all pages call this; tests inject the desired role ──
 
-/** Wraps children with SessionProvider at a given role. */
-function TestWrapper({
-  children,
-  role = "owner",
-  teamId = "team_test",
-}: {
-  children: React.ReactNode;
-  role?: string;
-  teamId?: string | null;
-}) {
-  return (
-    <MemoryRouter>
-      <SessionProvider
-        value={{
-          teamId,
-          role: role as import("@teamem/schema").TeamRole,
-          projectId: "prj_test",
-        }}
-      >
-        {children}
-      </SessionProvider>
-    </MemoryRouter>
-  );
-}
+let mockSessionRole: string = "owner";
+let mockTeamId: string | null = "team_test";
+let mockProjectId: string | null = "prj_test";
+
+vi.mock("@/lib/session", () => ({
+  useSession: () => ({
+    teamId: mockTeamId,
+    role: mockSessionRole,
+    projectId: mockProjectId,
+  }),
+}));
+
+// ── Mock useScope — settings pages route through useSession, which we mock ──
+// (no-op: useSession is already mocked above)
 
 // ── Mock helpers ────────────────────────────────────────────────────────────
 
@@ -45,14 +34,13 @@ function mockFetchResponse(data: unknown, status = 200) {
   });
 }
 
-// ── Shared mock setup ───────────────────────────────────────────────────────
-
 /** Mock fetch to return empty list + empty projects for keys/sources pages. */
 function mockEmptyLists() {
   return vi
     .spyOn(globalThis, "fetch")
     .mockImplementation((url: string | URL | Request) => {
-      const urlStr = typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+      const urlStr =
+        typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
       if (urlStr.includes("/projects")) {
         return Promise.resolve(mockFetchResponse([]) as Response);
       }
@@ -80,7 +68,7 @@ function mockEmptyLists() {
       }
       if (urlStr.includes("/teams/mine")) {
         return Promise.resolve(
-          mockFetchResponse([{ id: "team_test", name: "Test Team", role: "owner" }]) as Response
+          mockFetchResponse([{ id: "team_test", name: "Test Team", role: mockSessionRole }]) as Response
         );
       }
       if (urlStr.includes("/llm")) {
@@ -95,6 +83,16 @@ function mockEmptyLists() {
       }
       return Promise.resolve(mockFetchResponse([]) as Response);
     });
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function renderPage(Page: React.ComponentType) {
+  return render(
+    <MemoryRouter>
+      <Page />
+    </MemoryRouter>
+  );
 }
 
 // ── SettingsLayout ──────────────────────────────────────────────────────────
@@ -133,35 +131,29 @@ describe("SettingsKeysPage", () => {
     cleanup();
     vi.restoreAllMocks();
   });
+  beforeEach(() => {
+    mockSessionRole = "owner";
+    mockTeamId = "team_test";
+    mockProjectId = "prj_test";
+  });
 
   it("renders the page header", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsKeysPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsKeysPage);
     expect(screen.getByText("API keys")).toBeInTheDocument();
     expect(screen.getByText(/Keys carry data-plane scopes/)).toBeInTheDocument();
   });
 
   it("shows the Mint button for admin+", async () => {
+    mockSessionRole = "admin";
     mockEmptyLists();
-    render(
-      <TestWrapper role="admin">
-        <SettingsKeysPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsKeysPage);
     expect(screen.getByText("Mint API key")).toBeInTheDocument();
   });
 
   it("shows empty state when no keys are present", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsKeysPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsKeysPage);
     await waitFor(() => {
       expect(screen.getByText("No keys minted yet")).toBeInTheDocument();
     });
@@ -169,11 +161,7 @@ describe("SettingsKeysPage", () => {
 
   it("shows the key safety notice at the bottom", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsKeysPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsKeysPage);
     await waitFor(() => {
       expect(
         screen.getByText(/Key IDs.*are identifiers, safe to display/)
@@ -182,13 +170,9 @@ describe("SettingsKeysPage", () => {
   });
 
   it("hides management actions when viewer", async () => {
+    mockSessionRole = "viewer";
     mockEmptyLists();
-    render(
-      <TestWrapper role="viewer">
-        <SettingsKeysPage />
-      </TestWrapper>
-    );
-    // Viewer sees PermissionDenied, not the Mint button
+    renderPage(SettingsKeysPage);
     await waitFor(() => {
       expect(screen.getByText(/Higher role required/)).toBeInTheDocument();
     });
@@ -196,14 +180,11 @@ describe("SettingsKeysPage", () => {
   });
 
   it("shows no keys when teamId is null (not in a team)", async () => {
+    mockTeamId = null;
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockFetchResponse([]) as Response
     );
-    render(
-      <TestWrapper teamId={null}>
-        <SettingsKeysPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsKeysPage);
     await waitFor(() => {
       expect(screen.getByText("No keys minted yet")).toBeInTheDocument();
     });
@@ -217,24 +198,20 @@ describe("SettingsSourcesPage", () => {
     cleanup();
     vi.restoreAllMocks();
   });
+  beforeEach(() => {
+    mockSessionRole = "owner";
+    mockTeamId = "team_test";
+  });
 
   it("renders the page header", () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsSourcesPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsSourcesPage);
     expect(screen.getByText("Ingestion sources")).toBeInTheDocument();
   });
 
   it("shows GitHub App card", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsSourcesPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsSourcesPage);
     await waitFor(() => {
       expect(screen.getByText("GitHub App")).toBeInTheDocument();
     });
@@ -242,11 +219,7 @@ describe("SettingsSourcesPage", () => {
 
   it("shows CLI and MCP cards", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsSourcesPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsSourcesPage);
     await waitFor(() => {
       expect(screen.getByText(/CLI.*teamem init/)).toBeInTheDocument();
       expect(screen.getByText(/MCP.*agent writes/)).toBeInTheDocument();
@@ -255,11 +228,7 @@ describe("SettingsSourcesPage", () => {
 
   it("shows endpoint healthy status", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsSourcesPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsSourcesPage);
     await waitFor(() => {
       expect(screen.getByText("Endpoint healthy")).toBeInTheDocument();
     });
@@ -273,14 +242,14 @@ describe("SettingsLlmPage", () => {
     cleanup();
     vi.restoreAllMocks();
   });
+  beforeEach(() => {
+    mockSessionRole = "owner";
+    mockTeamId = "team_test";
+  });
 
   it("renders the page header", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsLlmPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsLlmPage);
     expect(screen.getByText("LLM & retrieval")).toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getByText("LLM provider")).toBeInTheDocument();
@@ -289,11 +258,7 @@ describe("SettingsLlmPage", () => {
 
   it("shows semantic retrieval status section", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsLlmPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsLlmPage);
     await waitFor(() => {
       expect(screen.getByText("Semantic retrieval")).toBeInTheDocument();
     });
@@ -301,11 +266,7 @@ describe("SettingsLlmPage", () => {
 
   it("shows compilation section as placeholder", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsLlmPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsLlmPage);
     await waitFor(() => {
       expect(screen.getByText("Compilation")).toBeInTheDocument();
     });
@@ -313,17 +274,14 @@ describe("SettingsLlmPage", () => {
 
   it("shows fts-only mode when no embedding is available", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsLlmPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsLlmPage);
     await waitFor(() => {
       expect(screen.getByText(/Unavailable — keyword/)).toBeInTheDocument();
     });
   });
 
   it("hides provider management from viewer", async () => {
+    mockSessionRole = "viewer";
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockFetchResponse({
         provider: null,
@@ -332,11 +290,7 @@ describe("SettingsLlmPage", () => {
         semanticRetrieval: { available: false, mode: "fts-only", reason: null },
       }) as Response
     );
-    render(
-      <TestWrapper role="viewer">
-        <SettingsLlmPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsLlmPage);
     await waitFor(() => {
       expect(screen.getByText(/Higher role required/)).toBeInTheDocument();
     });
@@ -350,24 +304,20 @@ describe("SettingsProjectPage", () => {
     cleanup();
     vi.restoreAllMocks();
   });
+  beforeEach(() => {
+    mockSessionRole = "owner";
+    mockTeamId = "team_test";
+  });
 
   it("renders the page header", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsProjectPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsProjectPage);
     expect(screen.getByText("Project")).toBeInTheDocument();
   });
 
   it("shows the Danger zone section for owner", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsProjectPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsProjectPage);
     await waitFor(() => {
       expect(screen.getByText("Danger zone")).toBeInTheDocument();
     });
@@ -375,11 +325,7 @@ describe("SettingsProjectPage", () => {
 
   it("shows purge button for owner", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsProjectPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsProjectPage);
     await waitFor(() => {
       expect(screen.getByText(/Purge…/)).toBeInTheDocument();
     });
@@ -387,11 +333,7 @@ describe("SettingsProjectPage", () => {
 
   it("shows Staleness detection as SOON placeholder", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsProjectPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsProjectPage);
     await waitFor(() => {
       expect(screen.getByText("Staleness detection")).toBeInTheDocument();
     });
@@ -399,28 +341,19 @@ describe("SettingsProjectPage", () => {
 
   it("shows General settings section", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsProjectPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsProjectPage);
     await waitFor(() => {
       expect(screen.getByText("General")).toBeInTheDocument();
     });
   });
 
   it("hides purge from non-owner admin", async () => {
+    mockSessionRole = "admin";
     mockEmptyLists();
-    render(
-      <TestWrapper role="admin">
-        <SettingsProjectPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsProjectPage);
     await waitFor(() => {
-      // Danger zone is shown but with restricted message, not the purge button
       expect(screen.getByText("Danger zone")).toBeInTheDocument();
     });
-    // Purge button not present for non-owner
     expect(screen.queryByText(/Purge…/)).toBeNull();
   });
 });
@@ -432,24 +365,20 @@ describe("SettingsTeamPage", () => {
     cleanup();
     vi.restoreAllMocks();
   });
+  beforeEach(() => {
+    mockSessionRole = "owner";
+    mockTeamId = "team_test";
+  });
 
   it("renders the page header", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsTeamPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsTeamPage);
     expect(screen.getByText("Team")).toBeInTheDocument();
   });
 
   it("shows the Danger zone for owner", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsTeamPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsTeamPage);
     await waitFor(() => {
       expect(screen.getByText("Danger zone")).toBeInTheDocument();
     });
@@ -457,11 +386,7 @@ describe("SettingsTeamPage", () => {
 
   it("shows delete team button for owner", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsTeamPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsTeamPage);
     await waitFor(() => {
       expect(screen.getByText(/Delete team…/)).toBeInTheDocument();
     });
@@ -469,11 +394,7 @@ describe("SettingsTeamPage", () => {
 
   it("shows New team button", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsTeamPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsTeamPage);
     await waitFor(() => {
       expect(screen.getByText("New team")).toBeInTheDocument();
     });
@@ -481,11 +402,7 @@ describe("SettingsTeamPage", () => {
 
   it("shows multi-team hint text", async () => {
     mockEmptyLists();
-    render(
-      <TestWrapper>
-        <SettingsTeamPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsTeamPage);
     await waitFor(() => {
       expect(
         screen.getByText(/You can belong to multiple teams/)
@@ -497,25 +414,18 @@ describe("SettingsTeamPage", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockFetchResponse([]) as Response
     );
-    render(
-      <TestWrapper>
-        <SettingsTeamPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsTeamPage);
     await waitFor(() => {
       expect(screen.getByText("No teams yet")).toBeInTheDocument();
     });
   });
 
   it("hides management from viewer", async () => {
+    mockSessionRole = "viewer";
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockFetchResponse([{ id: "team_test", name: "Test", role: "viewer" }]) as Response
     );
-    render(
-      <TestWrapper role="viewer">
-        <SettingsTeamPage />
-      </TestWrapper>
-    );
+    renderPage(SettingsTeamPage);
     await waitFor(() => {
       expect(screen.getByText(/Higher role required/)).toBeInTheDocument();
     });

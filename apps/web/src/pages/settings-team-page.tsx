@@ -4,6 +4,7 @@ import {
   Trash2,
   AlertTriangle,
   Check,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -337,7 +338,7 @@ export function SettingsTeamPage() {
                 onClick={() => setShowNewTeam(false)}
                 aria-label="Close"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
             <div className="modal-body">

@@ -154,7 +154,7 @@ export function SettingsSourcesPage() {
                 </dl>
                 <a
                   className="btn btn-outline btn-sm mt-3.5"
-                  href="#"
+                  href="https://github.com/settings/apps"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -172,7 +172,7 @@ export function SettingsSourcesPage() {
                 {canManage && (
                   <a
                     className="btn btn-outline btn-sm mt-3"
-                    href="#"
+                    href="https://github.com/settings/apps"
                     target="_blank"
                     rel="noopener noreferrer"
                   >
