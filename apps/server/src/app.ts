@@ -44,6 +44,9 @@ import { buildAuthRoutes } from './http/routes/auth.js';
 import { buildTeamsRoutes } from './http/routes/teams.js';
 import { buildProjectsRoutes } from './http/routes/projects.js';
 import { buildKeysRoutes } from './http/routes/keys.js';
+import { buildLlmConfigRoutes } from './http/routes/llm-config.js';
+import { buildConnectorStatusRoutes } from './http/routes/connectors.js';
+import { buildE2eSetupRoutes } from './http/routes/e2e-setup.js';
 import { buildAuditRoutes } from './http/routes/audit.js';
 import { buildMembersRoutes } from './http/routes/members.js';
 import { buildInvitesRoutes } from './http/routes/invites.js';
@@ -139,6 +142,17 @@ export function buildApp(deps: AppDeps = {}) {
     app.route('/', buildTeamsRoutes({ db: deps.db, mcpConfig }));
     app.route('/', buildProjectsRoutes({ db: deps.db }));
     app.route('/', buildKeysRoutes({ db: deps.db, mcpConfig }));
+    app.route('/', buildLlmConfigRoutes({ db: deps.db }));
+    app.route('/', buildConnectorStatusRoutes({ db: deps.db }));
+
+    // E2E test setup route — only mounted when TEAMEM_E2E_SECRET is set.
+    const e2eSecret = process.env['TEAMEM_E2E_SECRET'];
+    if (e2eSecret) {
+      const e2eRoutes = buildE2eSetupRoutes({ db: deps.db, secret: e2eSecret });
+      if (e2eRoutes) {
+        app.route('/', e2eRoutes);
+      }
+    }
   }
 
   // Ingestion routes — wired only when db is available.

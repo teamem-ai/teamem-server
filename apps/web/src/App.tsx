@@ -11,7 +11,6 @@ import { ContextPreviewPage } from "@/pages/context-preview-page";
 import { EventDetailPage } from "@/pages/event-detail-page";
 import { SoonPage } from "@/pages/soon-page";
 import { AuditPage } from "@/pages/audit-page";
-import { PlaceholderPage } from "@/pages/placeholder-page";
 import { EventsPage } from "@/pages/events-page";
 import { JobsPage } from "@/pages/jobs-page";
 import { JobDetailPage } from "@/pages/job-detail-page";
@@ -19,6 +18,12 @@ import { LoginPage } from "@/pages/login";
 import { InvitePage } from "@/pages/invite";
 import { AppLanding } from "@/pages/app-landing";
 import { OnboardingPage } from "@/components/onboarding/onboarding-page";
+import { SettingsLayout } from "@/pages/settings-layout";
+import { SettingsKeysPage } from "@/pages/settings-keys-page";
+import { SettingsSourcesPage } from "@/pages/settings-sources-page";
+import { SettingsLlmPage } from "@/pages/settings-llm-page";
+import { SettingsProjectPage } from "@/pages/settings-project-page";
+import { SettingsTeamPage } from "@/pages/settings-team-page";
 
 export default function App() {
   return (
@@ -54,51 +59,15 @@ export default function App() {
             <Route path="/members/:userId" element={<MemberProfilePage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/soon" element={<SoonPage />} />
-            <Route
-              path="/settings/keys"
-              element={
-                <PlaceholderPage
-                  title="API keys"
-                  description="Mint and manage API keys for agents and CLI access."
-                />
-              }
-            />
-            <Route
-              path="/settings/sources"
-              element={
-                <PlaceholderPage
-                  title="Ingestion sources"
-                  description="GitHub App, CLI, and MCP connection status."
-                />
-              }
-            />
-            <Route
-              path="/settings/llm"
-              element={
-                <PlaceholderPage
-                  title="LLM & retrieval"
-                  description="Configure your LLM provider and check semantic search status."
-                />
-              }
-            />
-            <Route
-              path="/settings/project"
-              element={
-                <PlaceholderPage
-                  title="Project settings"
-                  description="General settings and danger zone."
-                />
-              }
-            />
-            <Route
-              path="/settings/team"
-              element={
-                <PlaceholderPage
-                  title="Team settings"
-                  description="Manage your team configuration."
-                />
-              }
-            />
+            {/* Settings area with shared tab layout */}
+            <Route path="/settings" element={<SettingsLayout />}>
+              <Route index element={<Navigate to="/settings/keys" replace />} />
+              <Route path="keys" element={<SettingsKeysPage />} />
+              <Route path="sources" element={<SettingsSourcesPage />} />
+              <Route path="llm" element={<SettingsLlmPage />} />
+              <Route path="project" element={<SettingsProjectPage />} />
+              <Route path="team" element={<SettingsTeamPage />} />
+            </Route>
           </Route>
 
           {/* 404 — must be last */}

@@ -68,6 +68,9 @@ services:
       TEAMEM_OPENROUTER_API_KEY: ${TEAMEM_OPENROUTER_API_KEY:-}
       TEAMEM_OPENAI_COMPAT_BASE_URL: ${TEAMEM_OPENAI_COMPAT_BASE_URL:-}
       TEAMEM_OPENAI_COMPAT_API_KEY: ${TEAMEM_OPENAI_COMPAT_API_KEY:-}
+      # 64-hex-char AES-256-GCM key for BYO LLM keys stored in the DB.
+      # Generate with: openssl rand -hex 32
+      TEAMEM_LLM_ENCRYPTION_KEY: ${TEAMEM_LLM_ENCRYPTION_KEY:-}
     ports:
       # Container listens on 8080; override the host port via TEAMEM_PORT.
       - "${TEAMEM_PORT:-8080}:8080"
@@ -97,6 +100,7 @@ services:
       TEAMEM_OPENROUTER_API_KEY: ${TEAMEM_OPENROUTER_API_KEY:-}
       TEAMEM_OPENAI_COMPAT_BASE_URL: ${TEAMEM_OPENAI_COMPAT_BASE_URL:-}
       TEAMEM_OPENAI_COMPAT_API_KEY: ${TEAMEM_OPENAI_COMPAT_API_KEY:-}
+      TEAMEM_LLM_ENCRYPTION_KEY: ${TEAMEM_LLM_ENCRYPTION_KEY:-}
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'node.*worker\\.js' || exit 1"]
       interval: 10s
