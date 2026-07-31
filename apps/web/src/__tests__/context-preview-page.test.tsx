@@ -1,5 +1,5 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ContextPreviewPage } from "@/pages/context-preview-page";
 import { ScopeProvider } from "@/lib/scope";
@@ -119,6 +119,10 @@ function renderPage() {
 }
 
 describe("ContextPreviewPage", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -139,7 +143,9 @@ describe("ContextPreviewPage", () => {
     expect(
       screen.getByText(/What your agent automatically knows/),
     ).toBeInTheDocument();
-    expect(mocks.fetchContext).toHaveBeenCalledWith("prj_webapp");
+    await waitFor(() =>
+      expect(mocks.fetchContext).toHaveBeenCalledWith("prj_webapp"),
+    );
   });
 
   it("shows the token budget indicator", async () => {
