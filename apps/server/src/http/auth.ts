@@ -173,7 +173,22 @@ export function requireAuthOrWebSession(db: AppDb): MiddlewareHandler {
       throw new UnauthorizedError('Missing or invalid authentication');
     }
 
-    const projectId2 = c.req.query('projectId') ?? c.req.param('projectId');
+    // Resolve projectId: try query param, then path param, then POST body.
+    let projectId2 = c.req.query('projectId') ?? c.req.param('projectId');
+    if (!projectId2 && c.req.method === 'POST') {
+      // For POST endpoints (search.ts), projectId lives in the JSON body.
+      // Clone the request so the original body stream is still readable by
+      // the downstream handler.
+      try {
+        const clonedReq = c.req.raw.clone();
+        const body = await clonedReq.json();
+        if (body && typeof body.projectId === 'string' && body.projectId.length > 0) {
+          projectId2 = body.projectId;
+        }
+      } catch {
+        // Body is not valid JSON or is empty — handled below.
+      }
+    }
     if (!projectId2) {
       throw new UnauthorizedError('Missing or invalid authentication');
     }
@@ -236,6 +251,7 @@ export function requireAuthOrWebSession(db: AppDb): MiddlewareHandler {
       },
       team: { id: teamId, name: teamName },
       createdAt: new Date(),
+      teamRole,
     };
 
     c.set(AUTH_KEY, auth);

@@ -1,5 +1,5 @@
 /**
- * Auth middleware tests — requireAuth and requireScope HTTP behaviour.
+ * Auth middleware tests — requireAuth / requireScope / requireAuthOrWebSession.
  *
  * Verifies:
  * - Missing / malformed Authorization header → 401 (identical envelope)
@@ -7,10 +7,13 @@
  * - Valid token attaches AuthContext to the Hono context
  * - requireScope rejects insufficient scope → 403 (identical envelope)
  * - requireScope without prior requireAuth → 401
+ * - requireAuthOrWebSession: API key path (teamRole = undefined)
+ * - requireAuthOrWebSession: web session error paths (no cookie, invalid, no projectId)
+ * - requireAuthOrWebSession: POST body projectId extraction
  *
- * Uses a mock for resolveTokenHash so we can isolate the middleware's
- * HTTP contract from the database. Real-database integration is covered
- * by the events-write integration test.
+ * Uses mocks for resolveTokenHash, parseSessionCookie, and verifySession so
+ * we can isolate the middleware's HTTP contract from the database.
+ * Real-database integration is covered by the route integration tests.
  *
  * CLI: pnpm exec vitest run apps/server/src/http/auth.test.ts
  */
@@ -23,6 +26,7 @@ import {
 } from './errors.js';
 import {
   requireAuth,
+  requireAuthOrWebSession,
   requireScope,
   getAuth,
   AUTH_KEY,
@@ -94,6 +98,77 @@ const mockedResolve = vi.mocked(resolveTokenHash);
 // A minimal AppDb stub — the middleware needs a db reference but only passes it
 // to resolveTokenHash, which we've mocked, so a cast is safe.
 const mockDb = { $client: {} } as unknown as AppDb;
+
+// ── Mock parseSessionCookie & verifySession ────────────────────────────────
+// These are used by requireAuthOrWebSession in the web session fallback path.
+vi.mock('../auth/oauth-github.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../auth/oauth-github.js')>();
+  return {
+    ...actual,
+    parseSessionCookie: vi.fn(),
+    verifySession: vi.fn(),
+  };
+});
+
+import {
+  parseSessionCookie,
+  verifySession,
+} from '../auth/oauth-github.js';
+
+const mockedParseCookie = vi.mocked(parseSessionCookie);
+const mockedVerifySession = vi.mocked(verifySession);
+
+// ── Mock DB for web-session happy-path tests ──────────────────────────────
+// Creates a db stub whose $client.query and Drizzle select chains return
+// pre-configured data so requireAuthOrWebSession's web-session branch can
+// execute without a real database.
+function createWebSessionMockDb(opts: {
+  userRow?: Record<string, unknown> | null;
+  projectRows?: Array<{ teamId: string; teamName: string }>;
+  membershipRows?: Array<{ role: string }>;
+} = {}) {
+  const userRow = opts.userRow ?? {
+    id: 'user_1',
+    github_login: 'testuser',
+    avatar_url: 'https://example.com/avatar.png',
+  };
+
+  // Build a minimal Drizzle-like select chain. The middleware calls:
+  //   db.select({...}).from(schema.projects).innerJoin(...).where(...).limit(1)
+  //   db.select({role: ...}).from(schema.memberships).where(...).limit(1)
+  // Both chains are multiplexed through the same `db.select()` call, so we
+  // return a chain object that resolves projectRows on the first call and
+  // membershipRows on the second.
+  let selectCallCount = 0;
+
+  return {
+    $client: {
+      query: vi.fn().mockResolvedValue({
+        rows: userRow ? [userRow] : [],
+      }),
+    },
+    select: vi.fn().mockImplementation(() => {
+      const callIdx = selectCallCount++;
+      const chain = {
+        from: vi.fn().mockReturnValue({
+          innerJoin: vi.fn().mockReturnValue({
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue(
+                callIdx === 0 ? (opts.projectRows ?? []) : [],
+              ),
+            }),
+          }),
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue(
+              callIdx === 1 ? (opts.membershipRows ?? []) : [],
+            ),
+          }),
+        }),
+      };
+      return chain;
+    }),
+  } as unknown as AppDb;
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -552,5 +627,354 @@ describe('internal error during auth lookup', () => {
     // Must NOT leak internal error details
     expect(json.error.message).toBe('Internal error');
     expect(json.error.details).toBeUndefined();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Tests: requireAuthOrWebSession
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('requireAuthOrWebSession middleware', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // ── API key path: teamRole is undefined ────────────────────────────────
+
+  it('sets teamRole to undefined for API key auth', async () => {
+    const auth = mockAuthContext();
+    mockedResolve.mockResolvedValueOnce(auth);
+
+    let captured: AuthContext | undefined;
+
+    const app = createTestApp();
+    app.use('/v1/*', requireAuthOrWebSession(mockDb));
+    app.get('/v1/concepts', (c: Context) => {
+      captured = getAuth(c);
+      return c.json({ ok: true });
+    });
+
+    const token = validToken();
+    const res = await app.request('/v1/concepts?projectId=prj_mock', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(captured).toBeDefined();
+    expect(captured!.teamRole).toBeUndefined();
+  });
+
+  // ── 401: No Bearer + no session cookie ─────────────────────────────────
+
+  it('returns 401 when no Bearer and no session cookie', async () => {
+    mockedParseCookie.mockReturnValue(null);
+
+    const app = createTestApp();
+    app.use('/v1/*', requireAuthOrWebSession(mockDb));
+    app.get('/v1/concepts', (c: Context) => c.json({ ok: true }));
+
+    const res = await app.request('/v1/concepts?projectId=prj_test', {
+      method: 'GET',
+    });
+
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.error.code).toBe('unauthorized');
+  });
+
+  // ── 401: Session cookie present but invalid/expired/revoked ────────────
+
+  it('returns 401 when session cookie is present but verifySession returns null', async () => {
+    mockedParseCookie.mockReturnValue('valid-looking-token');
+    mockedVerifySession.mockResolvedValue(null);
+
+    const app = createTestApp();
+    app.use('/v1/*', requireAuthOrWebSession(mockDb));
+    app.get('/v1/concepts', (c: Context) => c.json({ ok: true }));
+
+    const res = await app.request('/v1/concepts?projectId=prj_test', {
+      method: 'GET',
+      headers: { Cookie: 'teamem_session=valid-looking-token' },
+    });
+
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.error.code).toBe('unauthorized');
+  });
+
+  // ── 401: Valid session but no projectId anywhere ──────────────────────
+
+  it('returns 401 when session is valid but no projectId in query, param, or body', async () => {
+    mockedParseCookie.mockReturnValue('valid-session');
+    mockedVerifySession.mockResolvedValue({
+      userId: 'user_1',
+      sessionId: 'sess_1',
+    });
+
+    // We need a db stub that supports $client.query for the user lookup
+    // (which happens before the projectId check). The projectId check
+    // will throw 401 before we reach any Drizzle select chains.
+    const dbWithUser = {
+      $client: {
+        query: vi.fn().mockResolvedValue({
+          rows: [{ id: 'user_1', github_login: 'testuser', avatar_url: null }],
+        }),
+      },
+    } as unknown as AppDb;
+
+    const app = createTestApp();
+    app.use('/v1/*', requireAuthOrWebSession(dbWithUser));
+    app.get('/v1/concepts', (c: Context) => c.json({ ok: true }));
+
+    // No projectId query param — GET with no params
+    const res = await app.request('/v1/concepts', {
+      method: 'GET',
+      headers: { Cookie: 'teamem_session=valid-session' },
+    });
+
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.error.code).toBe('unauthorized');
+  });
+
+  // ── POST body: projectId extracted from JSON body ──────────────────────
+
+  it('extracts projectId from POST JSON body when not in query/param', async () => {
+    mockedParseCookie.mockReturnValue('valid-session');
+    mockedVerifySession.mockResolvedValue({
+      userId: 'user_1',
+      sessionId: 'sess_1',
+    });
+
+    const wsd = createWebSessionMockDb({
+      userRow: {
+        id: 'user_1',
+        github_login: 'testuser',
+        avatar_url: 'https://example.com/avatar.png',
+      },
+      projectRows: [{ teamId: 'team_1', teamName: 'Test Team' }],
+      membershipRows: [{ role: 'member' }],
+    });
+
+    let captured: AuthContext | undefined;
+
+    const app = createTestApp();
+    app.use('/v1/*', requireAuthOrWebSession(wsd));
+    app.post('/v1/search', (c: Context) => {
+      captured = getAuth(c);
+      return c.json({ ok: true, teamRole: captured!.teamRole });
+    });
+
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: 'teamem_session=valid-session',
+      },
+      body: JSON.stringify({ projectId: 'prj_from_body', query: 'test' }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(captured).toBeDefined();
+    expect(captured!.teamRole).toBe('member');
+    expect(captured!.scope.kind).toBe('allProjects');
+    expect(captured!.scope.teamId).toBe('team_1');
+    expect(captured!.keyName).toBe('Web Session');
+
+    // Verify the original body is still readable by the handler
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+  });
+
+  // ── POST body: non-JSON body does not break the middleware ─────────────
+
+  it('returns 401 for POST with non-JSON body and no query/param projectId', async () => {
+    mockedParseCookie.mockReturnValue('valid-session');
+    mockedVerifySession.mockResolvedValue({
+      userId: 'user_1',
+      sessionId: 'sess_1',
+    });
+
+    // Need db stub with $client.query for the user lookup (happens before
+    // projectId extraction). The POST body clone will fail on non-JSON,
+    // and with no query/param projectId either, we get 401.
+    const dbWithUser = {
+      $client: {
+        query: vi.fn().mockResolvedValue({
+          rows: [{ id: 'user_1', github_login: 'testuser', avatar_url: null }],
+        }),
+      },
+    } as unknown as AppDb;
+
+    const app = createTestApp();
+    app.use('/v1/*', requireAuthOrWebSession(dbWithUser));
+    app.post('/v1/search', (c: Context) => c.json({ ok: true }));
+
+    // POST with non-JSON body, no projectId query param
+    const res = await app.request('/v1/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain',
+        Cookie: 'teamem_session=valid-session',
+      },
+      body: 'not json',
+    });
+
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.error.code).toBe('unauthorized');
+  });
+
+  // ── Web session: viewer role carries teamRole ──────────────────────────
+
+  it('sets teamRole to viewer for viewer membership', async () => {
+    mockedParseCookie.mockReturnValue('viewer-session');
+    mockedVerifySession.mockResolvedValue({
+      userId: 'user_viewer',
+      sessionId: 'sess_viewer',
+    });
+
+    const wsd = createWebSessionMockDb({
+      userRow: {
+        id: 'user_viewer',
+        github_login: 'vieweruser',
+        avatar_url: 'https://example.com/avatar.png',
+      },
+      projectRows: [{ teamId: 'team_1', teamName: 'Test Team' }],
+      membershipRows: [{ role: 'viewer' }],
+    });
+
+    let captured: AuthContext | undefined;
+
+    const app = createTestApp();
+    app.use('/v1/*', requireAuthOrWebSession(wsd));
+    app.get('/v1/concepts', (c: Context) => {
+      captured = getAuth(c);
+      return c.json({ teamRole: captured!.teamRole });
+    });
+
+    const res = await app.request('/v1/concepts?projectId=prj_test', {
+      method: 'GET',
+      headers: { Cookie: 'teamem_session=viewer-session' },
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.teamRole).toBe('viewer');
+    expect(captured!.scopes).toEqual(['read']);
+    // Viewer does NOT get read:payload
+    expect(captured!.scopes).not.toContain('read:payload');
+  });
+
+  // ── Web session: member+ carries teamRole and read:payload ─────────────
+
+  it('sets teamRole to member and includes read:payload scope for member', async () => {
+    mockedParseCookie.mockReturnValue('member-session');
+    mockedVerifySession.mockResolvedValue({
+      userId: 'user_member',
+      sessionId: 'sess_member',
+    });
+
+    const wsd = createWebSessionMockDb({
+      userRow: {
+        id: 'user_member',
+        github_login: 'memberuser',
+        avatar_url: 'https://example.com/avatar.png',
+      },
+      projectRows: [{ teamId: 'team_1', teamName: 'Test Team' }],
+      membershipRows: [{ role: 'member' }],
+    });
+
+    let captured: AuthContext | undefined;
+
+    const app = createTestApp();
+    app.use('/v1/*', requireAuthOrWebSession(wsd));
+    app.get('/v1/concepts', (c: Context) => {
+      captured = getAuth(c);
+      return c.json({
+        teamRole: captured!.teamRole,
+        scopes: captured!.scopes,
+      });
+    });
+
+    const res = await app.request('/v1/concepts?projectId=prj_test', {
+      method: 'GET',
+      headers: { Cookie: 'teamem_session=member-session' },
+    });
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.teamRole).toBe('member');
+    expect(json.scopes).toContain('read');
+    expect(json.scopes).toContain('read:payload');
+  });
+
+  // ── Web session: cross-team → 404 indistinguishable from not-found ─────
+
+  it('returns 404 when user has no membership in the project team (anti-enumeration)', async () => {
+    mockedParseCookie.mockReturnValue('cross-team-session');
+    mockedVerifySession.mockResolvedValue({
+      userId: 'user_no_membership',
+      sessionId: 'sess_cross',
+    });
+
+    const wsd = createWebSessionMockDb({
+      userRow: {
+        id: 'user_no_membership',
+        github_login: 'outsider',
+        avatar_url: 'https://example.com/avatar.png',
+      },
+      projectRows: [{ teamId: 'other_team', teamName: 'Other Team' }],
+      // No membership rows — user is not in this team
+      membershipRows: [],
+    });
+
+    const app = createTestApp();
+    app.use('/v1/*', requireAuthOrWebSession(wsd));
+    app.get('/v1/concepts', (c: Context) => c.json({ ok: true }));
+
+    const res = await app.request('/v1/concepts?projectId=prj_other', {
+      method: 'GET',
+      headers: { Cookie: 'teamem_session=cross-team-session' },
+    });
+
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error.code).toBe('not_found');
+  });
+
+  // ── Web session: missing project → 404 (anti-enumeration) ──────────────
+
+  it('returns 404 when project does not exist (same as missing membership)', async () => {
+    mockedParseCookie.mockReturnValue('valid-session');
+    mockedVerifySession.mockResolvedValue({
+      userId: 'user_1',
+      sessionId: 'sess_1',
+    });
+
+    const wsd = createWebSessionMockDb({
+      userRow: {
+        id: 'user_1',
+        github_login: 'testuser',
+        avatar_url: 'https://example.com/avatar.png',
+      },
+      // No project rows — project doesn't exist
+      projectRows: [],
+      membershipRows: [],
+    });
+
+    const app = createTestApp();
+    app.use('/v1/*', requireAuthOrWebSession(wsd));
+    app.get('/v1/concepts', (c: Context) => c.json({ ok: true }));
+
+    const res = await app.request('/v1/concepts?projectId=prj_nonexistent', {
+      method: 'GET',
+      headers: { Cookie: 'teamem_session=valid-session' },
+    });
+
+    expect(res.status).toBe(404);
+    const json = await res.json();
+    expect(json.error.code).toBe('not_found');
   });
 });

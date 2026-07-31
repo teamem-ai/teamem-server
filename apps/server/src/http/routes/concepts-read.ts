@@ -33,7 +33,7 @@ import {
   listConcepts,
   type ConceptRow,
 } from '../../db/repositories/concepts-read.js';
-import { requireAuth, requireScope, getAuth } from '../auth.js';
+import { requireAuthOrWebSession, requireScope, getAuth } from '../auth.js';
 import { isProjectScope, getTeamId, getProjectId } from '../../auth/scope.js';
 import {
   NotFoundError,
@@ -399,14 +399,14 @@ export function buildConceptsReadRoutes(deps: ConceptsReadDeps): Hono {
   const routes = new Hono();
 
   // List endpoint: GET /v1/concepts (M0-READ-03).
-  routes.use('/v1/concepts', requireAuth(deps.db));
+  routes.use('/v1/concepts', requireAuthOrWebSession(deps.db));
   routes.use('/v1/concepts', requireScope('read'));
   routes.get('/v1/concepts', async (c) => {
     return getConceptsListHandler(c, deps);
   });
 
   // Detail endpoints: GET /v1/concepts/by-path and GET /v1/concepts/:uuid (M0-READ-04).
-  routes.use('/v1/concepts/*', requireAuth(deps.db));
+  routes.use('/v1/concepts/*', requireAuthOrWebSession(deps.db));
   routes.use('/v1/concepts/*', requireScope('read'));
 
   // by-path MUST be registered before :uuid so the literal "by-path" is not
