@@ -46,7 +46,9 @@ describe.skipIf(!url)('LLM Config Routes — live Postgres', () => {
   });
 
   beforeEach(async () => {
+    // Clean up in reverse FK order: web_sessions references users, so delete it first.
     await db.execute('DELETE FROM llm_config');
+    await db.execute('DELETE FROM web_sessions');
     await db.execute('DELETE FROM memberships');
     await db.execute('DELETE FROM projects');
     await db.execute('DELETE FROM principals');
