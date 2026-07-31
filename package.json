@@ -10,7 +10,7 @@
   },
   "scripts": {
     "dev": "pnpm --filter @teamem/server dev",
-    "build": "pnpm --filter @teamem/server build",
+    "build": "pnpm --filter @teamem/server build && pnpm --filter @teamem/web build",
     "start": "pnpm --filter @teamem/server start",
     "worker": "pnpm --filter @teamem/server worker",
     "lint": "eslint .",

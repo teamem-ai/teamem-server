@@ -53,6 +53,7 @@ import { buildInvitesRoutes } from './http/routes/invites.js';
 import { inviteLookupHandler } from './http/routes/invite-lookup.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
+import { createSpaMiddleware } from './http/spa.js';
 
 export interface AppDeps extends HealthDeps {
   /** Database instance for scoped queries (events-write, read endpoints). */
@@ -239,6 +240,15 @@ export function buildApp(deps: AppDeps = {}) {
       buildMcpRoutes({ db: deps.db, registry: mcpRegistry, queue: deps.queue, embeddingClient: deps.embeddingClient }),
     );
   }
+
+  // ── SPA static file serving (production: web SPA hosted by server) ──
+  // Mounted after all API routes so /v1, /auth, /healthz, /readyz,
+  // /invites, /teams, /mcp, and /e2e take precedence.  The middleware
+  // serves static assets from apps/web/dist and falls back to index.html
+  // for SPA client-side routing.  If the dist directory doesn't exist
+  // (e.g. pure-API deployments or dev with Vite dev server), it does
+  // nothing and requests fall through to the 404 handler.
+  app.use('*', createSpaMiddleware());
 
   return app;
 }
