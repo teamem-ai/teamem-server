@@ -295,7 +295,10 @@ export function JobsPage() {
             title="No compile jobs yet"
             description="Jobs appear when events are queued for compilation. Ingest some events and they'll show up here."
             actions={
-              <a className="btn btn-outline" href="/events">
+              <a
+                className="btn btn-outline"
+                href={projectId ? `/events?projectId=${projectId}` : "/events"}
+              >
                 View events
               </a>
             }

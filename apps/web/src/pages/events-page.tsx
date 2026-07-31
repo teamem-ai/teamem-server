@@ -412,7 +412,7 @@ export function EventsPage() {
             </button>
           );
         })}
-        <span className="small muted" style={{ marginLeft: "auto" }}>
+        <span className="small muted hidden sm:inline" style={{ marginLeft: "auto" }}>
           {events.length} events · cursor pagination
         </span>
       </div>

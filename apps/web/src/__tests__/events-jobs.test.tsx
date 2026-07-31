@@ -17,6 +17,7 @@ import { EventsPage } from "@/pages/events-page";
 import { EventDetailPage } from "@/pages/event-detail-page";
 import { JobsPage } from "@/pages/jobs-page";
 import { JobDetailPage } from "@/pages/job-detail-page";
+import { AppShell } from "@/components/layout/app-shell";
 import { AuditWriteFailedError } from "@/lib/api";
 
 // ── Mock fetch ──────────────────────────────────────────────────────────────
@@ -337,6 +338,19 @@ describe("EventsPage", () => {
     renderListPage(<EventsPage />);
     await waitFor(() => {
       expect(screen.getByText("Load more")).toBeInTheDocument();
+    });
+  });
+
+  it("renders non-clickable 'Soon' nav items in sidebar", async () => {
+    render(
+      <MemoryRouter initialEntries={[`/events?projectId=${TEST_PROJECT_ID}`]}>
+        <AppShell />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      const soonItem = screen.getByText("Team digest").closest("div");
+      expect(soonItem).toHaveAttribute("title", "Coming soon");
+      expect(soonItem?.tagName).toBe("DIV");
     });
   });
 });

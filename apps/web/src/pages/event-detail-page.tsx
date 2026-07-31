@@ -265,11 +265,13 @@ export function EventDetailPage() {
     }
   };
 
+  const backHref = projectId ? `/events?projectId=${projectId}` : "/events";
+
   // ── Project scope prompt ────────────────────────────────────────────────
   if (!projectId && scopeReady) {
     return (
       <div className="max-w-[860px]">
-        <a className="btn btn-ghost btn-sm" href="/events" style={{ marginBottom: "14px" }}>
+        <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
           <ArrowLeft /> Events
         </a>
         <div className="card">
@@ -283,7 +285,7 @@ export function EventDetailPage() {
   if (loading) {
     return (
       <div className="max-w-[860px]">
-        <a className="btn btn-ghost btn-sm" href="/events" style={{ marginBottom: "14px" }}>
+        <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
           <ArrowLeft /> Events
         </a>
         <div className="card">
@@ -302,7 +304,7 @@ export function EventDetailPage() {
   if (auditFailed) {
     return (
       <div className="max-w-[860px]">
-        <a className="btn btn-ghost btn-sm" href="/events" style={{ marginBottom: "14px" }}>
+        <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
           <ArrowLeft /> Events
         </a>
         <div className="card">
@@ -339,7 +341,7 @@ export function EventDetailPage() {
   if (error) {
     return (
       <div className="max-w-[860px]">
-        <a className="btn btn-ghost btn-sm" href="/events" style={{ marginBottom: "14px" }}>
+        <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
           <ArrowLeft /> Events
         </a>
         <div className="card">
@@ -367,7 +369,7 @@ export function EventDetailPage() {
   if (!event) {
     return (
       <div className="max-w-[860px]">
-        <a className="btn btn-ghost btn-sm" href="/events" style={{ marginBottom: "14px" }}>
+        <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
           <ArrowLeft /> Events
         </a>
         <div className="card">
@@ -388,7 +390,7 @@ export function EventDetailPage() {
   // ── Normal display ────────────────────────────────────────────────────────
   return (
     <div className="max-w-[860px]">
-      <a className="btn btn-ghost btn-sm" href="/events" style={{ marginBottom: "14px" }}>
+      <a className="btn btn-ghost btn-sm" href={backHref} style={{ marginBottom: "14px" }}>
         <ArrowLeft /> Events
       </a>
 
