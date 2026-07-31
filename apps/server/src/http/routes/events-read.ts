@@ -244,6 +244,7 @@ async function getEventDetailHandler(c: Context, deps: EventsReadDeps): Promise<
     if (err instanceof AuditWriteFailedError) {
       throw new InternalError('Payload read audit failed; access denied', {
         cause: err,
+        details: { audit_failed: true },
       });
     }
     throw err;

@@ -11,7 +11,7 @@
  * - Red lines: actor null → Unknown (not System), skipped = neutral (not error)
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { EventsPage } from "@/pages/events-page";
 import { EventDetailPage } from "@/pages/event-detail-page";
@@ -51,10 +51,16 @@ afterEach(() => {
 
 // ── Render helpers ─────────────────────────────────────────────────────────
 
-/** Render a page that doesn't need route params (list pages). */
-function renderListPage(element: React.ReactElement) {
+const TEST_PROJECT_ID = "prj_demo00000000000000000000";
+
+/** Render a list page with a projectId in the URL so it doesn't block on the
+ *  interim scope prompt. */
+function renderListPage(
+  element: React.ReactElement,
+  { route = `/?projectId=${TEST_PROJECT_ID}` }: { route?: string } = {},
+) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[route]}>
       {element}
     </MemoryRouter>,
   );
@@ -304,6 +310,28 @@ describe("EventsPage", () => {
     });
   });
 
+  it("filters GitHub events client-side because API only supports single sourceKind", async () => {
+    mockFetchResponse(mockEventListResponse);
+    renderListPage(<EventsPage />);
+    await waitFor(() => {
+      // Full page: filter chip + table rows include CLI init
+      expect(screen.getAllByText("CLI init").length).toBeGreaterThan(1);
+    });
+    fireEvent.click(screen.getByText("GitHub"));
+    await waitFor(() => {
+      // GitHub events should remain
+      expect(screen.getByText("Commit")).toBeInTheDocument();
+      expect(screen.getByText("dli")).toBeInTheDocument();
+      // CLI init and MCP write events should be hidden; only the filter chip remains
+      expect(screen.getAllByText("CLI init").length).toBe(1);
+      expect(screen.getAllByText("MCP write").length).toBe(1);
+      // The CLI-init row summary should not appear
+      expect(
+        screen.queryByText("restore-postgres-from-backup.md"),
+      ).toBeNull();
+    });
+  });
+
   it("renders load more button when next cursor exists", async () => {
     mockFetchResponse(mockEventListResponse);
     renderListPage(<EventsPage />);
@@ -346,6 +374,25 @@ describe("EventDetailPage", () => {
     });
   });
 
+  it("renders payload safely without HTML injection", async () => {
+    const maliciousPayload = {
+      ...mockEventDetailResponse,
+      data: {
+        ...mockEventDetail,
+        payload: {
+          html: "<script>alert('xss')</script>",
+          nested: { value: "<img src=x onerror=alert(1)>" },
+        },
+      },
+    };
+    mockFetchResponse(maliciousPayload);
+    renderEventDetail("evt_xss");
+    await waitFor(() => {
+      // The literal script tag should be displayed as text, not executed
+      expect(screen.getByText(/<script>alert\('xss'\)<\/script>/)).toBeInTheDocument();
+    });
+  });
+
   it("shows fail-closed lock state when audit write fails", async () => {
     mockFetchError(
       new AuditWriteFailedError(500, {
@@ -369,6 +416,31 @@ describe("EventDetailPage", () => {
       expect(screen.getByText(/req-audit-fail-001/)).toBeInTheDocument();
       // Must show Retry button
       expect(screen.getByText("Retry")).toBeInTheDocument();
+    });
+  });
+
+  it("shows fail-closed lock state for real backend 500 internal+audit_failed", async () => {
+    // Real backend global error handler normalizes the message to
+    // "Internal error" but now includes details.audit_failed = true.
+    mockFetchResponse(
+      {
+        requestId: "req-audit-fail-002",
+        error: {
+          code: "internal",
+          message: "Internal error",
+          details: { audit_failed: true },
+        },
+      },
+      500,
+    );
+    renderEventDetail("evt_realAuditFail");
+    await waitFor(() => {
+      // Must show the specific fail-closed lock state, NOT generic error
+      expect(
+        screen.getByText(/Can't display payload right now/),
+      ).toBeInTheDocument();
+      // Must show the request ID for diagnostics
+      expect(screen.getByText(/req-audit-fail-002/)).toBeInTheDocument();
     });
   });
 

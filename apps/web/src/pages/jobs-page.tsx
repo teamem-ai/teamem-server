@@ -14,11 +14,12 @@ import type { Job, JobStatus } from "@teamem/schema";
 import { fetchJobs, ApiError } from "@/lib/api";
 import { JobStatusPill } from "@/components/ui/job-status-pill";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ProjectScopePrompt } from "@/components/ui/project-scope-prompt";
+import { useProjectId } from "@/lib/use-project-id";
 import { cn } from "@/lib/utils";
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-const DEFAULT_PROJECT_ID = "prj_demo00000000000000000000";
 
 const statusFilters: { label: string; status?: JobStatus }[] = [
   { label: "All" },
@@ -102,6 +103,7 @@ function initiatedByIcon(job: Job) {
 function JobRowSkeleton() {
   return (
     <tr>
+      <td><div className="skeleton h-3 w-[80px]" /></td>
       <td><div className="skeleton h-4 w-[80px]" /></td>
       <td className="num"><div className="skeleton h-3 w-[20px] ml-auto" /></td>
       <td><div className="skeleton h-3 w-[90px]" /></td>
@@ -111,10 +113,20 @@ function JobRowSkeleton() {
   );
 }
 
+/** Sort failed jobs to the top while preserving created_at desc order inside each group. */
+function sortFailedFirst(jobs: Job[]): Job[] {
+  return [...jobs].sort((a, b) => {
+    if (a.status === "failed" && b.status !== "failed") return -1;
+    if (a.status !== "failed" && b.status === "failed") return 1;
+    return 0;
+  });
+}
+
 // ── Main page ───────────────────────────────────────────────────────────────
 
 export function JobsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { projectId, setProjectId, isReady: scopeReady } = useProjectId();
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -129,22 +141,24 @@ export function JobsPage() {
 
   const loadJobs = useCallback(
     async (cursor?: string, append = false) => {
+      if (!projectId) return;
       if (!append) setLoading(true);
       else setLoadingMore(true);
       setError(null);
 
       try {
         const result = await fetchJobs({
-          projectId: DEFAULT_PROJECT_ID,
+          projectId,
           status: filterStatus,
           cursor,
           limit: 20,
         });
         const data = result.data as Job[];
+        const sorted = sortFailedFirst(data);
         if (append) {
-          setJobs((prev) => [...prev, ...data]);
+          setJobs((prev) => [...prev, ...sorted]);
         } else {
-          setJobs(data);
+          setJobs(sorted);
         }
         setNextCursor(result.nextCursor);
       } catch (err) {
@@ -158,21 +172,28 @@ export function JobsPage() {
         setLoadingMore(false);
       }
     },
-    [filterStatus],
+    [filterStatus, projectId],
   );
 
   useEffect(() => {
-    loadJobs();
-  }, [loadJobs]);
+    if (projectId && scopeReady) {
+      loadJobs();
+    } else if (!projectId && scopeReady) {
+      setLoading(false);
+      setError(null);
+    }
+  }, [loadJobs, projectId, scopeReady]);
 
   const handleFilterChange = (status?: string) => {
     const value = status ?? "";
     setActiveFilter(value);
+    const nextParams = new URLSearchParams(searchParams);
     if (value) {
-      setSearchParams({ status: value });
+      nextParams.set("status", value);
     } else {
-      setSearchParams({});
+      nextParams.delete("status");
     }
+    setSearchParams(nextParams);
   };
 
   const handleLoadMore = () => {
@@ -180,6 +201,26 @@ export function JobsPage() {
       loadJobs(nextCursor, true);
     }
   };
+
+  // ── Render: project scope prompt ──────────────────────────────────────────
+  if (!projectId && scopeReady) {
+    return (
+      <div>
+        <div className="page-head">
+          <div className="ph-text">
+            <h1>Jobs</h1>
+            <p className="sub">
+              Ingest and compilation work units. When events don&apos;t become
+              pages, the answer is here.
+            </p>
+          </div>
+        </div>
+        <div className="card">
+          <ProjectScopePrompt onSet={setProjectId} />
+        </div>
+      </div>
+    );
+  }
 
   // ── Error ─────────────────────────────────────────────────────────────────
   if (error && jobs.length === 0) {
@@ -268,6 +309,7 @@ export function JobsPage() {
           <table className="table">
             <thead>
               <tr>
+                <th style={{ width: "160px" }}>Kind</th>
                 <th style={{ width: "150px" }}>Status</th>
                 <th style={{ width: "90px" }} className="num">
                   Events
@@ -294,6 +336,14 @@ export function JobsPage() {
                           window.location.href = `/jobs/${job.id}`;
                         }}
                       >
+                        <td>
+                          <span
+                            className="small muted"
+                            title="The API does not expose job kind yet (DUA-156 gap)"
+                          >
+                            —
+                          </span>
+                        </td>
                         <td>
                           <JobStatusPill status={job.status as JobStatus} />
                         </td>

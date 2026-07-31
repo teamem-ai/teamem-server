@@ -21,6 +21,8 @@ import {
 import type { EventSummary, SourceKind, ActorProvenance } from "@teamem/schema";
 import { fetchEvents, ApiError } from "@/lib/api";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ProjectScopePrompt } from "@/components/ui/project-scope-prompt";
+import { useProjectId } from "@/lib/use-project-id";
 import { cn } from "@/lib/utils";
 
 // ── Source kind display config ──────────────────────────────────────────────
@@ -68,17 +70,25 @@ const sourceKindConfig: Record<
 
 // ── Filter chip definitions ─────────────────────────────────────────────────
 
-const filterChips: { label: string; kind?: SourceKind; icon?: typeof Activity }[] = [
+const GITHUB_KINDS = [
+  "github_commit",
+  "github_pr",
+  "github_issue",
+  "github_pr_comment",
+];
+
+const filterChips: {
+  label: string;
+  kind?: SourceKind | "github_group";
+  icon?: typeof Activity;
+}[] = [
   { label: "All sources" },
-  { label: "GitHub", kind: undefined, icon: GitCommitHorizontal },
+  { label: "GitHub", kind: "github_group", icon: GitCommitHorizontal },
   { label: "CLI init", kind: "cli_init", icon: Terminal },
   { label: "MCP write", kind: "mcp_write", icon: Sparkles },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-/** Placeholder project ID — will come from scope context in M2-AUTH-03. */
-const DEFAULT_PROJECT_ID = "prj_demo00000000000000000000";
 
 function formatRelativeTime(iso: string): string {
   const date = new Date(iso);
@@ -224,9 +234,11 @@ function EventRowSkeleton() {
 
 export function EventsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const { projectId, setProjectId, isReady: scopeReady } = useProjectId();
 
   // State
   const [events, setEvents] = useState<EventSummary[]>([]);
+  const [fetchedEvents, setFetchedEvents] = useState<EventSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -235,28 +247,31 @@ export function EventsPage() {
     searchParams.get("sourceKind") ?? "",
   );
 
-  // Derive sourceKind filter from state
-  const filterKind = activeFilter || undefined;
+  const isGitHubGroup = activeFilter === "github_group";
+  const serverFilterKind = isGitHubGroup
+    ? undefined
+    : (activeFilter || undefined);
 
   // Fetch events
   const loadEvents = useCallback(
     async (cursor?: string, append = false) => {
+      if (!projectId) return;
       if (!append) setLoading(true);
       else setLoadingMore(true);
       setError(null);
 
       try {
         const result = await fetchEvents({
-          projectId: DEFAULT_PROJECT_ID,
-          sourceKind: filterKind,
+          projectId,
+          sourceKind: serverFilterKind,
           cursor,
           limit: 20,
         });
         const data = result.data as EventSummary[];
         if (append) {
-          setEvents((prev) => [...prev, ...data]);
+          setFetchedEvents((prev) => [...prev, ...data]);
         } else {
-          setEvents(data);
+          setFetchedEvents(data);
         }
         setNextCursor(result.nextCursor);
       } catch (err) {
@@ -270,23 +285,41 @@ export function EventsPage() {
         setLoadingMore(false);
       }
     },
-    [filterKind],
+    [projectId, serverFilterKind],
   );
 
-  // Load on mount and when filter changes
+  // Apply client-side GitHub group filter
   useEffect(() => {
-    loadEvents();
-  }, [loadEvents]);
+    if (isGitHubGroup) {
+      setEvents(
+        fetchedEvents.filter((e) => GITHUB_KINDS.includes(e.source.kind)),
+      );
+    } else {
+      setEvents(fetchedEvents);
+    }
+  }, [fetchedEvents, isGitHubGroup]);
+
+  // Load on mount and when filter / project changes
+  useEffect(() => {
+    if (projectId && scopeReady) {
+      loadEvents();
+    } else if (!projectId && scopeReady) {
+      setLoading(false);
+      setError(null);
+    }
+  }, [loadEvents, projectId, scopeReady]);
 
   // Update URL when filter changes
-  const handleFilterChange = (kind?: string) => {
+  const handleFilterChange = (kind?: SourceKind | "github_group") => {
     const value = kind ?? "";
     setActiveFilter(value);
+    const nextParams = new URLSearchParams(searchParams);
     if (value) {
-      setSearchParams({ sourceKind: value });
+      nextParams.set("sourceKind", value);
     } else {
-      setSearchParams({});
+      nextParams.delete("sourceKind");
     }
+    setSearchParams(nextParams);
   };
 
   const handleLoadMore = () => {
@@ -294,6 +327,26 @@ export function EventsPage() {
       loadEvents(nextCursor, true);
     }
   };
+
+  // ── Render: project scope prompt ────────────────────────────────────────────
+  if (!projectId && scopeReady) {
+    return (
+      <div>
+        <div className="page-head">
+          <div className="ph-text">
+            <h1>Events</h1>
+            <p className="sub">
+              Raw development activity ingested from GitHub webhooks,{" "}
+              <code className="mono">teamem init</code> and agent writes.
+            </p>
+          </div>
+        </div>
+        <div className="card">
+          <ProjectScopePrompt onSet={setProjectId} />
+        </div>
+      </div>
+    );
+  }
 
   // ── Render: error state ───────────────────────────────────────────────────
   if (error && events.length === 0) {
@@ -346,10 +399,8 @@ export function EventsPage() {
       {/* Source filter chips */}
       <div className="filter-row" style={{ marginTop: 0 }}>
         {filterChips.map((chip) => {
-          const isActive =
-            chip.kind === undefined
-              ? activeFilter === ""
-              : activeFilter === chip.kind;
+          const value = chip.kind ?? "";
+          const isActive = activeFilter === value;
           return (
             <button
               key={chip.label}
@@ -404,7 +455,7 @@ export function EventsPage() {
                       key={event.id}
                       className="clickable"
                       onClick={() => {
-                        window.location.href = `/events/${event.id}?projectId=${DEFAULT_PROJECT_ID}`;
+                        window.location.href = `/events/${event.id}?projectId=${projectId}`;
                       }}
                     >
                       <td>

@@ -58,6 +58,7 @@ interface ErrorBody {
   error?: {
     code?: string;
     message?: string;
+    details?: Record<string, unknown>;
   };
 }
 
@@ -104,12 +105,16 @@ async function request<T>(
       body = {};
     }
 
-    // Detect fail-closed audit state: 500 + "Payload read audit failed"
+    // Detect fail-closed audit state: 500 + details.audit_failed === true
+    // (backend also preserves the internal message in test/dev configs, but
+    // production error handling normalizes the message to "Internal error".)
     const err = body as ErrorBody;
-    if (
+    const isAuditFailed =
       res.status === 500 &&
-      err?.error?.message?.includes("Payload read audit failed")
-    ) {
+      (err?.error?.details?.audit_failed === true ||
+        err?.error?.details?.audit_failed === "true" ||
+        err?.error?.message?.includes("Payload read audit failed"));
+    if (isAuditFailed) {
       throw new AuditWriteFailedError(res.status, body);
     }
 

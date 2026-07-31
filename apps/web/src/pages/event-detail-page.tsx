@@ -7,7 +7,7 @@
  * Consumes GET /v1/events/:id (requires read:payload scope, audited).
  */
 import { useState, useEffect } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Copy,
@@ -28,10 +28,10 @@ import {
   AuditWriteFailedError,
   ApiError,
 } from "@/lib/api";
+import { ProjectScopePrompt } from "@/components/ui/project-scope-prompt";
+import { useProjectId } from "@/lib/use-project-id";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-const DEFAULT_PROJECT_ID = "prj_demo00000000000000000000";
 
 function formatFullDate(iso: string): string {
   const date = new Date(iso);
@@ -75,32 +75,79 @@ const sourceKindIcon: Record<string, typeof GitCommitHorizontal> = {
   external_event: Activity,
 };
 
-// ── JSON syntax highlighting (lightweight, no library) ─────────────────────
+// ── JSON syntax highlighting (safe, no dangerouslySetInnerHTML) ──────────
+
+function JsonString({ children }: { children: string }) {
+  return (
+    <span className="json-string">
+      {JSON.stringify(children)}
+    </span>
+  );
+}
+
+function JsonValue({ value, indent = 0 }: { value: unknown; indent?: number }) {
+  const pad = "  ".repeat(indent);
+
+  if (value === null) {
+    return <span className="json-null">null</span>;
+  }
+  if (typeof value === "boolean") {
+    return <span className="json-bool">{value ? "true" : "false"}</span>;
+  }
+  if (typeof value === "number") {
+    return <span className="json-number">{String(value)}</span>;
+  }
+  if (typeof value === "string") {
+    return <JsonString>{value}</JsonString>;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <span>[]</span>;
+    }
+    return (
+      <span>
+        {"["}
+        {value.map((item, index) => (
+          <span key={index}>
+            {"\n"}{pad}{"  "}
+            <JsonValue value={item} indent={indent + 1} />
+            {index < value.length - 1 ? "," : ""}
+          </span>
+        ))}
+        {"\n"}{pad}{"]"}
+      </span>
+    );
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const keys = Object.keys(obj);
+    if (keys.length === 0) {
+      return <span>{"{}"}</span>;
+    }
+    return (
+      <span>
+        {"{"}
+        {keys.map((key, index) => (
+          <span key={key}>
+            {"\n"}{pad}{"  "}
+            <span className="json-key">{JSON.stringify(key)}</span>
+            {": "}
+            <JsonValue value={obj[key]} indent={indent + 1} />
+            {index < keys.length - 1 ? "," : ""}
+          </span>
+        ))}
+        {"\n"}{pad}{"}"}
+      </span>
+    );
+  }
+  return <span>{JSON.stringify(value)}</span>;
+}
 
 function JsonViewer({ data }: { data: Record<string, unknown> }) {
-  const json = JSON.stringify(data, null, 2);
-
-  // Simple regex-based highlighting for keys, strings, numbers, booleans, null
-  const highlighted = json
-    .replace(
-      /("(?:[^"\\]|\\.)*")\s*:/g,
-      '<span class="json-key">$1</span>:',
-    )
-    .replace(
-      /:\s*("(?:[^"\\]|\\.)*")/g,
-      ': <span class="json-string">$1</span>',
-    )
-    .replace(/:\s*(true|false)/g, ': <span class="json-bool">$1</span>')
-    .replace(/:\s*(null)/g, ': <span class="json-null">$1</span>')
-    .replace(/:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
-      ': <span class="json-number">$1</span>',
-    );
-
   return (
-    <pre
-      className="json-viewer"
-      dangerouslySetInnerHTML={{ __html: highlighted }}
-    />
+    <pre className="json-viewer">
+      <JsonValue value={data} />
+    </pre>
   );
 }
 
@@ -154,8 +201,7 @@ function ActorDisplay({
 
 export function EventDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [searchParams] = useSearchParams();
-  const projectId = searchParams.get("projectId") ?? DEFAULT_PROJECT_ID;
+  const { projectId, setProjectId, isReady: scopeReady } = useProjectId();
 
   const [event, setEvent] = useState<EventDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -166,7 +212,7 @@ export function EventDetailPage() {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !projectId || !scopeReady) return;
 
     let cancelled = false;
     setLoading(true);
@@ -196,7 +242,7 @@ export function EventDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [id, projectId]);
+  }, [id, projectId, scopeReady]);
 
   const handleCopyJson = async () => {
     if (!event) return;
@@ -218,6 +264,20 @@ export function EventDetailPage() {
       // silent
     }
   };
+
+  // ── Project scope prompt ────────────────────────────────────────────────
+  if (!projectId && scopeReady) {
+    return (
+      <div className="max-w-[860px]">
+        <a className="btn btn-ghost btn-sm" href="/events" style={{ marginBottom: "14px" }}>
+          <ArrowLeft /> Events
+        </a>
+        <div className="card">
+          <ProjectScopePrompt onSet={setProjectId} />
+        </div>
+      </div>
+    );
+  }
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) {
