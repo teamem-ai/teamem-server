@@ -45,7 +45,16 @@ function loadState(): OnboardingState {
 
 function saveState(state: OnboardingState) {
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    // R7: the API key plaintext must never be persisted — strip it
+    // before serialising.  Step 5 needs the token in memory to poll,
+    // but it must not survive a page reload or browser close.
+    const safe: OnboardingState = {
+      ...state,
+      step4: state.step4
+        ? { ...state.step4, token: "", mcpCommand: "" }
+        : undefined,
+    };
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(safe));
   } catch {
     // storage full or unavailable — non-critical
   }

@@ -437,4 +437,64 @@ describe("Onboarding wizard — network-boundary integration (MSW)", () => {
       screen.getByText(/Settings.*API keys/),
     ).toBeInTheDocument();
   });
+
+  it("R7: API key plaintext is never persisted to sessionStorage", async () => {
+    renderOnboarding();
+
+    // Navigate through all steps to get a key minted
+    fireEvent.change(screen.getByLabelText("Team name"), {
+      target: { value: "Acme Corp" },
+    });
+    fireEvent.change(screen.getByLabelText("First project"), {
+      target: { value: TEST_PROJECT_NAME },
+    });
+    fireEvent.click(screen.getByText("Continue"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Connect an LLM provider")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText(/Skip for now/));
+
+    await waitFor(() => {
+      expect(screen.getByText("Choose which repositories to watch")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Continue"));
+
+    // Wait for key to be minted (token visible on screen)
+    await waitFor(
+      () => {
+        expect(screen.getByText(TEST_TOKEN)).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+
+    // Advance to Step 5 — this triggers the state persistence with token stripped
+    fireEvent.click(screen.getByText(/I've copied the key/));
+
+    // Wait for Step 5 to render
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText("Your first knowledge is here"),
+        ).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+
+    // Now check sessionStorage: the persisted state must NOT contain the token.
+    // React effects are async, so poll until the state is persisted.
+    await waitFor(
+      () => {
+        const stored = sessionStorage.getItem("teamem-onboarding");
+        expect(stored).toBeTruthy();
+        const parsed = JSON.parse(stored!);
+        expect(parsed.step4).toBeTruthy();
+        expect(parsed.step4.token).toBe("");
+        expect(parsed.step4.mcpCommand).toBe("");
+        // keyId (non-sensitive) can be persisted
+        expect(parsed.step4.keyId).toBeTruthy();
+      },
+      { timeout: 3000 },
+    );
+  });
 });

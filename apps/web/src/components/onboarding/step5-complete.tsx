@@ -92,7 +92,10 @@ export function Step5Complete({
     };
   }, [fetchData, polling]);
 
-  const hasData = stats && (stats.hasEvents || stats.hasPages);
+  // Only show success when at least one concept page exists.
+  // Events alone do not constitute success — the compiler must have
+  // produced pages (red line: honest waiting, not fake success).
+  const hasData = stats && stats.hasPages;
 
   // ── Key skipped state: no Bearer token, can't poll read endpoints ───
 
@@ -309,19 +312,19 @@ export function Step5Complete({
         compiled.
       </p>
 
-      {/* Stats row — all zeros */}
+      {/* Stats row — shows observed counts (may be non-zero for events/jobs even when pages are 0) */}
       <div className="card card-pad">
         <div className="stat-row">
           <div className="stat">
-            <span className="num">0</span>
+            <span className="num">{stats?.eventsCount ?? 0}</span>
             <span className="lbl">Events received</span>
           </div>
           <div className="stat">
-            <span className="num">0</span>
+            <span className="num">{stats?.jobsCount ?? 0}</span>
             <span className="lbl">Jobs found</span>
           </div>
           <div className="stat">
-            <span className="num">0</span>
+            <span className="num">{stats?.pagesCount ?? 0}</span>
             <span className="lbl">Pages compiled</span>
           </div>
         </div>
