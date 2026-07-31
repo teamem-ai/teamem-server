@@ -152,7 +152,14 @@ async function assembleConcept(
     .leftJoin(
       schema.users,
       and(
-        eq(schema.users.githubId, sql`CAST(${schema.principals.providerUserId} AS INTEGER)`),
+        eq(sql`${schema.users.githubId}::text`, schema.principals.providerUserId),
+      ),
+    )
+    .leftJoin(
+      schema.memberships,
+      and(
+        eq(schema.memberships.userId, schema.users.id),
+        eq(schema.memberships.teamId, teamId),
       ),
     )
     .where(

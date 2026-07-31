@@ -82,6 +82,7 @@ const threeEvidenceConcept = {
       displayName: "dli",
       githubLogin: "dli",
       avatarUrl: "https://avatars.githubusercontent.com/u/12345",
+      userId: "usr_dli",
     },
     {
       principalId: "pri_ac57a5e07cd94af0aec6b08819cb7422",
@@ -268,14 +269,42 @@ describe("ConceptDetailPage", () => {
     expect(screen.getByText("GitHub account")).toBeInTheDocument();
   });
 
-  it("links bound GitHub contributors to their GitHub profile", async () => {
+  it("links bound GitHub contributors to internal member profile when userId is present", async () => {
     setupScope();
     mocks.fetchConcept.mockResolvedValue(threeEvidenceConcept);
     renderConcept(threeEvidenceConcept.uuid);
 
     await screen.findByText("Contributors · 2");
-    const ghLink = screen.getByText("@dli").closest("a");
-    expect(ghLink).toHaveAttribute("href", "https://github.com/dli");
+    // dli has userId: "usr_dli" → should link to internal member profile
+    const link = screen.getByText("@dli").closest("a");
+    expect(link).toHaveAttribute("href", "/members/usr_dli");
+    // Internal link, not blank target
+    expect(link).not.toHaveAttribute("target", "_blank");
+  });
+
+  it("falls back to GitHub profile when contributor has no userId", async () => {
+    setupScope();
+    // dli without userId
+    const noUserConcept = {
+      ...threeEvidenceConcept,
+      contributors: [
+        {
+          principalId: "pri_no_user",
+          kind: "human" as const,
+          provider: "github",
+          displayName: "somebody",
+          githubLogin: "somebody",
+          avatarUrl: "https://avatars.githubusercontent.com/u/99999",
+        },
+        ...threeEvidenceConcept.contributors.slice(1),
+      ],
+    };
+    mocks.fetchConcept.mockResolvedValue(noUserConcept);
+    renderConcept(noUserConcept.uuid);
+
+    await screen.findByText("@somebody");
+    const ghLink = screen.getByText("@somebody").closest("a");
+    expect(ghLink).toHaveAttribute("href", "https://github.com/somebody");
     expect(ghLink).toHaveAttribute("target", "_blank");
   });
 
