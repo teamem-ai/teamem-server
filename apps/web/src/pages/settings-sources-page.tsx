@@ -8,6 +8,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { CommandBlock } from "@/components/ui/command-block";
+import { PermissionDenied, ViewerInfoBanner } from "@/components/ui/permission-denied";
 import type { KeyEntry, ConnectorStatusResponse, MintKeyResponse } from "@teamem/schema";
 import { useSession } from "@/lib/session";
 
@@ -32,6 +33,7 @@ export function SettingsSourcesPage() {
   const teamId = session.teamId;
   const role = session.role ?? "viewer";
   const canManage = role === "owner" || role === "admin";
+  const isViewer: boolean = role === "viewer";
 
   const [keys, setKeys] = useState<KeyEntry[]>([]);
   const [selectedKeyId, setSelectedKeyId] = useState("");
@@ -108,6 +110,25 @@ export function SettingsSourcesPage() {
     } finally {
       setMinting(false);
     }
+  }
+
+  // ── Viewer guard ──────────────────────────────────────────────────────
+  if (isViewer) {
+    return (
+      <div>
+        <div className="page-head">
+          <div className="ph-text">
+            <h1>Ingestion sources</h1>
+            <p className="sub">
+              Where events come from. Three ways feed the compiler — use any
+              combination.
+            </p>
+          </div>
+        </div>
+        <ViewerInfoBanner />
+        <PermissionDenied requiredRole="admin" />
+      </div>
+    );
   }
 
   return (
