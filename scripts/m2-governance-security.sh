@@ -285,11 +285,11 @@ BRAVO_COOKIE="teamem_session=${BRAVO_SESSION_PLAINTEXT}"
 
 # ── API key tokens ──────────────────────────────────────────────────────────
 
-ALPHA_TOKEN_PLAINTEXT="tmAlpha$(openssl rand -hex 32 | base64 | tr -d '=+/' | head -c 43)"
+ALPHA_TOKEN_PLAINTEXT="tm_Alpha$(openssl rand -hex 32 | base64 | tr -d '=+/' | head -c 43)"
 ALPHA_TOKEN_HASH=$(token_hash "$ALPHA_TOKEN_PLAINTEXT")
 ALPHA_API_KEY="$ALPHA_TOKEN_PLAINTEXT"
 
-BRAVO_TOKEN_PLAINTEXT="tmBravo$(openssl rand -hex 32 | base64 | tr -d '=+/' | head -c 43)"
+BRAVO_TOKEN_PLAINTEXT="tm_Bravo$(openssl rand -hex 32 | base64 | tr -d '=+/' | head -c 43)"
 BRAVO_TOKEN_HASH=$(token_hash "$BRAVO_TOKEN_PLAINTEXT")
 BRAVO_API_KEY="$BRAVO_TOKEN_PLAINTEXT"
 
@@ -683,7 +683,7 @@ assert_eq "Cross-team purge → 404 (same)" "404" \
 log ""
 log "--- 5.5 Revoked Key → 401 ---"
 
-TMP_TOKEN="tmRevoke$(openssl rand -hex 32)"
+TMP_TOKEN="tm_Revoke$(openssl rand -hex 32)"
 TMP_HASH=$(token_hash "$TMP_TOKEN")
 
 seed_sql "Temp revoke key" \
@@ -702,10 +702,10 @@ assert_eq "Revoked key → 401" "401" "$POST_REVOKE"
 POST_REVOKE_BODY=$(api_body GET "/v1/events?projectId=${ALPHA_PROJECT}" "$TMP_TOKEN")
 assert_not_contains "Revoked error does not mention 'revoked'" "$POST_REVOKE_BODY" "revoked"
 
-UNKNOWN_STATUS=$(api_status GET "/v1/events?projectId=${ALPHA_PROJECT}" "tmNotARealKey000000000000000000000000000000000")
+UNKNOWN_STATUS=$(api_status GET "/v1/events?projectId=${ALPHA_PROJECT}" "tm_NotARealKey00000000000000000000000000000000")
 assert_eq "Unknown key → 401 (same as revoked)" "401" "$UNKNOWN_STATUS"
 
-UNKNOWN_BODY=$(api_body GET "/v1/events?projectId=${ALPHA_PROJECT}" "tmNotARealKey000000000000000000000000000000000")
+UNKNOWN_BODY=$(api_body GET "/v1/events?projectId=${ALPHA_PROJECT}" "tm_NotARealKey00000000000000000000000000000000")
 assert_eq "Revoked/unknown error codes match" \
   "$(echo "$POST_REVOKE_BODY" | jq -r '.error.code')" \
   "$(echo "$UNKNOWN_BODY"      | jq -r '.error.code')"
