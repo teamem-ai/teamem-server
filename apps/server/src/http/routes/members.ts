@@ -73,8 +73,11 @@ function requireOwner(): MiddlewareHandler {
 export function buildMembersRoutes(config: GitHubOAuthConfig, db: AppDb): Hono {
   const routes = new Hono();
 
-  // All routes require a valid web session.
-  routes.use('*', requireSession(config, db));
+  // All members routes require a valid web session.
+  // Scoped to /v1/members (exact) and /v1/members/* (sub-routes)
+  // so the session middleware does not leak onto unrelated paths.
+  routes.use('/v1/members/*', requireSession(config, db));
+  routes.use('/v1/members', requireSession(config, db));
 
   // ── GET /v1/members ──────────────────────────────────────────────────────
   // Returns the team's members in join order (oldest first). Each entry
