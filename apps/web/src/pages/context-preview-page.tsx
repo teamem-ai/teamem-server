@@ -7,6 +7,7 @@ import {
   Check,
   AlertTriangle,
   Zap,
+  FolderPlus,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -195,6 +196,28 @@ export function ContextPreviewPage() {
             Retry
           </button>
         </div>
+      </div>
+    );
+  }
+
+  // scope is "ready" (team resolved) but there is no project yet — without
+  // this branch the data-fetch effect above never fires (it requires a
+  // projectId) and `loading` would stay stuck at its initial `true` forever,
+  // showing a skeleton that never resolves. Surface the real reason instead
+  // of a fake loading state.
+  if (!scope.projectId) {
+    return (
+      <div className="card">
+        <EmptyState
+          icon={FolderPlus}
+          title="No project yet"
+          description="Your team doesn't have a project yet — create one to start previewing agent context."
+          actions={
+            <a className="btn btn-primary" href="/onboarding">
+              Create a project
+            </a>
+          }
+        />
       </div>
     );
   }
