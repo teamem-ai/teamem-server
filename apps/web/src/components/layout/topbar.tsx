@@ -52,7 +52,7 @@ export function Topbar() {
   };
 
   return (
-    <header className="h-topbar border-b border-border bg-bg flex items-center gap-[6px] sm:gap-[10px] px-3 sm:px-6 sticky top-0 z-30 overflow-hidden">
+    <header className="h-topbar border-b border-border bg-bg flex items-center gap-[6px] sm:gap-[10px] px-3 sm:px-6 sticky top-0 z-30">
       {/* Team indicator — the session's active team. Multi-team switching is
           not available yet, so this is a label, not a fake switcher. */}
       <span className="inline-flex items-center gap-[7px] font-semibold text-[13px] sm:text-[13.5px] py-[6px] px-[8px] sm:px-[10px] text-text max-w-[100px] sm:max-w-[220px] truncate">
