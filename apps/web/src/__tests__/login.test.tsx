@@ -78,9 +78,11 @@ describe("LoginPage", () => {
     renderLogin("/login?error=auth_failed");
 
     await waitFor(() => {
-      // "Sign-in didn't complete." appears in both the banner title and the description
+      // "Sign-in didn't complete." is the static banner title; the
+      // per-error-code message must not repeat it (was a real bug — see
+      // the errorMessages comment in login.tsx).
       const matches = screen.getAllByText(/Sign-in didn't complete/);
-      expect(matches.length).toBeGreaterThanOrEqual(1);
+      expect(matches.length).toBe(1);
     });
 
     // The retry button should still be present
