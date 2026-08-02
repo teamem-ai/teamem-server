@@ -80,6 +80,10 @@ const handlers = [
   }),
 
   // ── POST /v1/teams/:teamId/keys ─────────────────────────────────────
+  // Real API scopes (packages/schema/src/auth.ts): "events:write", "read",
+  // "read:payload", "audit:read" — deliberately no bare "write". Validating
+  // this here (instead of accepting anything) is what would have caught the
+  // client sending the nonexistent "write" scope.
   http.post("/v1/teams/:teamId/keys", async ({ params, request }) => {
     const body = await request.json() as {
       name?: string; projectId?: string; scopes?: string[];
@@ -90,6 +94,14 @@ const handlers = [
         { status: 404 },
       );
     }
+    const VALID_SCOPES = ["events:write", "read", "read:payload", "audit:read"];
+    const scopes = body.scopes ?? ["read"];
+    if (scopes.some((s) => !VALID_SCOPES.includes(s))) {
+      return HttpResponse.json(
+        { requestId: "req_key_invalid", error: { code: "invalid_request", message: "Bad request" } },
+        { status: 400 },
+      );
+    }
     return HttpResponse.json(
       {
         requestId: "req_key",
@@ -98,7 +110,7 @@ const handlers = [
           name: body.name ?? "Onboarding key",
           token: TEST_TOKEN,
           mcpCommand: `claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer ${TEST_TOKEN}"`,
-          scopes: body.scopes ?? ["read", "write"],
+          scopes,
           allProjects: false,
           projectId: body.projectId ?? null,
           createdAt: new Date().toISOString(),

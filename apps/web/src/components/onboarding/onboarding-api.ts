@@ -165,7 +165,9 @@ export async function mintApiKey(
     body: JSON.stringify({
       name,
       projectId,
-      scopes: ["read", "write"],
+      // Real API scopes (packages/schema/src/auth.ts): "write" does not
+      // exist — event ingestion is "events:write".
+      scopes: ["read", "events:write"],
     }),
   });
 }
