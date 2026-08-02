@@ -55,7 +55,17 @@ const server = setupServer(
     return HttpResponse.json({ data: [MOCK_MEMBER] });
   }),
   http.get(`/v1/teams/${encodeURIComponent(MOCK_TEAM_ID)}/keys`, () => {
-    return HttpResponse.json([MOCK_KEY]);
+    // Real server shape is the standard listResponse envelope — see
+    // apps/server/src/http/routes/keys.ts: c.json({ requestId, data: keys }).
+    // A bare array here previously matched a bug in fetchKeys() (missing
+    // .data unwrap) instead of the real contract, which is exactly how
+    // that crash ("TypeError: ... is not iterable" in buildLookups) shipped
+    // without any test catching it.
+    return HttpResponse.json({
+      requestId: "test-req-002",
+      data: [MOCK_KEY],
+      nextCursor: null,
+    });
   })
 );
 

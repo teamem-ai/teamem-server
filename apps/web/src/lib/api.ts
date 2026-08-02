@@ -465,9 +465,18 @@ export async function fetchMembers(): Promise<MemberEntry[]> {
   return json.data;
 }
 
-/** List API keys for the current team (requires web session, admin+). */
+/** List API keys for the current team (requires web session, admin+).
+ *  Server returns the standard listResponse envelope ({requestId, data,
+ *  nextCursor}) — must unwrap .data, same as fetchProjects below. Using
+ *  rawRequest directly here (as this used to) silently assigns the whole
+ *  envelope object to a variable typed KeyEntry[], which compiles fine
+ *  (the cast is unchecked) but crashes at runtime the first time a caller
+ *  iterates it: "TypeError: ... is not iterable". */
 export async function fetchKeys(teamId: string): Promise<KeyEntry[]> {
-  return rawRequest<KeyEntry[]>(`/v1/teams/${encodeURIComponent(teamId)}/keys`);
+  const resp = await rawRequest<{ requestId: string; data: KeyEntry[] }>(
+    `/v1/teams/${encodeURIComponent(teamId)}/keys`,
+  );
+  return resp.data;
 }
 
 /** Change a member's role (owner only). */
