@@ -561,32 +561,39 @@ describe("SettingsTeamPage", () => {
     });
   });
 
-  it("shows New team button", async () => {
+  it("does NOT offer creating additional teams (single-team portal)", async () => {
     mockEmptyLists();
     renderPage(SettingsTeamPage);
+    // Wait for the team card to render, then assert no create affordance.
     await waitFor(() => {
-      expect(screen.getByText("New team")).toBeInTheDocument();
+      expect(screen.getByText("Danger zone")).toBeInTheDocument();
     });
+    expect(screen.queryByText("New team")).toBeNull();
+    expect(screen.queryByText("Create team")).toBeNull();
+    expect(screen.queryByText(/belong to multiple teams/)).toBeNull();
+    expect(screen.queryByText(/Switch teams from the top bar/)).toBeNull();
   });
 
-  it("shows multi-team hint text", async () => {
+  it("states the portal uses a single team", async () => {
     mockEmptyLists();
     renderPage(SettingsTeamPage);
     await waitFor(() => {
       expect(
-        screen.getByText(/You can belong to multiple teams/)
+        screen.getByText(/This portal uses a single team/)
       ).toBeInTheDocument();
     });
   });
 
-  it("shows empty state when no teams exist", async () => {
+  it("shows empty state (without a create-team action) when no team exists", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockFetchResponse([]) as Response
     );
     renderPage(SettingsTeamPage);
     await waitFor(() => {
-      expect(screen.getByText("No teams yet")).toBeInTheDocument();
+      expect(screen.getByText("No team yet")).toBeInTheDocument();
     });
+    expect(screen.queryByText("Create team")).toBeNull();
+    expect(screen.queryByText("New team")).toBeNull();
   });
 
   it("hides management from viewer", async () => {
