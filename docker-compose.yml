@@ -55,6 +55,10 @@ services:
       # Single-process mode: when true, the server embeds the pg-boss
       # compile worker — bring up only `postgres server` and skip `worker`.
       TEAMEM_ALL_IN_ONE: ${TEAMEM_ALL_IN_ONE:-false}
+      # Automatic schema migration on boot (default on). The server applies
+      # pending drizzle migrations before serving, so a fresh volume needs no
+      # manual migrate step. Set to "false" to run migrations out-of-band.
+      TEAMEM_AUTO_MIGRATE: ${TEAMEM_AUTO_MIGRATE:-}
       # GitHub App / webhook / OAuth (same App for all three roles)
       TEAMEM_GITHUB_WEBHOOK_SECRET: ${TEAMEM_GITHUB_WEBHOOK_SECRET:-}
       TEAMEM_GITHUB_APP_ID: ${TEAMEM_GITHUB_APP_ID:-}

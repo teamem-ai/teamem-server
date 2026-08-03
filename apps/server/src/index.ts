@@ -13,6 +13,7 @@ import { loadRuntimeConfig } from './config/runtime.js';
 import { parseServerEnv } from './config/env.js';
 import { startRuntime, type Runtime, type RuntimeStartup } from './composition-root.js';
 import { createDbHandle } from './db/client.js';
+import { runMigrations } from './db/migrate.js';
 import { createCompileQueue } from './queue/boss.js';
 import {
   createNoProviderHandler,
@@ -49,6 +50,12 @@ export function createRuntimeStartup(config: {
       // Prove connectivity so a dead database fails startup fast rather than
       // surfacing later as a mysterious query error.
       await dbHandle.db.execute('select 1');
+      // Apply pending schema migrations before anything serves traffic. A
+      // fresh Postgres volume has no tables until this runs, and every
+      // sign-in / write would otherwise fail at the database layer. Runs
+      // only in the server process (the worker never migrates); idempotent
+      // and skippable via TEAMEM_AUTO_MIGRATE=false.
+      await runMigrations(dbHandle.db, (m) => console.log(`[runtime] ${m}`));
       return { stop: () => dbHandle.close() };
     },
     async startQueue() {
