@@ -807,12 +807,23 @@
   /* ---------- provider pick ---------- */
   .provider-pick {
     display: grid;
+    /* Two-up grid (design reference main.css:451). Without explicit columns,
+       grid falls back to a single implicit column, so the four providers
+       stack lopsided instead of aligning in a 2×2. The mobile media query
+       below collapses this back to one column. */
+    grid-template-columns: 1fr 1fr;
     gap: 10px;
   }
   .provider-opt {
     display: flex;
     gap: 10px;
     align-items: flex-start;
+    /* The design reference renders these as <div>; the app uses <button> for
+       real keyboard/click semantics, and a <button> defaults to
+       text-align:center. Without this reset each provider name is centered
+       over its (wider) subtitle instead of left-aligned above it, so the
+       four names land at different offsets and look unaligned. */
+    text-align: left;
     padding: 13px 14px;
     border: 1.5px solid var(--border);
     border-radius: var(--r);
