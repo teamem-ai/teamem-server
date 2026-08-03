@@ -38,6 +38,7 @@ vi.mock("@/components/onboarding/onboarding-api", async () => {
     mintApiKey: vi.fn(),
     createTeam: vi.fn(),
     createProject: vi.fn(),
+    renameTeam: vi.fn(),
   };
 });
 
@@ -46,12 +47,14 @@ import {
   getLatestConcept,
   createTeam,
   createProject,
+  renameTeam,
 } from "@/components/onboarding/onboarding-api";
 
 const mockedGetStats = vi.mocked(getOnboardingStats);
 const mockedGetLatest = vi.mocked(getLatestConcept);
 const mockedCreateTeam = vi.mocked(createTeam);
 const mockedCreateProject = vi.mocked(createProject);
+const mockedRenameTeam = vi.mocked(renameTeam);
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -67,12 +70,13 @@ describe("Step1CreateTeam", () => {
   beforeEach(() => {
     mockedCreateTeam.mockReset();
     mockedCreateProject.mockReset();
+    mockedRenameTeam.mockReset();
   });
 
   it("renders team and project name fields", () => {
     renderStep(<Step1CreateTeam onComplete={vi.fn()} />);
 
-    expect(screen.getByText("Create your team")).toBeInTheDocument();
+    expect(screen.getByText("Name your team & first project")).toBeInTheDocument();
     expect(screen.getByLabelText("Team name")).toBeInTheDocument();
     expect(screen.getByLabelText("First project")).toBeInTheDocument();
     expect(screen.getByText(/you'll become the team/)).toBeInTheDocument();
@@ -110,6 +114,99 @@ describe("Step1CreateTeam", () => {
     await waitFor(() => {
       expect(screen.getByText("Creating…")).toBeInTheDocument();
     });
+  });
+
+  // ── existingTeam: session already has an auto-bootstrapped team (first
+  // GitHub login). Step 1 pre-fills its name and renames rather than
+  // creating a duplicate. ────────────────────────────────────────────────
+
+  it("pre-fills the team name and renames (not creates) the existing team on submit", async () => {
+    const onComplete = vi.fn();
+    mockedRenameTeam.mockResolvedValue({
+      requestId: "req_r",
+      data: { id: "team_existing", name: "Acme Corp" },
+    });
+    mockedCreateProject.mockResolvedValue({
+      requestId: "req_2",
+      data: { id: "prj_1", teamId: "team_existing", name: "proj", createdAt: new Date().toISOString() },
+    });
+
+    renderStep(
+      <Step1CreateTeam
+        existingTeam={{ id: "team_existing", name: "dli's Team", role: "owner" }}
+        onComplete={onComplete}
+      />,
+    );
+
+    // Both fields present; team name pre-filled with the placeholder.
+    const teamInput = screen.getByLabelText("Team name") as HTMLInputElement;
+    expect(teamInput.value).toBe("dli's Team");
+    expect(screen.getByLabelText("First project")).toBeInTheDocument();
+
+    // User renames the team and names the first project.
+    fireEvent.change(teamInput, { target: { value: "Acme Corp" } });
+    fireEvent.change(screen.getByLabelText("First project"), {
+      target: { value: "test-project" },
+    });
+    fireEvent.click(screen.getByText("Continue"));
+
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledOnce();
+    });
+
+    expect(mockedCreateTeam).not.toHaveBeenCalled();
+    expect(mockedRenameTeam).toHaveBeenCalledWith("team_existing", "Acme Corp");
+    expect(mockedCreateProject).toHaveBeenCalledWith("team_existing", "test-project");
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        team: expect.objectContaining({ id: "team_existing", name: "Acme Corp" }),
+      }),
+    );
+  });
+
+  it("does not call rename when the pre-filled team name is left unchanged", async () => {
+    const onComplete = vi.fn();
+    mockedCreateProject.mockResolvedValue({
+      requestId: "req_2",
+      data: { id: "prj_1", teamId: "team_existing", name: "proj", createdAt: new Date().toISOString() },
+    });
+
+    renderStep(
+      <Step1CreateTeam
+        existingTeam={{ id: "team_existing", name: "dli's Team", role: "owner" }}
+        onComplete={onComplete}
+      />,
+    );
+
+    // Leave team name as-is, only fill the project.
+    fireEvent.change(screen.getByLabelText("First project"), {
+      target: { value: "test-project" },
+    });
+    fireEvent.click(screen.getByText("Continue"));
+
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledOnce();
+    });
+
+    expect(mockedCreateTeam).not.toHaveBeenCalled();
+    expect(mockedRenameTeam).not.toHaveBeenCalled();
+    expect(mockedCreateProject).toHaveBeenCalledWith("team_existing", "test-project");
+  });
+
+  it("requires a project name when existingTeam is given", async () => {
+    renderStep(
+      <Step1CreateTeam
+        existingTeam={{ id: "team_existing", name: "Acme Corp", role: "owner" }}
+        onComplete={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Continue"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Project name is required.")).toBeInTheDocument();
+    });
+    expect(mockedCreateProject).not.toHaveBeenCalled();
   });
 });
 

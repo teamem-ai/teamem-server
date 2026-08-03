@@ -1,20 +1,22 @@
 import { useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { getSession } from "@/lib/api";
+import { useNavigate } from "react-router-dom";
+import { getSession, fetchProjects } from "@/lib/api";
 
 const INVITE_TOKEN_KEY = "teamem_invite_token";
 
 /**
  * Post-OAuth landing page. The server redirects here after GitHub OAuth
  * completes. This component checks the session and routes the user:
- *   - Has stored invite token → /join?token=... (recover guest invite flow)
- *   - Has team → /knowledge
- *   - No team  → /login?noteam=1
- *   - No session → /login
+ *   - Has stored invite token       → /join?token=... (recover guest invite)
+ *   - Team + at least one project   → /knowledge (onboarding already done)
+ *   - Team + no project yet         → /onboarding (finish setup — the common
+ *                                      first-login case, since OAuth auto-
+ *                                      bootstraps the team but not a project)
+ *   - Session but no team           → /onboarding
+ *   - No session                    → /onboarding (its sign-in step)
  */
 export function AppLanding() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     let cancelled = false;
@@ -40,25 +42,31 @@ export function AppLanding() {
         return;
       }
 
-      const hasNoTeam = searchParams.get("no_team") === "true";
       const sess = await getSession();
-
       if (cancelled) return;
 
       if (sess && sess.teamId) {
-        navigate("/knowledge", { replace: true });
-      } else if (sess && !sess.teamId) {
-        navigate("/login?noteam=1", { replace: true });
-      } else if (hasNoTeam) {
-        navigate("/login?noteam=1", { replace: true });
+        // Onboarded only if a project exists; otherwise send them into the
+        // wizard to create their first one (the usual first-login state).
+        let hasProject = false;
+        try {
+          const projects = await fetchProjects(sess.teamId);
+          hasProject = projects.length > 0;
+        } catch {
+          hasProject = false;
+        }
+        if (cancelled) return;
+        navigate(hasProject ? "/knowledge" : "/onboarding", { replace: true });
       } else {
-        navigate("/login", { replace: true });
+        // No session, or signed in without a team — the onboarding front
+        // door handles both (sign-in step, or full from-scratch flow).
+        navigate("/onboarding", { replace: true });
       }
     }
 
     void check();
     return () => { cancelled = true; };
-  }, [navigate, searchParams]);
+  }, [navigate]);
 
   return null;
 }

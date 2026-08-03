@@ -89,6 +89,19 @@ export async function createTeam(name: string): Promise<ApiResponse<{
   });
 }
 
+/** PATCH /v1/teams/:teamId (web session, owner). Real route: teams.ts:151.
+ *  Used in onboarding to give the auto-bootstrapped team ("<login>'s Team")
+ *  the real name the user types in step 1, instead of creating a duplicate. */
+export async function renameTeam(
+  teamId: string,
+  name: string,
+): Promise<ApiResponse<{ id: string; name: string }>> {
+  return request(`/v1/teams/${encodeURIComponent(teamId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
 /** POST /v1/teams/:teamId/projects (web session, admin+). Real route: projects.ts:59 */
 export async function createProject(
   teamId: string,

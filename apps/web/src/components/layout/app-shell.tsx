@@ -3,8 +3,10 @@ import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { ScopeProvider, useScope } from "@/lib/scope";
 
-/** Redirects to /login once the scope resolves to "signed-out" — e.g. after
- *  the session cookie is cleared (sign out) or expires. Must render inside
+/** Redirects to /onboarding once the scope resolves to "signed-out" — e.g.
+ *  after the session cookie is cleared (sign out) or expires. Onboarding is
+ *  the portal's single front door: signed out, it shows the GitHub sign-in
+ *  step; signed in, its entry guard routes onward. Must render inside
  *  ScopeProvider so useScope() has a context to read. "loading" is left
  *  alone (the initial fetch hasn't settled yet, not an auth decision), and
  *  "error" is left to the page-level retry UI (a fetch/network failure is
@@ -13,7 +15,7 @@ function AppShellContent() {
   const scope = useScope();
 
   if (scope.status === "signed-out") {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/onboarding" replace />;
   }
 
   return (

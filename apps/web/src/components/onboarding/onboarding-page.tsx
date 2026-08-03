@@ -14,11 +14,13 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Check } from "lucide-react";
-import { Step1CreateTeam, type Step1Data } from "./step1-create-team";
+import { Step1CreateTeam, type Step1Data, type ExistingTeam } from "./step1-create-team";
 import { Step2LlmProvider, type Step2Data } from "./step2-llm-provider";
 import { Step3Repositories, type Step3Data } from "./step3-repositories";
 import { Step4MintKey, type Step4Data } from "./step4-mint-key";
 import { Step5Complete } from "./step5-complete";
+import { OnboardingSignIn } from "./onboarding-signin";
+import { getSession, fetchProjects } from "@/lib/api";
 
 // ── Persistent state ───────────────────────────────────────────────────────
 
@@ -79,6 +81,89 @@ export function OnboardingPage() {
     (step: number) => setState((prev) => ({ ...prev, currentStep: step })),
     [],
   );
+
+  // Discard any persisted wizard progress and return to a clean step 1. Used
+  // by the entry guard when the backend shows onboarding is not actually
+  // done (no project), so stale step2–4 state can't drive an invalid request.
+  const resetWizard = useCallback(
+    () => setState({ currentStep: 1, completed: false }),
+    [],
+  );
+
+  // ── Entry guard ────────────────────────────────────────────────────────
+  // The onboarding wizard is the portal's front door (App.tsx routes "/" and
+  // any signed-out internal page here). It has to handle every arrival state,
+  // because "has a team" does NOT mean "already onboarded" — every first
+  // GitHub login auto-bootstraps a team (see ensureTeamMembership); a project
+  // is what actually marks onboarding done. Resolve it once up front:
+  //   - No session                → show the GitHub sign-in step (step 0),
+  //                                  NOT a redirect to /login — the wizard is
+  //                                  the front door, sign-in lives inside it
+  //   - Team + at least 1 project → already onboarded, /knowledge
+  //   - Team + 0 projects         → resume at Step 1 as "create your first
+  //                                  project", reusing the existing team
+  //                                  (see ExistingTeam doc on Step1CreateTeam)
+  //   - No team at all            → genuinely fresh signup, full flow
+  const [entry, setEntry] = useState<
+    | { status: "checking" }
+    | { status: "signed-out" }
+    | { status: "ready"; existingTeam: ExistingTeam | null }
+  >({ status: "checking" });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkEntry() {
+      try {
+        const session = await getSession();
+        if (cancelled) return;
+
+        if (!session) {
+          setEntry({ status: "signed-out" });
+          return;
+        }
+
+        if (session.teamId) {
+          const projects = await fetchProjects(session.teamId);
+          if (cancelled) return;
+
+          if (projects.length > 0) {
+            navigate("/knowledge", { replace: true });
+            return;
+          }
+
+          // Team but no project. Any persisted progress past step 1 is stale:
+          // its saved step1.project.id points at a project that no longer
+          // exists (e.g. the DB was reset since), and step 4 would mint a key
+          // against that dead id → HTTP 404. Restart the wizard at step 1.
+          resetWizard();
+          setEntry({
+            status: "ready",
+            existingTeam: {
+              id: session.teamId,
+              name: session.teamName ?? "",
+              role: session.role ?? "owner",
+            },
+          });
+          return;
+        }
+
+        // No team yet — a genuinely fresh start; discard any stale progress.
+        resetWizard();
+        setEntry({ status: "ready", existingTeam: null });
+      } catch {
+        // A transient failure must not strand the visitor on the skeleton
+        // forever. Fall back to the sign-in step — the safe default, and
+        // the user can re-authenticate from there if the session is gone.
+        if (!cancelled) setEntry({ status: "signed-out" });
+      }
+    }
+
+    void checkEntry();
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate, resetWizard]);
 
   // Compute server base URL from current origin (the Vite dev server proxies
   // /v1 and /auth to the backend; in production the server hosts the SPA).
@@ -171,31 +256,63 @@ export function OnboardingPage() {
 
   // ── Render ────────────────────────────────────────────────────────────
 
+  const wizLogo = (
+    <svg
+      className="logo-mark"
+      viewBox="0 0 32 32"
+      fill="none"
+      aria-label="teamem logo"
+    >
+      <rect className="fill-accent" x="1.5" y="1.5" width="29" height="29" rx="7.5" />
+      <path
+        d="M9 11h14M9 16h10.5M9 21h12.5"
+        stroke="#fff"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+
+  // Entry guard hasn't resolved yet (or is redirecting away) — render
+  // nothing rather than flashing Step 1 at a signed-out or already-
+  // onboarded visitor.
+  if (entry.status === "checking") {
+    return (
+      <div className="wizard">
+        <div className="wiz-body">
+          <div className="wiz-card">
+            <div className="skeleton" style={{ height: 28, width: "60%", marginBottom: 16 }} />
+            <div className="skeleton" style={{ height: 56, width: "100%", marginBottom: 12 }} />
+            <div className="skeleton" style={{ height: 32, width: "75%" }} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Signed out — the wizard's front door is the GitHub sign-in step. No step
+  // indicator and no "Exit setup" (there's nowhere signed-out to exit to).
+  if (entry.status === "signed-out") {
+    return (
+      <div className="wizard">
+        <div className="wiz-top">
+          {wizLogo}
+          <strong>teamem</strong>
+        </div>
+        <div className="wiz-body">
+          <div className="wiz-card">
+            <OnboardingSignIn />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="wizard">
       {/* Top bar: logo + steps + exit */}
       <div className="wiz-top">
-        <svg
-          className="logo-mark"
-          viewBox="0 0 32 32"
-          fill="none"
-          aria-label="teamem logo"
-        >
-          <rect
-            className="fill-accent"
-            x="1.5"
-            y="1.5"
-            width="29"
-            height="29"
-            rx="7.5"
-          />
-          <path
-            d="M9 11h14M9 16h10.5M9 21h12.5"
-            stroke="#fff"
-            strokeWidth="2.4"
-            strokeLinecap="round"
-          />
-        </svg>
+        {wizLogo}
         <strong>teamem</strong>
 
         {/* Step progress indicator */}
@@ -243,6 +360,7 @@ export function OnboardingPage() {
         <div className="wiz-card">
           {state.currentStep === 1 && (
             <Step1CreateTeam
+              existingTeam={entry.existingTeam}
               onComplete={handleStep1Complete}
             />
           )}

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi, type Mock } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi, type Mock } from "vitest";
 import { render, waitFor, cleanup } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { useEffect } from "react";
@@ -6,9 +6,11 @@ import { useEffect } from "react";
 // ── Mocks ───────────────────────────────────────────────────────────────────
 
 let mockGetSession: Mock;
+let mockFetchProjects: Mock;
 
 vi.mock("@/lib/api", () => ({
   getSession: (...args: unknown[]) => mockGetSession(...args),
+  fetchProjects: (...args: unknown[]) => mockFetchProjects(...args),
 }));
 
 import { AppLanding } from "@/pages/app-landing";
@@ -73,6 +75,14 @@ const teamSession = {
 };
 
 describe("AppLanding", () => {
+  beforeEach(() => {
+    // Default: a team with one project (fully onboarded). Individual tests
+    // override to [] to exercise the "no project yet → onboarding" branch.
+    mockFetchProjects = vi.fn().mockResolvedValue([
+      { id: "prj_1", teamId: "team_1", name: "web", createdAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+  });
+
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -142,8 +152,11 @@ describe("AppLanding", () => {
 
   // ── Normal routing (no invite token) ───────────────────────────────────
 
-  it("redirects to /knowledge when session exists with a team", async () => {
+  it("redirects to /knowledge when session has a team with a project", async () => {
     mockGetSession = vi.fn().mockResolvedValue(teamSession);
+    mockFetchProjects = vi.fn().mockResolvedValue([
+      { id: "prj_1", teamId: "team_1", name: "web", createdAt: "2026-01-01T00:00:00.000Z" },
+    ]);
 
     vi.stubGlobal("sessionStorage", {
       getItem: vi.fn(() => null),
@@ -159,7 +172,25 @@ describe("AppLanding", () => {
     });
   });
 
-  it("redirects to /login?noteam=1 when session exists but no team", async () => {
+  it("redirects to /onboarding when session has a team but no project yet", async () => {
+    mockGetSession = vi.fn().mockResolvedValue(teamSession);
+    mockFetchProjects = vi.fn().mockResolvedValue([]);
+
+    vi.stubGlobal("sessionStorage", {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    });
+
+    const spy = createNavigationSpy();
+    render(spy.render());
+
+    await waitFor(() => {
+      expect(spy.fullPath).toBe("/onboarding");
+    });
+  });
+
+  it("redirects to /onboarding when session exists but no team", async () => {
     mockGetSession = vi.fn().mockResolvedValue(noTeamSession);
 
     vi.stubGlobal("sessionStorage", {
@@ -172,28 +203,11 @@ describe("AppLanding", () => {
     render(spy.render());
 
     await waitFor(() => {
-      expect(spy.fullPath).toBe("/login?noteam=1");
+      expect(spy.fullPath).toBe("/onboarding");
     });
   });
 
-  it("redirects to /login?noteam=1 when server says no_team and no session", async () => {
-    mockGetSession = vi.fn().mockResolvedValue(null);
-
-    vi.stubGlobal("sessionStorage", {
-      getItem: vi.fn(() => null),
-      setItem: vi.fn(),
-      removeItem: vi.fn(),
-    });
-
-    const spy = createNavigationSpy("/app?no_team=true");
-    render(spy.render());
-
-    await waitFor(() => {
-      expect(spy.fullPath).toBe("/login?noteam=1");
-    });
-  });
-
-  it("redirects to /login when no session and no invite token", async () => {
+  it("redirects to /onboarding when no session (its sign-in step handles it)", async () => {
     mockGetSession = vi.fn().mockResolvedValue(null);
 
     vi.stubGlobal("sessionStorage", {
@@ -206,7 +220,7 @@ describe("AppLanding", () => {
     render(spy.render());
 
     await waitFor(() => {
-      expect(spy.fullPath).toBe("/login");
+      expect(spy.fullPath).toBe("/onboarding");
     });
   });
 
@@ -228,8 +242,8 @@ describe("AppLanding", () => {
     render(spy.render());
 
     await waitFor(() => {
-      // Falls through to normal routing
-      expect(spy.fullPath).toBe("/login");
+      // Falls through to normal routing (no session → onboarding front door)
+      expect(spy.fullPath).toBe("/onboarding");
     });
   });
 
