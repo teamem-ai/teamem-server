@@ -131,3 +131,11 @@ export function useScope(): ScopeState {
   if (!ctx) throw new Error("useScope must be used within a ScopeProvider");
   return ctx;
 }
+
+/** Like {@link useScope} but returns null instead of throwing when there is no
+ *  ScopeProvider above. Lets a helper reconcile against the real scope when
+ *  one exists (the whole app runs inside AppShell's provider) while still
+ *  working in isolated unit tests that render a page without the provider. */
+export function useScopeOptional(): ScopeState | null {
+  return useContext(ScopeContext);
+}
