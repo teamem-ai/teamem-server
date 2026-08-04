@@ -89,6 +89,7 @@ export function SettingsLlmPage() {
   const [models, setModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  const [modelOpen, setModelOpen] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{
     ok: boolean;
@@ -409,28 +410,79 @@ export function SettingsLlmPage() {
                 </div>
               </div>
 
-              {/* ── Model ─────────────────────────────────────────────── */}
+              {/* ── Model (typeahead) ─────────────────────────────────── */}
               <div className="field mt-4 mb-0" style={{ maxWidth: 520 }}>
                 <label className="label" htmlFor="llmmodel">
                   Model
                 </label>
                 <div className="flex gap-2 items-center">
-                  <select
-                    id="llmmodel"
-                    className="input flex-1"
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                  >
-                    <option value="">Provider default</option>
-                    {(selectedModel && !models.includes(selectedModel)
-                      ? [selectedModel, ...models]
-                      : models
-                    ).map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative flex-1">
+                    <input
+                      id="llmmodel"
+                      className="input w-full"
+                      type="text"
+                      value={selectedModel}
+                      placeholder="Provider default — type or pick a model"
+                      autoComplete="off"
+                      role="combobox"
+                      aria-expanded={modelOpen}
+                      aria-autocomplete="list"
+                      onChange={(e) => {
+                        setSelectedModel(e.target.value);
+                        setModelOpen(true);
+                      }}
+                      onFocus={() => setModelOpen(true)}
+                      // Delay so a click on an option registers before closing.
+                      onBlur={() => setTimeout(() => setModelOpen(false), 150)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setModelOpen(false);
+                      }}
+                    />
+                    {modelOpen && (() => {
+                      // Show all models when the field holds an exact match
+                      // (so you can browse to another), else filter by input.
+                      const q = selectedModel.trim().toLowerCase();
+                      const list = models.includes(selectedModel)
+                        ? models
+                        : models.filter((m) => m.toLowerCase().includes(q));
+                      if (list.length === 0) return null;
+                      return (
+                        <ul
+                          role="listbox"
+                          className="card"
+                          style={{
+                            position: "absolute",
+                            zIndex: 20,
+                            top: "calc(100% + 4px)",
+                            left: 0,
+                            right: 0,
+                            maxHeight: 240,
+                            overflowY: "auto",
+                            padding: 4,
+                            margin: 0,
+                            listStyle: "none",
+                          }}
+                        >
+                          {list.slice(0, 100).map((m) => (
+                            <li key={m} role="option" aria-selected={m === selectedModel}>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm w-full"
+                                style={{ justifyContent: "flex-start", fontWeight: m === selectedModel ? 600 : 400 }}
+                                // onMouseDown fires before the input's onBlur.
+                                onMouseDown={() => {
+                                  setSelectedModel(m);
+                                  setModelOpen(false);
+                                }}
+                              >
+                                {m}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      );
+                    })()}
+                  </div>
                   <button
                     type="button"
                     className="btn btn-outline btn-sm"
@@ -444,6 +496,16 @@ export function SettingsLlmPage() {
                         ? "Reload"
                         : "Load models"}
                   </button>
+                  {selectedModel && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setSelectedModel("")}
+                      title="Use the provider default"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
                 {modelsError && (
                   <p className="hint" style={{ color: "var(--amber)" }}>
@@ -451,10 +513,10 @@ export function SettingsLlmPage() {
                   </p>
                 )}
                 <p className="hint">
-                  The model that compiles events into knowledge.{" "}
-                  <strong>Provider default</strong> uses the server&apos;s
-                  built-in default for this provider — load models to pick a
-                  specific one.
+                  The model that compiles events into knowledge. Start typing to
+                  filter, or clear the field to use the{" "}
+                  <strong>provider default</strong>. Load models to populate the
+                  list from your provider.
                 </p>
               </div>
 

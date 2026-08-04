@@ -435,22 +435,64 @@ describe("SettingsLlmPage", () => {
 
     renderPage(SettingsLlmPage);
 
-    // The saved model is selected.
+    // The saved model is shown in the combobox input.
     await waitFor(() => {
-      const select = screen.getByLabelText("Model") as HTMLSelectElement;
-      expect(select.value).toBe("gpt-4o");
+      const input = screen.getByLabelText("Model") as HTMLInputElement;
+      expect(input.value).toBe("gpt-4o");
     });
 
-    // Models auto-load (there is a stored key) and appear as options, alongside
-    // the "Provider default" choice.
+    // Focusing opens the typeahead; the auto-loaded models appear as options
+    // (the current exact match shows the full list so you can pick another).
+    fireEvent.focus(screen.getByLabelText("Model"));
     await waitFor(() => {
       expect(
         screen.getByRole("option", { name: "gpt-4o-mini" }),
       ).toBeInTheDocument();
     });
-    expect(
-      screen.getByRole("option", { name: "Provider default" }),
-    ).toBeInTheDocument();
+  });
+
+  it("filters models as you type in the model combobox", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (url: string | URL | Request) => {
+        const urlStr =
+          typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+        if (urlStr.includes("/llm/models")) {
+          return Promise.resolve(
+            mockFetchResponse({
+              models: ["gpt-4o", "gpt-4o-mini", "o1-preview"],
+            }) as Response,
+          );
+        }
+        if (urlStr.includes("/llm")) {
+          return Promise.resolve(
+            mockFetchResponse({
+              provider: "openai",
+              model: null,
+              hasKey: true,
+              lastTest: null,
+              semanticRetrieval: { available: true, mode: "vector", reason: null },
+            }) as Response,
+          );
+        }
+        return Promise.resolve(mockFetchResponse([]) as Response);
+      },
+    );
+
+    renderPage(SettingsLlmPage);
+
+    const input = await screen.findByLabelText("Model");
+    // Wait for models to auto-load.
+    await waitFor(() => {
+      fireEvent.focus(input);
+      expect(screen.getByRole("option", { name: "o1-preview" })).toBeInTheDocument();
+    });
+
+    // Typing "mini" filters to just the matching model.
+    fireEvent.change(input, { target: { value: "mini" } });
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "gpt-4o-mini" })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("option", { name: "o1-preview" })).toBeNull();
   });
 
   it("hides provider management from viewer", async () => {
