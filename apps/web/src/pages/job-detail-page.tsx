@@ -164,7 +164,7 @@ function EventResultRow({ result }: { result: JobEventResult }) {
               <span key={cid}>
                 {i > 0 && ", "}
                 <a
-                  href={`/concepts/${cid}`}
+                  href={`/concept/${cid}`}
                   className="inline-flex items-center gap-1"
                   onClick={(e) => e.stopPropagation()}
                 >

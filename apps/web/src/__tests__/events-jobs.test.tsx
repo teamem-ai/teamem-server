@@ -569,6 +569,22 @@ describe("JobDetailPage", () => {
     });
   });
 
+  it("links a compiled event to the concept page at /concept/ (singular route)", async () => {
+    mockFetchResponse(mockJobDetailResponse);
+    renderJobDetail("eaf45a04-7c3d-4a1b-9f2c-8d7e6a5b4c3d");
+    await waitFor(() => {
+      const links = document.querySelectorAll('a[href^="/concept/"]');
+      expect(links.length).toBeGreaterThanOrEqual(1);
+    });
+    // The route is /concept/:uuid — a /concepts/ (plural) link would 404.
+    expect(document.querySelector('a[href^="/concepts/"]')).toBeNull();
+    expect(
+      document.querySelector(
+        'a[href="/concept/550e8400-e29b-41d4-a716-446655440000"]',
+      ),
+    ).not.toBeNull();
+  });
+
   it("renders skipped with neutral styling — not error color", async () => {
     mockFetchResponse(mockJobDetailResponse);
     renderJobDetail("eaf45a04-7c3d-4a1b-9f2c-8d7e6a5b4c3d");
