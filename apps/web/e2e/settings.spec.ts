@@ -34,7 +34,7 @@ test.describe("Settings area — owner flows @owner", () => {
     const tokenLocator = page.getByTestId("key-token");
     await expect(tokenLocator).toBeVisible();
     const token = await tokenLocator.textContent();
-    expect(token).toMatch(/^tm_/);
+    expect(token).toMatch(/^tok_/);
     expect(token!.length).toBeGreaterThan(20);
 
     await page.getByRole("button", { name: "Done" }).click();

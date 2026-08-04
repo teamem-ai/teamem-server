@@ -9,7 +9,7 @@
  * reused — the command never silently creates a second team/project/key.
  *
  * Security:
- * - Tokens are 256-bit random, prefixed `tm_`, hashed with SHA-256.
+ * - Tokens are 256-bit random, prefixed `tok_`, hashed with SHA-256.
  * - Plaintext is printed to stdout exactly once; never logged, stored, or
  *   included in error messages.
  * - The `--rotate` flag revokes the old key and mints a new one, printing

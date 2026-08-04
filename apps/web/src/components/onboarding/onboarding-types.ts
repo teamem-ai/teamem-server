@@ -23,7 +23,7 @@ export interface ProjectEntry {
 export interface MintKeyResponse {
   id: string;           // key_...
   name: string;
-  token: string;        // tm_... — plaintext, returned exactly once
+  token: string;        // tok_... — plaintext, returned exactly once
   mcpCommand: string;   // pasteable `claude mcp add` command
   scopes: string[];
   allProjects: boolean;

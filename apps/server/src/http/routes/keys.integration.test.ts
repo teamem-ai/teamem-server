@@ -180,7 +180,7 @@ describe.skipIf(!url)('Keys Routes — web key minting (live Postgres)', () => {
       // Response shape
       expect(data.id).toMatch(/^key_/);
       expect(data.name).toBe('My API Key');
-      expect(data.token).toMatch(/^tm_/);
+      expect(data.token).toMatch(/^tok_/);
       expect(data.token.length).toBeGreaterThan(40);
       expect(data.mcpCommand).toContain('claude mcp add');
       expect(data.mcpCommand).toContain(data.token);

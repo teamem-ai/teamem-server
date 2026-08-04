@@ -101,7 +101,7 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
 
     // Token printed exactly once on creation
     expect(result.key.token).toBeDefined();
-    expect(result.key.token).toMatch(/^tm_[A-Za-z0-9_-]{40,}$/);
+    expect(result.key.token).toMatch(/^tok_[A-Za-z0-9_-]{40,}$/);
 
     // MCP add command (DUA-211): present when token is present
     expect(result.key.mcpAddCommand).toBeDefined();

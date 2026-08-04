@@ -161,7 +161,7 @@ export function ComponentShowcase() {
           Key Reveal (one-time display, R7)
         </h2>
         <div className="card card-pad">
-          <KeyReveal token="tm_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" />
+          <KeyReveal token="tok_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6" />
         </div>
       </section>
 
