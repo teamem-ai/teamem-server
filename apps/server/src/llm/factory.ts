@@ -140,6 +140,43 @@ export function createLlmClient(
 /* Core call path                                                            */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * Redact secrets and bound the length of a string before it is logged. Strips
+ * Bearer tokens and `sk_`/`tok_`/`tm_`-style keys, and caps the length.
+ */
+function scrubForDebug(s: string): string {
+  return s
+    .replace(/Bearer\s+[^\s"']+/gi, 'Bearer [REDACTED]')
+    .replace(/\b(sk|tok|tm)[_-][A-Za-z0-9_-]+/g, '$1_[REDACTED]')
+    .slice(0, 800);
+}
+
+/**
+ * Opt-in diagnostic log for LLM failures. OFF by default — the compiler stays
+ * quiet and leaks nothing (§5.3). When TEAMEM_LLM_DEBUG is set, the underlying
+ * cause of an otherwise-opaque provider_error / http_error is written to the
+ * worker log (secrets scrubbed, length-bounded) so a self-hoster can see WHY a
+ * compile failed. It never includes the ingested payload — only the provider's
+ * error message / response snippet.
+ */
+function logLlmDebug(
+  provider: string,
+  requestId: string,
+  kind: string,
+  detail: string,
+): void {
+  if (!process.env['TEAMEM_LLM_DEBUG']) return;
+  console.warn(
+    JSON.stringify({
+      event: 'llm_debug',
+      provider,
+      requestId,
+      kind,
+      detail: scrubForDebug(detail),
+    }),
+  );
+}
+
 async function runStructured<T>(
   provider: LlmProviderKind,
   config: ResolvedLlmConfig,
@@ -174,8 +211,24 @@ async function runStructured<T>(
     }
 
     if (!response.ok) {
-      // Drain the body so the socket is freed, but keep none of it.
-      await drain(response);
+      if (process.env['TEAMEM_LLM_DEBUG']) {
+        // Debug only: capture the provider's error body (bounded, scrubbed).
+        let body = '';
+        try {
+          body = await response.text();
+        } catch {
+          /* ignore */
+        }
+        logLlmDebug(
+          provider,
+          request.requestId,
+          'http_error',
+          `HTTP ${response.status} (model=${model}): ${body}`,
+        );
+      } else {
+        // Drain the body so the socket is freed, but keep none of it.
+        await drain(response);
+      }
       throw new LlmError('http_error', provider, request.requestId, {
         httpStatus: response.status,
       });
@@ -205,6 +258,14 @@ async function runStructured<T>(
     if (err instanceof LlmError) throw err;
     // Unexpected failure — wrap as a provider_error without attaching the
     // raw error as cause (§5.3: logs/inspect must not leak provider internals).
+    // Opt-in debug logging records the cause (e.g. a JSON parse error when the
+    // model didn't return valid structured output) so it can be investigated.
+    logLlmDebug(
+      provider,
+      request.requestId,
+      'provider_error',
+      err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+    );
     throw new LlmError('provider_error', provider, request.requestId);
   } finally {
     clearTimeout(timer);
@@ -398,9 +459,11 @@ function parseOpenAiFamily(
   try {
     envelope = JSON.parse(raw);
   } catch {
+    logLlmDebug(provider, requestId, 'provider_error', `response body was not valid JSON: ${raw}`);
     throw new LlmError('provider_error', provider, requestId);
   }
   if (!isObject(envelope)) {
+    logLlmDebug(provider, requestId, 'provider_error', `response was not a JSON object: ${raw}`);
     throw new LlmError('provider_error', provider, requestId);
   }
   const providerModel =
@@ -422,6 +485,12 @@ function parseOpenAiFamily(
   try {
     value = JSON.parse(content);
   } catch {
+    logLlmDebug(
+      provider,
+      requestId,
+      'schema_validation_failed',
+      `model content was not valid JSON: ${content}`,
+    );
     throw new LlmError('schema_validation_failed', provider, requestId);
   }
   return usage ? { value, providerModel, usage } : { value, providerModel };

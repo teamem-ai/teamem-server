@@ -9,7 +9,7 @@
  * the real headers, URL, and JSON body the production client would send, and
  * the fake responses are shaped exactly like the real provider envelopes.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { f1Output } from '../compiler/f1/output.js';
@@ -778,5 +778,68 @@ describe('LlmError — redacted surface', () => {
     const err = new LlmError('timeout', 'claude', 'req-y');
     expect(err.httpStatus).toBeUndefined();
     expect(err.message).toContain('timeout');
+  });
+});
+// ── Opt-in diagnostic logging (TEAMEM_LLM_DEBUG) ─────────────────────────────
+
+describe('TEAMEM_LLM_DEBUG diagnostic logging', () => {
+  afterEach(() => {
+    delete process.env['TEAMEM_LLM_DEBUG'];
+    vi.restoreAllMocks();
+  });
+
+  it('logs the underlying cause of a provider_error when enabled', async () => {
+    process.env['TEAMEM_LLM_DEBUG'] = '1';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // 2xx with non-JSON body → extractStructured throws → provider_error.
+    const fetch = makeRecorder(() => new Response('not json', { status: 200 }), []);
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({ schema: answerSchema, systemPrompt: 's', userPrompt: 'u', requestId: 'req-dbg' }),
+    ).rejects.toMatchObject({ kind: 'provider_error' });
+
+    const line = warn.mock.calls.map((c) => String(c[0])).find((s) => s.includes('llm_debug'));
+    expect(line).toBeDefined();
+    const parsed = JSON.parse(line!);
+    expect(parsed.kind).toBe('provider_error');
+    expect(parsed.requestId).toBe('req-dbg');
+    expect(typeof parsed.detail).toBe('string');
+    expect(parsed.detail.length).toBeGreaterThan(0);
+  });
+
+  it('stays silent when TEAMEM_LLM_DEBUG is not set', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetch = makeRecorder(() => new Response('not json', { status: 200 }), []);
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({ schema: answerSchema, systemPrompt: 's', userPrompt: 'u', requestId: 'req-quiet' }),
+    ).rejects.toMatchObject({ kind: 'provider_error' });
+
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('llm_debug'))).toBe(false);
+  });
+
+  it('scrubs secrets from a logged http_error body', async () => {
+    process.env['TEAMEM_LLM_DEBUG'] = '1';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({ error: { message: 'bad key sk-supersecret123456 and tok_abc' } }),
+          { status: 401 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({ schema: answerSchema, systemPrompt: 's', userPrompt: 'u', requestId: 'req-http' }),
+    ).rejects.toMatchObject({ kind: 'http_error' });
+
+    const line = warn.mock.calls.map((c) => String(c[0])).find((s) => s.includes('llm_debug'));
+    expect(line).toBeDefined();
+    expect(line!).not.toContain('sk-supersecret123456');
+    expect(line!).toContain('HTTP 401');
   });
 });
