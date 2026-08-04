@@ -248,7 +248,14 @@ export const llmConfigResponse = z.strictObject({
 /** PUT /v1/teams/:teamId/llm request body. */
 export const llmConfigRequest = z.strictObject({
   provider: llmProvider,
-  apiKey: z.string().min(1),
+  /**
+   * The API key to store, or the sentinel "__STORED__" to keep the existing
+   * key. Optional — when omitted the provider (and model) are updated while
+   * any existing key is preserved, so a provider can be recorded before a key
+   * is available (e.g. during onboarding). A key is still required before
+   * compilation can use the team's own provider.
+   */
+  apiKey: z.string().min(1).optional(),
   /**
    * Provider-native model id for compilation. Optional — omitted/absent means
    * the server keeps or falls back to the provider default. Empty string is

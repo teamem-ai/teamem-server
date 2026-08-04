@@ -39,6 +39,7 @@ vi.mock("@/components/onboarding/onboarding-api", async () => {
     createTeam: vi.fn(),
     createProject: vi.fn(),
     renameTeam: vi.fn(),
+    saveLlmProvider: vi.fn(),
   };
 });
 
@@ -48,6 +49,7 @@ import {
   createTeam,
   createProject,
   renameTeam,
+  saveLlmProvider,
 } from "@/components/onboarding/onboarding-api";
 
 const mockedGetStats = vi.mocked(getOnboardingStats);
@@ -55,6 +57,7 @@ const mockedGetLatest = vi.mocked(getLatestConcept);
 const mockedCreateTeam = vi.mocked(createTeam);
 const mockedCreateProject = vi.mocked(createProject);
 const mockedRenameTeam = vi.mocked(renameTeam);
+const mockedSaveLlmProvider = vi.mocked(saveLlmProvider);
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -293,8 +296,50 @@ describe("Step2LlmProvider", () => {
     );
 
     expect(
-      screen.getByText(/LLM is configured at deploy time/),
+      screen.getByText(/Pick the provider you'll use/),
     ).toBeInTheDocument();
+  });
+
+  it("saves the selected provider (mapping claude→anthropic) on Continue", async () => {
+    mockedSaveLlmProvider.mockResolvedValue(undefined);
+    const onComplete = vi.fn();
+    renderStep(
+      <Step2LlmProvider
+        teamId="team_abc"
+        onComplete={onComplete}
+        onBack={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("OpenRouter"));
+    fireEvent.click(screen.getByText("Continue"));
+
+    await waitFor(() => {
+      expect(onComplete).toHaveBeenCalledOnce();
+    });
+    expect(mockedSaveLlmProvider).toHaveBeenCalledWith("team_abc", "openrouter");
+  });
+
+  it("does not advance if saving the provider fails", async () => {
+    mockedSaveLlmProvider.mockRejectedValue(new Error("network"));
+    const onComplete = vi.fn();
+    renderStep(
+      <Step2LlmProvider
+        teamId="team_abc"
+        onComplete={onComplete}
+        onBack={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Anthropic"));
+    fireEvent.click(screen.getByText("Continue anyway"));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Couldn't save your provider selection/)).toBeInTheDocument();
+    });
+    expect(onComplete).not.toHaveBeenCalled();
   });
 });
 

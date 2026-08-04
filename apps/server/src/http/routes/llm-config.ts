@@ -246,19 +246,22 @@ export function buildLlmConfigRoutes(deps: LlmConfigDeps): Hono {
       // changes and a previously-chosen model no longer applies.
       const modelToStore = model ?? null;
 
-      // Resolve the encrypted key. The "__STORED__" sentinel means "keep the
-      // saved key" — so the user can change the model (or provider) without
-      // re-entering their key. Otherwise encrypt the provided key at rest
-      // (AES-256-GCM; throws if TEAMEM_LLM_ENCRYPTION_KEY is not configured).
-      let apiKeyEncrypted: string;
-      if (apiKey === '__STORED__') {
+      // Resolve the encrypted key:
+      //  - omitted        → keep any existing key (may be null): lets the user
+      //                     record a provider choice before they have a key
+      //                     (e.g. onboarding), or change only the model.
+      //  - "__STORED__"   → keep the existing key; error if there is none.
+      //  - a real key     → encrypt it at rest (AES-256-GCM; throws if
+      //                     TEAMEM_LLM_ENCRYPTION_KEY is not configured).
+      let apiKeyEncrypted: string | null;
+      if (apiKey === undefined || apiKey === '__STORED__') {
         const rows = await db
           .select({ encrypted: schema.llmConfig.apiKeyEncrypted })
           .from(schema.llmConfig)
           .where(eq(schema.llmConfig.teamId, teamId))
           .limit(1);
         const existing = rows[0]?.encrypted ?? null;
-        if (!existing) {
+        if (apiKey === '__STORED__' && !existing) {
           throw new InvalidRequestError(
             'No stored API key to keep — provide an API key.',
           );

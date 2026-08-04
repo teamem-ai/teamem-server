@@ -349,4 +349,62 @@ describe.skipIf(!url)('LLM Config Routes — live Postgres', () => {
       expect(res.status).toBe(403);
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Provider-only save (onboarding: record the choice before a key exists)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('provider-only save (apiKey omitted)', () => {
+    async function adminSession(name: string) {
+      const userId = await createUser(nextGithubId(), name);
+      const teamId = await createTeam(`${name} Team`);
+      await createProject(teamId, 'P');
+      await addMembership(userId, teamId, 'admin');
+      const sessionToken = await createSession(userId);
+      return { teamId, sessionToken };
+    }
+
+    it('stores the provider with no key when apiKey is omitted', async () => {
+      const { teamId, sessionToken } = await adminSession('llmprovonly');
+
+      const put = await app.request(`/v1/teams/${teamId}/llm`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openrouter' }),
+      });
+      expect(put.status).toBe(200);
+
+      const get = await app.request(`/v1/teams/${teamId}/llm`, {
+        headers: { Cookie: cookie(sessionToken) },
+      });
+      const json = await get.json();
+      expect(json.data.provider).toBe('openrouter');
+      expect(json.data.hasKey).toBe(false);
+    });
+
+    it('preserves an existing key when a later provider-only PUT arrives', async () => {
+      const { teamId, sessionToken } = await adminSession('llmprovkeep');
+
+      // First: full save with a key.
+      await app.request(`/v1/teams/${teamId}/llm`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openai', apiKey: 'sk-keep' }),
+      });
+      // Then: provider-only PUT (no key) switching provider.
+      const put = await app.request(`/v1/teams/${teamId}/llm`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openrouter' }),
+      });
+      expect(put.status).toBe(200);
+
+      const get = await app.request(`/v1/teams/${teamId}/llm`, {
+        headers: { Cookie: cookie(sessionToken) },
+      });
+      const json = await get.json();
+      expect(json.data.provider).toBe('openrouter');
+      expect(json.data.hasKey).toBe(true); // key preserved
+    });
+  });
 });

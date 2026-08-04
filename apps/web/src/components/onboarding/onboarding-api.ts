@@ -115,19 +115,41 @@ export async function createProject(
   });
 }
 
-// ── Step 2: LLM Provider (informational — no write endpoint exists) ────────
+// ── Step 2: LLM Provider ───────────────────────────────────────────────────
 
 /**
- * LLM provider metadata.  The server configures providers via environment
- * variables (TEAMEM_ANTHROPIC_API_KEY, etc.), not via a web API.  This
- * step is educational: it shows what the four BYO providers offer so the
- * operator can set the right env vars at deploy time.
+ * LLM provider metadata shown in the onboarding picker. The `kind` uses the
+ * wizard's naming ("claude"); the LLM config API uses "anthropic", so
+ * saveLlmProvider maps between them.
  */
 export interface LlmProviderMeta {
   kind: "claude" | "openai" | "openrouter" | "custom";
   name: string;
   subtitle: string;
   hasEmbedding: boolean;
+}
+
+/** LLM config provider names (as stored/accepted by PUT /v1/teams/:id/llm). */
+type LlmConfigProvider = "anthropic" | "openai" | "openrouter" | "custom";
+
+function providerKindToConfig(kind: LlmProviderMeta["kind"]): LlmConfigProvider {
+  return kind === "claude" ? "anthropic" : kind;
+}
+
+/**
+ * Persist the selected LLM provider so it carries through to Settings → LLM
+ * and drives compilation. PUT /v1/teams/:teamId/llm with provider only (no
+ * apiKey) records the choice; the key is added later in Settings. Real route:
+ * llm-config.ts (web session, admin+).
+ */
+export async function saveLlmProvider(
+  teamId: string,
+  kind: LlmProviderMeta["kind"],
+): Promise<void> {
+  await request(`/v1/teams/${encodeURIComponent(teamId)}/llm`, {
+    method: "PUT",
+    body: JSON.stringify({ provider: providerKindToConfig(kind) }),
+  });
 }
 
 export const LLM_PROVIDERS: LlmProviderMeta[] = [
