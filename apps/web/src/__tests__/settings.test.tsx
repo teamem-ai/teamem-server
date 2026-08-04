@@ -408,6 +408,51 @@ describe("SettingsLlmPage", () => {
     });
   });
 
+  it("reflects the saved model and loads provider models into the dropdown", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (url: string | URL | Request) => {
+        const urlStr =
+          typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+        if (urlStr.includes("/llm/models")) {
+          return Promise.resolve(
+            mockFetchResponse({ models: ["gpt-4o", "gpt-4o-mini"] }) as Response,
+          );
+        }
+        if (urlStr.includes("/llm")) {
+          return Promise.resolve(
+            mockFetchResponse({
+              provider: "openai",
+              model: "gpt-4o",
+              hasKey: true,
+              lastTest: null,
+              semanticRetrieval: { available: true, mode: "vector", reason: null },
+            }) as Response,
+          );
+        }
+        return Promise.resolve(mockFetchResponse([]) as Response);
+      },
+    );
+
+    renderPage(SettingsLlmPage);
+
+    // The saved model is selected.
+    await waitFor(() => {
+      const select = screen.getByLabelText("Model") as HTMLSelectElement;
+      expect(select.value).toBe("gpt-4o");
+    });
+
+    // Models auto-load (there is a stored key) and appear as options, alongside
+    // the "Provider default" choice.
+    await waitFor(() => {
+      expect(
+        screen.getByRole("option", { name: "gpt-4o-mini" }),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("option", { name: "Provider default" }),
+    ).toBeInTheDocument();
+  });
+
   it("hides provider management from viewer", async () => {
     mockSessionRole = "viewer";
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

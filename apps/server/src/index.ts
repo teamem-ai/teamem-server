@@ -15,12 +15,9 @@ import { startRuntime, type Runtime, type RuntimeStartup } from './composition-r
 import { createDbHandle } from './db/client.js';
 import { runMigrations } from './db/migrate.js';
 import { createCompileQueue } from './queue/boss.js';
-import {
-  createNoProviderHandler,
-  startEmbeddedWorker,
-} from './worker/embedded.js';
+import { startEmbeddedWorker } from './worker/embedded.js';
 import { createCompileJobHandler } from './queue/worker.js';
-import { createLlmClient } from './llm/factory.js';
+import { createTeamLlmResolver } from './llm/resolve-team-llm.js';
 import { createEmbeddingClient } from './llm/embedding/factory.js';
 import { startServer } from './server.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
@@ -37,11 +34,12 @@ export function createRuntimeStartup(config: {
   const dbHandle = createDbHandle(config.databaseUrl);
   const queue = createCompileQueue(config.databaseUrl);
 
-  // Resolve LLM config from the environment for the embedded worker.
+  // Resolve LLM config from the environment. This is the fallback for teams
+  // that have not saved a provider in Settings → LLM; per-team BYO config
+  // (resolved at job time) takes precedence. The embedding client here serves
+  // the HTTP read path (search / MCP); the compile worker resolves its own.
   const env = parseServerEnv();
   const llmProvider = env.llmProviders[0];
-  const llm =
-    llmProvider ? createLlmClient(llmProvider) : undefined;
   const embeddingClient =
     llmProvider ? createEmbeddingClient(llmProvider) : null;
 
@@ -104,20 +102,23 @@ export function createRuntimeStartup(config: {
       };
     },
     async startWorker() {
-      if (!llm) {
+      if (!llmProvider) {
         console.warn(
-          '[runtime] no LLM provider configured — embedded worker will start but ' +
-          'compilation will fail. Configure TEAMEM_ANTHROPIC_API_KEY, ' +
-          'TEAMEM_OPENAI_API_KEY, or equivalent.',
+          '[runtime] no env LLM provider configured — teams that have not saved ' +
+          'a provider in Settings → LLM will have their compile jobs fail with ' +
+          'no_llm_provider. Configure TEAMEM_ANTHROPIC_API_KEY, ' +
+          'TEAMEM_OPENAI_API_KEY, or equivalent, or set one in the portal.',
         );
       }
-      // Use the real handler when an LLM is configured. Without one, the
-      // no-provider handler still claims each job and moves it to a terminal
-      // `failed` state, so the row does not sit in `queued` forever with no
-      // consumer that will ever return to it.
-      const handler = llm
-        ? createCompileJobHandler({ db: dbHandle.db, llm, embeddingClient })
-        : createNoProviderHandler(dbHandle.db);
+      // Resolve the LLM per job from the team's saved BYO config (provider,
+      // key, chosen model), falling back to the env provider. The handler
+      // fails a job with `no_llm_provider` when neither is available, so the
+      // row reaches a terminal state instead of sitting queued forever.
+      const resolveLlm = createTeamLlmResolver({
+        db: dbHandle.db,
+        fallback: llmProvider,
+      });
+      const handler = createCompileJobHandler({ db: dbHandle.db, resolveLlm });
       return startEmbeddedWorker(queue, handler);
     },
   };

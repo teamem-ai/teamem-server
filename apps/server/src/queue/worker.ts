@@ -24,6 +24,23 @@ import {
   handleCompileJob,
   type CompileJobDeps,
 } from '../compiler/f1/compile-job.js';
+import type { TeamLlmResolver } from '../llm/resolve-team-llm.js';
+import type { LlmClient } from '../llm/types.js';
+import type { EmbeddingClient } from '../llm/embedding/port.js';
+import type { AppDb } from '../db/client.js';
+
+/**
+ * Deps for the worker-level handler. Either a static `llm` (single-provider /
+ * tests) or a per-team `resolveLlm` (production: the team's saved BYO config
+ * drives compilation, env fallback). When `resolveLlm` returns null the job is
+ * failed with `no_llm_provider`, mirroring the standalone no-provider handler.
+ */
+export interface CompileHandlerDeps {
+  readonly db: AppDb;
+  readonly llm?: LlmClient;
+  readonly embeddingClient?: EmbeddingClient | null;
+  readonly resolveLlm?: TeamLlmResolver;
+}
 
 // ── Message shape ───────────────────────────────────────────────────────────
 
@@ -77,7 +94,7 @@ function sanitizeError(err: unknown): { code: string; message: string } {
  * @param llm  LLM client for F1 structured extraction.
  * @returns    A {@link CompileJobHandler} ready to register with pg-boss.
  */
-export function createCompileJobHandler(deps: CompileJobDeps): CompileJobHandler {
+export function createCompileJobHandler(deps: CompileHandlerDeps): CompileJobHandler {
   const { db } = deps;
 
   return async (job: CompileJob): Promise<void> => {
@@ -128,8 +145,47 @@ export function createCompileJobHandler(deps: CompileJobDeps): CompileJobHandler
         return;
       }
 
-      // 4. Delegate to the F1 compilation handler.
-      await handleCompileJob(deps, {
+      // 4. Resolve the LLM/embedding clients for this job's team. In
+      //    production this reads the team's saved BYO config (provider, key,
+      //    chosen model) with an env fallback; tests pass a static `llm`.
+      let llm = deps.llm;
+      let embeddingClient = deps.embeddingClient ?? null;
+      if (deps.resolveLlm) {
+        const resolved = await deps.resolveLlm(teamId);
+        if (resolved) {
+          llm = resolved.llm;
+          embeddingClient = resolved.embeddingClient;
+        } else {
+          llm = undefined;
+        }
+      }
+
+      if (!llm) {
+        // No provider from the team config or env — fail with the same
+        // contract code the standalone no-provider handler uses.
+        await updateJobStatus(db, teamId, projectId, jobId, 'failed', {
+          error: {
+            code: 'no_llm_provider',
+            message:
+              'No LLM provider is configured for this team, so this job ' +
+              'could not be compiled. Configure a provider in Settings → LLM, ' +
+              'or set a TEAMEM_* provider key, then re-submit the events.',
+          },
+        });
+        console.warn(
+          JSON.stringify({
+            event: 'compile_job_no_provider',
+            jobId,
+            teamId,
+            message: 'job failed: no LLM provider configured',
+          }),
+        );
+        return;
+      }
+
+      // 5. Delegate to the F1 compilation handler with the resolved clients.
+      const jobDeps: CompileJobDeps = { db, llm, embeddingClient };
+      await handleCompileJob(jobDeps, {
         jobId,
         teamId,
         projectId,

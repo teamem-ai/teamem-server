@@ -19,10 +19,8 @@ import { parseServerEnv } from './config/env.js';
 import { fatalStartup, installShutdownHandlers } from './lifecycle.js';
 import { createCompileQueue } from './queue/boss.js';
 import { createCompileJobHandler } from './queue/worker.js';
-import { createNoProviderHandler } from './worker/embedded.js';
+import { createTeamLlmResolver } from './llm/resolve-team-llm.js';
 import { createDbHandle } from './db/client.js';
-import { createLlmClient } from './llm/factory.js';
-import { createEmbeddingClient } from './llm/embedding/factory.js';
 import type { CompileJobHandler } from './queue/boss.js';
 
 export async function runWorker(): Promise<void> {
@@ -34,22 +32,20 @@ export async function runWorker(): Promise<void> {
   const dbHandle = createDbHandle(config.databaseUrl);
   const db = dbHandle.db;
 
-  // Resolve a compile handler: real F1 when an LLM is configured, honest
-  // no-op otherwise — just like the all-in-one composition root.
-  let handler: CompileJobHandler;
+  // Resolve the LLM per job from the team's saved BYO config (provider, key,
+  // chosen model), falling back to the env provider — same as the all-in-one
+  // composition root. The handler fails a job with `no_llm_provider` when
+  // neither is available.
   const llmProvider = env.llmProviders[0];
-  if (llmProvider) {
-    const llm = createLlmClient(llmProvider);
-    const embeddingClient = createEmbeddingClient(llmProvider);
-    handler = createCompileJobHandler({ db, llm, embeddingClient });
-  } else {
+  if (!llmProvider) {
     console.warn(
-      '[worker] no LLM provider configured — compile jobs will be failed with ' +
-      'no_llm_provider rather than compiled. Configure ' +
-      'TEAMEM_ANTHROPIC_API_KEY, TEAMEM_OPENAI_API_KEY, or equivalent.',
+      '[worker] no env LLM provider configured — teams without a saved provider ' +
+      'in Settings → LLM will have compile jobs failed with no_llm_provider. ' +
+      'Configure TEAMEM_ANTHROPIC_API_KEY, TEAMEM_OPENAI_API_KEY, or equivalent.',
     );
-    handler = createNoProviderHandler(db);
   }
+  const resolveLlm = createTeamLlmResolver({ db, fallback: llmProvider });
+  const handler: CompileJobHandler = createCompileJobHandler({ db, resolveLlm });
 
   // pg-boss lives inside Postgres — the queue start verifies connectivity.
   const queue = createCompileQueue(config.databaseUrl, {

@@ -223,6 +223,12 @@ export type LlmProvider = z.infer<typeof llmProvider>;
 /** GET /v1/teams/:teamId/llm response. */
 export const llmConfigResponse = z.strictObject({
   provider: llmProvider.nullable(),
+  /**
+   * The model used for compilation. Null means the provider default is used
+   * (see DEFAULT_MODELS server-side). A provider-native model id, e.g.
+   * "claude-sonnet-4-5-20250929", "gpt-4o-2024-08-06", "openai/gpt-4o".
+   */
+  model: z.string().nullable(),
   /** Whether an API key has been configured. */
   hasKey: z.boolean(),
   /** Last known connection test result. */
@@ -243,6 +249,24 @@ export const llmConfigResponse = z.strictObject({
 export const llmConfigRequest = z.strictObject({
   provider: llmProvider,
   apiKey: z.string().min(1),
+  /**
+   * Provider-native model id for compilation. Optional — omitted/absent means
+   * the server keeps or falls back to the provider default. Empty string is
+   * rejected; send a real model id or omit the field.
+   */
+  model: z.string().min(1).max(200).optional(),
+});
+
+/** POST /v1/teams/:teamId/llm/models request body — list a provider's models.
+ *  apiKey may be the sentinel "__STORED__" to use the saved key. */
+export const llmModelsRequest = z.strictObject({
+  provider: llmProvider,
+  apiKey: z.string().min(1),
+});
+
+/** POST /v1/teams/:teamId/llm/models response — model ids the key can use. */
+export const llmModelsResponse = z.strictObject({
+  models: z.array(z.string()),
 });
 
 // ── Connector Status DTOs (v0.3 additive, DUA-237) ────────────────────
@@ -295,4 +319,6 @@ export type RenameTeamRequest = z.infer<typeof renameTeamRequest>;
 export type DeleteTeamResponse = z.infer<typeof deleteTeamResponse>;
 export type LlmConfigResponse = z.infer<typeof llmConfigResponse>;
 export type LlmConfigRequest = z.infer<typeof llmConfigRequest>;
+export type LlmModelsRequest = z.infer<typeof llmModelsRequest>;
+export type LlmModelsResponse = z.infer<typeof llmModelsResponse>;
 export type ConnectorStatusResponse = z.infer<typeof connectorStatusResponse>;
