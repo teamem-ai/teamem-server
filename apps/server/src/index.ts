@@ -25,6 +25,8 @@ import { bootstrapMain } from './commands/bootstrap.js';
 import { installShutdownHandlers } from './lifecycle.js';
 import { GitHubConnector } from './connectors/github/connector.js';
 import { registerConnector } from './connectors/registry.js';
+import { createGitHubAppCredentialsProvider } from './connectors/github/app-credentials.js';
+import { createGitHubApiClient, type GitHubApiClient } from './connectors/github/app-api-client.js';
 
 /** Build the real startup factories over a validated runtime config. */
 export function createRuntimeStartup(config: {
@@ -42,6 +44,20 @@ export function createRuntimeStartup(config: {
   const llmProvider = env.llmProviders[0];
   const embeddingClient =
     llmProvider ? createEmbeddingClient(llmProvider) : null;
+
+  // GitHub App REST API client (installation repo list for Settings →
+  // Ingestion). Needs the three credentials that let us mint an installation
+  // token; OAuth client id/secret are irrelevant to this call, so this is a
+  // narrower gate than githubAppConfigured.
+  let githubApiClient: GitHubApiClient | undefined;
+  if (env.github?.appId && env.github?.installationId && env.github?.privateKey) {
+    const credentialsProvider = createGitHubAppCredentialsProvider({
+      appId: env.github.appId,
+      installationId: env.github.installationId,
+      privateKey: env.github.privateKey,
+    });
+    githubApiClient = createGitHubApiClient(credentialsProvider);
+  }
 
   return {
     async startDatabase() {
@@ -82,6 +98,9 @@ export function createRuntimeStartup(config: {
         queue,
         embeddingClient,
         githubOAuth,
+        githubAppConfigured: env.githubAppConfigured,
+        githubWebhookConfigured: env.github?.webhookSecret !== undefined,
+        githubApiClient,
       });
       // `serve()` from @hono/node-server starts listening asynchronously.
       // Wait for the server to be ready so an EADDRINUSE failure surfaces

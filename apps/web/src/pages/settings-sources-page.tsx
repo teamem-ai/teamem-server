@@ -191,7 +191,7 @@ export function SettingsSourcesPage() {
                               {r}
                             </code>
                           ))
-                        : "No repositories selected"}
+                        : "No repositories selected — choose which ones below"}
                     </span>
                   </dd>
                   <dt>Webhook secret</dt>
@@ -218,12 +218,12 @@ export function SettingsSourcesPage() {
                 </dl>
                 <a
                   className="btn btn-outline btn-sm mt-3.5"
-                  href="https://github.com/settings/apps"
+                  href="https://github.com/settings/installations"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  Manage repository access on GitHub
+                  Select repositories on GitHub
                 </a>
               </>
             ) : (

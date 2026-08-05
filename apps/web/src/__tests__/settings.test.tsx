@@ -317,6 +317,48 @@ describe("SettingsSourcesPage", () => {
     });
   });
 
+  it("links to GitHub's installed-apps page (not the developer console) to select repos", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (url: string | URL | Request) => {
+        const urlStr =
+          typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+        if (urlStr.includes("/connectors")) {
+          return Promise.resolve(
+            mockFetchResponse({
+              github: {
+                connected: true,
+                appName: null,
+                installedOn: null,
+                repositories: [],
+                webhookSecretConfigured: true,
+                recentDeliveries: [],
+              },
+              cli: { lastInit: { at: null, repo: null, commitSha: null, eventsCount: 0, pagesCount: 0 }, activeKeysWithWrite: 0 },
+              mcp: { endpointHealthy: true, activeKeysWithWrite: 0 },
+            }) as Response,
+          );
+        }
+        return Promise.resolve(mockFetchResponse([]) as Response);
+      },
+    );
+
+    renderPage(SettingsSourcesPage);
+
+    await waitFor(() => {
+      expect(screen.getByText("Connected")).toBeInTheDocument();
+    });
+
+    // Empty repo state points at the button, not a dead end.
+    expect(
+      screen.getByText(/No repositories selected — choose which ones below/),
+    ).toBeInTheDocument();
+
+    // https://github.com/settings/apps is the developer console (apps you
+    // authored) — not where an installed App's repo access is managed.
+    const link = screen.getByRole("link", { name: /Select repositories on GitHub/ });
+    expect(link).toHaveAttribute("href", "https://github.com/settings/installations");
+  });
+
   it("mints a write key and shows the actionable CLI/MCP command", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     fetchSpy.mockImplementation((url: string | URL | Request) => {
