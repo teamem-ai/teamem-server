@@ -196,22 +196,25 @@ export function SettingsSourcesPage() {
                   </dd>
                   <dt>Webhook secret</dt>
                   <dd>
-                    <span className="flex items-center gap-2">
-                      {connectorStatus.github.webhookSecretConfigured ? (
-                        <span className="pill green">
-                          <Check className="w-3 h-3" />
-                          Configured
-                        </span>
-                      ) : (
-                        <span className="pill">Not configured</span>
-                      )}
+                    <span className="flex flex-col gap-1">
+                      <span className="flex items-center gap-2">
+                        {connectorStatus.github.webhookSecretConfigured ? (
+                          <span className="pill green">
+                            <Check className="w-3 h-3" />
+                            Configured
+                          </span>
+                        ) : (
+                          <span className="pill">Not configured</span>
+                        )}
+                      </span>
                       {canManage && (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          title="Regenerating invalidates the current secret — GitHub App settings must be updated too"
-                        >
-                          Regenerate…
-                        </button>
+                        <span className="text-[12px] text-text-3">
+                          Set via <code className="mono">TEAMEM_GITHUB_WEBHOOK_SECRET</code> at
+                          deploy time — there is no in-app rotation. To
+                          rotate it: generate a new value, update it in both
+                          your <code className="mono">.env</code> and the GitHub
+                          App&apos;s Webhook settings, then restart the server.
+                        </span>
                       )}
                     </span>
                   </dd>

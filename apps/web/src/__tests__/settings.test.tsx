@@ -352,6 +352,47 @@ describe("SettingsSourcesPage", () => {
     expect(
       screen.getByText(/No repositories selected — choose which ones below/),
     ).toBeInTheDocument();
+  });
+
+  it("does not show a dead 'Regenerate…' button for the webhook secret", async () => {
+    // Regression: this button previously had no onClick at all — clicking it
+    // did nothing, silently. The webhook secret is env-configured
+    // (TEAMEM_GITHUB_WEBHOOK_SECRET) with no in-app rotation mechanism, so
+    // it should say that honestly instead of offering a non-functional action.
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (url: string | URL | Request) => {
+        const urlStr =
+          typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+        if (urlStr.includes("/connectors")) {
+          return Promise.resolve(
+            mockFetchResponse({
+              github: {
+                connected: true,
+                appName: null,
+                installedOn: null,
+                repositories: [],
+                webhookSecretConfigured: true,
+                recentDeliveries: [],
+              },
+              cli: { lastInit: { at: null, repo: null, commitSha: null, eventsCount: 0, pagesCount: 0 }, activeKeysWithWrite: 0 },
+              mcp: { endpointHealthy: true, activeKeysWithWrite: 0 },
+            }) as Response,
+          );
+        }
+        return Promise.resolve(mockFetchResponse([]) as Response);
+      },
+    );
+
+    renderPage(SettingsSourcesPage);
+
+    await waitFor(() => {
+      expect(screen.getByText("Connected")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Regenerate…")).toBeNull();
+    expect(
+      screen.getByText(/there is no in-app rotation/),
+    ).toBeInTheDocument();
 
     // https://github.com/settings/apps is the developer console (apps you
     // authored) — not where an installed App's repo access is managed.
