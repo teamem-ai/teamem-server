@@ -38,7 +38,7 @@ describe('createTeamLlmResolver', () => {
       model: 'gpt-4o-mini',
       api_key_encrypted: encryptApiKey('sk-team-key'),
     };
-    const build = vi.fn((_c: ResolvedLlmConfig, _m: string | null): ResolvedTeamLlm => stub);
+    const build = vi.fn<(config: ResolvedLlmConfig, model: string | null) => ResolvedTeamLlm>(() => stub);
     const resolve = createTeamLlmResolver({ db: fakeDb(row), build });
 
     const result = await resolve('team_x');
@@ -56,7 +56,7 @@ describe('createTeamLlmResolver', () => {
       model: null,
       api_key_encrypted: encryptApiKey('sk-ant'),
     };
-    const build = vi.fn((_c: ResolvedLlmConfig, _m: string | null): ResolvedTeamLlm => stub);
+    const build = vi.fn<(config: ResolvedLlmConfig, model: string | null) => ResolvedTeamLlm>(() => stub);
     const resolve = createTeamLlmResolver({ db: fakeDb(row), build });
 
     await resolve('team_x');
@@ -68,7 +68,7 @@ describe('createTeamLlmResolver', () => {
 
   it('falls back to the env provider when the team has no saved config', async () => {
     const fallback: ResolvedLlmConfig = { kind: 'openai', apiKey: 'sk-env' };
-    const build = vi.fn((_c: ResolvedLlmConfig, _m: string | null): ResolvedTeamLlm => stub);
+    const build = vi.fn<(config: ResolvedLlmConfig, model: string | null) => ResolvedTeamLlm>(() => stub);
     const resolve = createTeamLlmResolver({ db: fakeDb(undefined), fallback, build });
 
     const result = await resolve('team_x');
@@ -86,7 +86,7 @@ describe('createTeamLlmResolver', () => {
       api_key_encrypted: encryptApiKey('sk-custom'),
     };
     const fallback: ResolvedLlmConfig = { kind: 'openai', apiKey: 'sk-env' };
-    const build = vi.fn((_c: ResolvedLlmConfig, _m: string | null): ResolvedTeamLlm => stub);
+    const build = vi.fn<(config: ResolvedLlmConfig, model: string | null) => ResolvedTeamLlm>(() => stub);
     const resolve = createTeamLlmResolver({ db: fakeDb(row), fallback, build });
 
     await resolve('team_x');
