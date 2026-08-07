@@ -518,10 +518,35 @@ describe('structured — normalizes a root union into a provider-legal object', 
     expect(schema['$schema']).toBeUndefined();
   }
 
-  it('claude: wraps the F1 union in a required "result" property', async () => {
+  /**
+   * Recursively asserts no `oneOf`/`anyOf`/`allOf` survives anywhere in the
+   * schema — not just at the root. Pins down the real production failure:
+   * OpenRouter routing an OpenAI-shaped `response_format` to an Anthropic-
+   * family backend (Bedrock/Azure/Anthropic all observed) rejects `oneOf`
+   * anywhere, not only at the root, contradicting the "nested combinators
+   * are fine everywhere" assumption a previous revision of this file relied
+   * on (see the {@link flattenOneOfBranches} doc in factory.ts).
+   */
+  function expectNoCombinatorAnywhere(node: unknown): void {
+    if (Array.isArray(node)) {
+      for (const item of node) expectNoCombinatorAnywhere(item);
+      return;
+    }
+    if (typeof node !== 'object' || node === null) return;
+    const obj = node as Record<string, unknown>;
+    expect(obj['oneOf']).toBeUndefined();
+    expect(obj['anyOf']).toBeUndefined();
+    expect(obj['allOf']).toBeUndefined();
+    for (const value of Object.values(obj)) expectNoCombinatorAnywhere(value);
+  }
+
+  it('claude: flattens the F1 union into a bare object schema — no envelope needed', async () => {
     const calls: Captured[] = [];
+    // A bare (unwrapped) payload — flattening means the provider is asked
+    // for the branches' properties directly at the root, not inside a
+    // "result" envelope.
     const fetch = makeRecorder(
-      () => okClaude({ result: { action: 'skip', reason: 'no knowledge' } }),
+      () => okClaude({ action: 'skip', reason: 'no knowledge' }),
       calls,
     );
     const client = createLlmClient(byoConfigs[0], { fetch });
@@ -533,28 +558,30 @@ describe('structured — normalizes a root union into a provider-legal object', 
       requestId: 'req-f1',
     });
 
-    // The caller still receives the union value, not the envelope.
     expect(res.output).toEqual({ action: 'skip', reason: 'no knowledge' });
 
     const inputSchema = (
       calls[0]!.body as { tools: [{ input_schema: Record<string, unknown> }] }
     ).tools[0].input_schema;
     expectRootObjectShape(inputSchema);
-    expect(inputSchema['required']).toEqual([SCHEMA_ENVELOPE_PROPERTY]);
-    // The union itself survives one level down — the branches are still
-    // provider-native structured output, not flattened into a loose object.
-    const inner = (inputSchema['properties'] as Record<string, { oneOf?: unknown[] }>)[
-      SCHEMA_ENVELOPE_PROPERTY
-    ]!;
-    expect(inner.oneOf).toHaveLength(2);
+    expectNoCombinatorAnywhere(inputSchema);
+    // Only the discriminant is common to every branch — everything else
+    // (title/body/path/tags/confidence from `extract`, `reason` from `skip`)
+    // stays optional in the merged schema; real enforcement is still the
+    // Zod re-validation below, not this hint to the model.
+    expect(inputSchema['required']).toEqual(['action']);
+    const properties = inputSchema['properties'] as Record<string, unknown>;
+    expect(Object.keys(properties)).toEqual(
+      expect.arrayContaining(['action', 'title', 'body', 'reason']),
+    );
+    // The discriminant's two literal values merge into one enum rather than
+    // one branch silently overwriting the other's `const`.
+    expect(properties['action']).toEqual({ type: 'string', enum: ['extract', 'skip'] });
   });
 
-  it('openai: wraps the F1 union and still omits strict (nested oneOf)', async () => {
+  it('openai: flattens the F1 union and omits strict (properties stay partially optional)', async () => {
     const calls: Captured[] = [];
-    const fetch = makeRecorder(
-      () => okOpenAi({ result: { action: 'skip', reason: 'nope' } }),
-      calls,
-    );
+    const fetch = makeRecorder(() => okOpenAi({ action: 'skip', reason: 'nope' }), calls);
     const client = createLlmClient(byoConfigs[1], { fetch });
 
     const res = await client.structured({
@@ -573,39 +600,21 @@ describe('structured — normalizes a root union into a provider-legal object', 
       }
     ).response_format.json_schema;
     expectRootObjectShape(envelope.schema);
-    expect(envelope.schema['required']).toEqual([SCHEMA_ENVELOPE_PROPERTY]);
-    // Wrapping fixes the root, but the nested oneOf is still not strict-
-    // compatible, so strict must stay absent.
+    expectNoCombinatorAnywhere(envelope.schema);
+    expect(envelope.schema['required']).toEqual(['action']);
+    // No oneOf survives, but OpenAI strict mode also requires every property
+    // to be in `required` — most F1 properties stay optional post-merge, so
+    // strict must stay absent even though the combinator rule is satisfied.
     expect(envelope.strict).toBeUndefined();
   });
 
-  it('parses an envelope Anthropic filled with a serialized JSON string', async () => {
-    // Observed against the live API: the model may put the serialized object
-    // in the envelope property instead of the object itself.
+  it('rejects a bare payload that violates the union even though the provider-side schema is now more permissive', async () => {
+    // The flattened schema only requires `action` — `reason` is optional at
+    // the JSON-Schema level once merged with `extract`'s branch. Zod remains
+    // the authority regardless (§5.2): a `skip` payload missing `reason`
+    // must still fail.
     const calls: Captured[] = [];
-    const fetch = makeRecorder(
-      () => okClaude({ result: JSON.stringify({ action: 'skip', reason: 'stringified' }) }),
-      calls,
-    );
-    const client = createLlmClient(byoConfigs[0], { fetch });
-
-    const res = await client.structured({
-      schema: f1Output,
-      systemPrompt: 'sys',
-      userPrompt: 'usr',
-      requestId: 'req-f1-str',
-    });
-    expect(res.output).toEqual({ action: 'skip', reason: 'stringified' });
-  });
-
-  it('rejects an envelope whose payload does not satisfy the union', async () => {
-    // Unwrapping must not become a way to smuggle unvalidated output through:
-    // Zod remains the authority (§5.2).
-    const calls: Captured[] = [];
-    const fetch = makeRecorder(
-      () => okClaude({ result: { action: 'skip' } }), // `reason` missing
-      calls,
-    );
+    const fetch = makeRecorder(() => okClaude({ action: 'skip' }), calls); // `reason` missing
     const client = createLlmClient(byoConfigs[0], { fetch });
 
     await expect(
@@ -618,19 +627,36 @@ describe('structured — normalizes a root union into a provider-legal object', 
     ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
   });
 
-  it('rejects a bare union payload sent without the envelope', async () => {
+  it('parses an envelope Anthropic filled with a serialized JSON string (non-flattenable union)', async () => {
+    // Observed against the live API: the model may put the serialized object
+    // in the envelope property instead of the object itself. Uses a union
+    // that flattenOneOfBranches deliberately leaves alone (a primitive
+    // branch, not all-object) so this still exercises the envelope-wrap +
+    // unwrap path that flattening bypasses for F1/F2.
+    const stringOrObject = z.union([z.string(), answerSchema]);
     const calls: Captured[] = [];
-    const fetch = makeRecorder(() => okClaude({ action: 'skip', reason: 'unwrapped' }), calls);
+    const fetch = makeRecorder(
+      () => okClaude({ result: JSON.stringify(validValue) }),
+      calls,
+    );
     const client = createLlmClient(byoConfigs[0], { fetch });
 
-    await expect(
-      client.structured({
-        schema: f1Output,
-        systemPrompt: 'sys',
-        userPrompt: 'usr',
-        requestId: 'req-f1-bare',
-      }),
-    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+    const res = await client.structured({
+      schema: stringOrObject,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-str-union',
+    });
+    // unwrapEnvelope JSON.parses the envelope's string value before Zod
+    // validation, so this matches the object branch of the union, not the
+    // string branch — proving the parse-then-validate path, not just that a
+    // string trivially satisfies `z.string()`.
+    expect(res.output).toEqual(validValue);
+
+    const inputSchema = (
+      calls[0]!.body as { tools: [{ input_schema: Record<string, unknown> }] }
+    ).tools[0].input_schema;
+    expect(inputSchema['required']).toEqual([SCHEMA_ENVELOPE_PROPERTY]);
   });
 
   it('leaves an object-root schema unwrapped and sends it with strict:true', async () => {

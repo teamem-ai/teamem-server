@@ -280,13 +280,15 @@ async function runStructured<T>(
  * Build the `json_schema` member of an OpenAI-family `response_format`.
  *
  * OpenAI Structured Outputs `strict: true` forbids `anyOf`/`oneOf`/`$ref`
- * anywhere in the schema. The real F1/F2 schemas are discriminated unions, so
- * after {@link toProviderSchema} wraps them they still carry a nested `oneOf`
- * and remain strict-incompatible. Forcing `strict: true` on them would 400 the
- * `openai`, `openrouter`, and OpenAI-compatible `custom` providers, so strict
- * is requested only when the schema can honor it and omitted otherwise —
- * a valid provider-native structured-output request either way (strict
- * defaults to false).
+ * anywhere in the schema and requires every object's `properties` to be
+ * fully listed in `required`. {@link toProviderSchema} now eliminates `oneOf`
+ * everywhere (see {@link flattenOneOfBranches}), but the flattened schema
+ * only requires each branch's *common* keys (e.g. just `action` for F1) —
+ * still strict-incompatible, since most properties stay optional. Forcing
+ * `strict: true` on it would 400 the `openai`, `openrouter`, and OpenAI-
+ * compatible `custom` providers, so strict is requested only when the schema
+ * can actually honor it and omitted otherwise — a valid provider-native
+ * structured-output request either way (strict defaults to false).
  *
  * Note what omitting `strict` does NOT buy: the root-must-be-an-object rule is
  * enforced by OpenAI regardless of `strict`, which is why the root-union
@@ -313,9 +315,15 @@ function openAiJsonSchema(schema: unknown): {
 
 /**
  * Whether `schema` meets OpenAI Structured Outputs strict-mode constraints:
- * the ROOT must be an object, and no `anyOf`/`oneOf`/`allOf`/`$ref` keyword
- * may appear anywhere (including nested objects, array items, and `$defs`).
- * Primitive node types are allowed at non-root positions.
+ * the ROOT must be an object, no `anyOf`/`oneOf`/`allOf`/`$ref` keyword may
+ * appear anywhere (including nested objects, array items, and `$defs`), and
+ * every object node's `properties` must all be listed in that node's
+ * `required` (OpenAI's actual strict-mode rule — optional fields have to be
+ * modeled as nullable-but-required, which no schema here does, so this
+ * correctly falls back to non-strict rather than mis-certifying a schema
+ * like the flattened F1/F2 output — where most keys stay genuinely optional
+ * after the `oneOf` merge — as strict-compatible). Primitive node types are
+ * allowed at non-root positions.
  */
 function isOpenAiStrictCompatible(schema: unknown): boolean {
   if (!isObject(schema) || schema.type !== 'object') return false;
@@ -331,6 +339,10 @@ function strictCompatibleSubtree(node: unknown): boolean {
   }
   const properties = node.properties;
   if (isObject(properties)) {
+    const required = Array.isArray(node.required) ? node.required : [];
+    for (const key of Object.keys(properties)) {
+      if (!required.includes(key)) return false;
+    }
     for (const value of Object.values(properties)) {
       if (!strictCompatibleSubtree(value)) return false;
     }
@@ -572,13 +584,25 @@ interface ProviderSchema {
  * NOT sufficient for a root union — an earlier revision assumed it was, which
  * is why every real F1/F2 call failed on every provider.
  *
- * Wrapping keeps the union visible to the model (nested combinators are fine
- * everywhere) instead of flattening the branches into one permissive object,
- * so the provider-native mechanism still carries the real contract (§5.2).
- * Schemas that are already root objects are passed through untouched.
+ * An earlier revision of this function wrapped the union in a root envelope
+ * but left `oneOf` nested one level down inside it, on the assumption that
+ * nested combinators are accepted everywhere. That held for direct Anthropic
+ * tool-use and direct OpenAI calls, but not for every path a provider config
+ * can reach: OpenRouter's OpenAI-compatible `response_format`, when routed to
+ * an Anthropic-family backend (Bedrock/Azure/Anthropic all observed), gets
+ * translated into Anthropic's native structured-output request and rejects
+ * `oneOf` anywhere in the schema — `output_config.format.schema: Schema type
+ * 'oneOf' is not supported` — not just at the root. So `oneOf` is now
+ * eliminated everywhere via {@link flattenOneOfBranches}, not merely moved:
+ * every branch's properties are merged into one permissive object, which is
+ * necessarily less strict than the original union at the JSON-Schema level.
+ * That's an accepted trade-off, not a weakening of the real contract — the
+ * Zod discriminated union re-validates every response after the fact (§5.2),
+ * so a model that exploits the widened schema still fails validation; this
+ * schema only has to steer the model, not gate correctness.
  */
 function toProviderSchema(schema: unknown): ProviderSchema {
-  const stripped = stripSchemaAnchor(schema);
+  const stripped = flattenOneOfBranches(stripSchemaAnchor(schema));
   if (isObject(stripped) && stripped.type === 'object' && !hasRootCombinator(stripped)) {
     return { schema: stripped, wrapped: false };
   }
@@ -600,6 +624,130 @@ function toProviderSchema(schema: unknown): ProviderSchema {
 
 function hasRootCombinator(node: Record<string, unknown>): boolean {
   return 'oneOf' in node || 'anyOf' in node || 'allOf' in node;
+}
+
+/**
+ * Recursively flatten every `oneOf` of object-schema branches into a single
+ * merged object schema: `properties` is the union of every branch's
+ * properties, and `required` is the intersection (only keys required in
+ * every branch — for a discriminated union that's exactly the discriminant).
+ *
+ * A property key present in more than one branch is merged by
+ * {@link mergePropertyVariants} rather than overwritten, so a discriminant
+ * like `action: { const: 'extract' }` vs `action: { const: 'skip' }` becomes
+ * `action: { enum: ['extract', 'skip'] }` instead of silently losing one
+ * branch's value.
+ *
+ * `oneOf` nodes that aren't a plain list of object-type branches (e.g. a
+ * union of primitives) are left untouched — this only targets the shape
+ * `z.discriminatedUnion`/`z.union` of `z.object` produces, which is the only
+ * pattern any current F1/F2 schema uses.
+ */
+function flattenOneOfBranches(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    return node.map(flattenOneOfBranches);
+  }
+  if (!isObject(node)) return node;
+
+  const recursed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) {
+    recursed[key] = flattenOneOfBranches(value);
+  }
+
+  const branches = recursed['oneOf'];
+  if (
+    !Array.isArray(branches) ||
+    branches.length === 0 ||
+    !branches.every(isFlattenableBranch)
+  ) {
+    return recursed;
+  }
+
+  const properties: Record<string, unknown> = {};
+  const variantsByKey = new Map<string, unknown[]>();
+  for (const branch of branches) {
+    for (const [key, valueSchema] of Object.entries(branch.properties)) {
+      const variants = variantsByKey.get(key) ?? [];
+      variants.push(valueSchema);
+      variantsByKey.set(key, variants);
+    }
+  }
+  for (const [key, variants] of variantsByKey) {
+    properties[key] = mergePropertyVariants(variants);
+  }
+
+  let required: string[] | null = null;
+  for (const branch of branches) {
+    const branchRequired = Array.isArray(branch.required)
+      ? (branch.required as string[])
+      : [];
+    required =
+      required === null
+        ? branchRequired
+        : required.filter((k) => branchRequired.includes(k));
+  }
+
+  const { oneOf: _oneOf, ...rest } = recursed;
+  void _oneOf;
+  return {
+    ...rest,
+    type: 'object',
+    properties,
+    required: required ?? [],
+    additionalProperties: false,
+  };
+}
+
+function isFlattenableBranch(
+  branch: unknown,
+): branch is { type: 'object'; properties: Record<string, unknown>; required?: unknown } {
+  return (
+    isObject(branch) &&
+    branch.type === 'object' &&
+    isObject(branch.properties)
+  );
+}
+
+/**
+ * Merge the schemas a property was given across different `oneOf` branches
+ * into one. Identical schemas collapse to one copy. Schemas that differ only
+ * by a `const` (the shape a discriminated union's literal tag produces —
+ * `{ type: 'string', const: 'extract' }` vs `{ type: 'string', const: 'skip' }`)
+ * merge into a single `enum` of the distinct literal values, which is a plain
+ * constraint keyword, not a combinator, so it's unaffected by the `oneOf`
+ * rejection this function exists to work around.
+ *
+ * Anything else (genuinely different types/shapes for the same key across
+ * branches) falls back to an unconstrained `{}` — no current F1/F2 schema
+ * produces this, and an unconstrained hint is still safe because the real
+ * enforcement is the post-response Zod validation, not this schema.
+ */
+function mergePropertyVariants(variants: unknown[]): unknown {
+  const first = variants[0];
+  if (variants.every((v) => JSON.stringify(v) === JSON.stringify(first))) {
+    return first;
+  }
+
+  const literals: unknown[] = [];
+  let allConstLiterals = true;
+  for (const variant of variants) {
+    if (
+      isObject(variant) &&
+      Object.keys(variant).length === 2 &&
+      typeof variant.type === 'string' &&
+      'const' in variant
+    ) {
+      literals.push(variant.const);
+    } else {
+      allConstLiterals = false;
+      break;
+    }
+  }
+  if (allConstLiterals) {
+    return { type: (first as Record<string, unknown>).type, enum: literals };
+  }
+
+  return {};
 }
 
 /**
