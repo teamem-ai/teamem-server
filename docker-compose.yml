@@ -52,6 +52,11 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-teamem}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-teamem}
+      # Public URL this instance is reached at. Drives the GitHub OAuth
+      # redirect_uri and every generated invite link — defaults to
+      # localhost, which breaks both the moment this is deployed behind a
+      # real domain. Must match the GitHub App's Callback URL exactly.
+      TEAMEM_BASE_URL: ${TEAMEM_BASE_URL:-}
       # Single-process mode: when true, the server embeds the pg-boss
       # compile worker — bring up only `postgres server` and skip `worker`.
       TEAMEM_ALL_IN_ONE: ${TEAMEM_ALL_IN_ONE:-false}
