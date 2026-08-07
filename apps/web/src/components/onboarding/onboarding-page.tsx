@@ -103,12 +103,30 @@ export function OnboardingPage() {
   //   - Team + 0 projects         → resume at Step 1 as "create your first
   //                                  project", reusing the existing team
   //                                  (see ExistingTeam doc on Step1CreateTeam)
-  //   - No team at all            → genuinely fresh signup, full flow
+  //   - No team at all            → BLOCKED, not a fresh-signup wizard.
+  //                                  ensureTeamMembership only auto-bootstraps
+  //                                  a team when none exists yet anywhere on
+  //                                  this instance, and does so at login —
+  //                                  before this component ever mounts. So a
+  //                                  signed-in session that reaches here with
+  //                                  no team means a team already exists and
+  //                                  this visitor isn't in it (never invited,
+  //                                  or removed): self-serve team creation is
+  //                                  rejected server-side (POST /v1/teams)
+  //                                  regardless, so offering the wizard would
+  //                                  just be a dead end. A genuinely invited
+  //                                  new user never reaches this branch — the
+  //                                  post-OAuth landing page recovers their
+  //                                  invite token and routes to /join instead.
   const [entry, setEntry] = useState<
     | { status: "checking" }
     | { status: "signed-out" }
+    | { status: "blocked" }
     | { status: "ready"; existingTeam: ExistingTeam | null }
   >({ status: "checking" });
+  // githubLogin for the "blocked" screen's "signed in as X" line — kept
+  // separate from `entry` so the union above stays free of display-only data.
+  const [blockedLogin, setBlockedLogin] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,9 +166,14 @@ export function OnboardingPage() {
           return;
         }
 
-        // No team yet — a genuinely fresh start; discard any stale progress.
+        // No team yet, and (see the comment above the entry state type)
+        // that means someone else's team already exists on this instance
+        // and this visitor isn't a member of it. Discard any stale wizard
+        // progress and block rather than offering a self-serve team
+        // creation flow the server will reject anyway.
         resetWizard();
-        setEntry({ status: "ready", existingTeam: null });
+        setBlockedLogin(session.githubLogin);
+        setEntry({ status: "blocked" });
       } catch {
         // A transient failure must not strand the visitor on the skeleton
         // forever. Fall back to the sign-in step — the safe default, and
@@ -302,6 +325,50 @@ export function OnboardingPage() {
         <div className="wiz-body">
           <div className="wiz-card">
             <OnboardingSignIn />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Signed in, but not a member of any team, and this instance already has
+  // one — no self-serve team creation is offered (the server rejects it
+  // too). The only ways forward are a real invite or switching accounts.
+  if (entry.status === "blocked") {
+    return (
+      <div className="wizard">
+        <div className="wiz-top">
+          {wizLogo}
+          <strong>teamem</strong>
+        </div>
+        <div className="wiz-body">
+          <div className="wiz-card">
+            <h1>No team access</h1>
+            <p className="tagline">
+              {blockedLogin ? (
+                <>Signed in as <strong>{blockedLogin}</strong>, but this account isn&apos;t a member of a team on this portal.</>
+              ) : (
+                "This account isn't a member of a team on this portal."
+              )}
+            </p>
+            <p style={{ marginTop: 8 }}>
+              Ask a team owner to send you an invite link, or switch to a
+              GitHub account that already has access.
+            </p>
+            <div className="auth-box" style={{ marginTop: 20 }}>
+              <a
+                href="/auth/logout"
+                className="btn btn-outline btn-block"
+                onClick={(e) => {
+                  e.preventDefault();
+                  void fetch("/auth/logout", { method: "POST" }).finally(() => {
+                    window.location.href = "/login";
+                  });
+                }}
+              >
+                Switch GitHub account
+              </a>
+            </div>
           </div>
         </div>
       </div>

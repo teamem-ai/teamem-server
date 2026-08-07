@@ -257,17 +257,19 @@ const handlers = [
   }),
 
   // ── GET /auth/me ────────────────────────────────────────────────────
-  // Default: a genuinely fresh user with no team at all yet (the rare
-  // case — every first GitHub login normally auto-bootstraps a team, see
-  // the entry-guard tests below for that far more common path).
+  // Default: the common real case — GitHub OAuth already auto-bootstrapped
+  // a team for this user (ensureTeamMembership), but no project yet. A
+  // teamId:null session is deliberately NOT the default here: once any
+  // team exists on the instance, the wizard blocks that state instead of
+  // offering self-serve team creation (see the dedicated "blocked" test).
   http.get("/auth/me", () => {
     return HttpResponse.json({
       userId: "usr_test",
       githubLogin: "testuser",
       avatarUrl: null,
-      teamId: null,
-      teamName: null,
-      role: null,
+      teamId: TEST_TEAM_ID,
+      teamName: "testuser's Team",
+      role: "owner",
     });
   }),
 ];
@@ -329,7 +331,7 @@ async function fillStep1(teamName: string, projectName: string) {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe("Onboarding wizard — network-boundary integration (MSW)", () => {
-  it("Step 1: creates a team and project through real POST endpoints", async () => {
+  it("Step 1: renames the auto-bootstrapped team and creates the first project through real endpoints", async () => {
     renderOnboarding();
 
     await fillStep1("Acme Corp", TEST_PROJECT_NAME);
@@ -561,6 +563,35 @@ describe("Onboarding wizard — entry guard", () => {
     const signIn = screen.getByRole("link", { name: /Sign in with GitHub/i });
     expect(signIn).toHaveAttribute("href", "/auth/github");
     expect(screen.queryByText("LOGIN_PAGE_MARKER")).toBeNull();
+  });
+
+  it("blocks self-serve team creation (not the fresh-signup wizard) for a signed-in session with no team", async () => {
+    // This is the state a removed or never-invited visitor lands in — see
+    // the entry-guard comment above. ensureTeamMembership only ever returns
+    // null here once some team already exists on the instance, so this must
+    // never fall back to the self-serve "create your own team" wizard (the
+    // server rejects that POST anyway — see teams.ts).
+    server.use(
+      http.get("/auth/me", () =>
+        HttpResponse.json({
+          userId: "usr_blocked",
+          githubLogin: "removed_user",
+          avatarUrl: null,
+          teamId: null,
+          teamName: null,
+          role: null,
+        }),
+      ),
+    );
+
+    renderOnboarding();
+
+    await waitFor(() => {
+      expect(screen.getByText("No team access")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/removed_user/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Team name")).toBeNull();
+    expect(teamCreateCalls).toBe(0);
   });
 
   it("redirects to /knowledge when the team already has a project", async () => {
