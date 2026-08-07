@@ -40,6 +40,7 @@ import { z } from 'zod';
 import type { LlmProviderConfig, ResolvedLlmConfig } from '../config/llm.js';
 import {
   LlmError,
+  MAX_OUTPUT_TOKENS,
   type FetchLike,
   type LlmClient,
   type LlmClientDeps,
@@ -426,6 +427,7 @@ function buildRequest(
       headers,
       body: JSON.stringify({
         model,
+        max_tokens: MAX_OUTPUT_TOKENS,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },

@@ -21,7 +21,7 @@
  * authority on correctness.
  */
 import type { ResolvedLlmConfig } from '../config/llm.js';
-import { LlmError, type LlmUsage } from './types.js';
+import { LlmError, MAX_OUTPUT_TOKENS, type LlmUsage } from './types.js';
 
 /** Anthropic API host. */
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com/v1';
@@ -74,7 +74,7 @@ export function buildClaudeRequest(
       },
       body: JSON.stringify({
         model,
-        max_tokens: 1024,
+        max_tokens: MAX_OUTPUT_TOKENS,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
         tools: [

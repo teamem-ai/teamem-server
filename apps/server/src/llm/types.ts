@@ -30,6 +30,20 @@ import type { z } from 'zod';
 export type LlmProviderKind = 'claude' | 'openai' | 'openrouter' | 'custom';
 
 /**
+ * Output token ceiling sent on every structured-output request, for every
+ * provider family. Must cover the largest field either F1 or F2 output can
+ * legally produce — F2's `mergedBody` alone is capped at 50,000 characters
+ * (compiler/f2/decision.ts), well north of 1,024 tokens (~4,096 characters).
+ *
+ * A cap that's too tight doesn't error — the provider silently truncates
+ * mid-token and returns 200, so the JSON comes back unterminated and fails
+ * schema_validation_failed with no indication it was ever a length problem
+ * rather than a genuine model mistake. Observed against real F1 extractions
+ * whose `body` field alone exceeded the previous 1,024-token cap.
+ */
+export const MAX_OUTPUT_TOKENS = 8192;
+
+/**
  * Provider-neutral description of the model that produced a response.
  *
  * `model` is the provider-reported model identifier (e.g. `gpt-4o-2024-08-06`

@@ -38,7 +38,7 @@ import {
   buildClaudeRequest,
   parseClaudeResponse,
 } from './claude-adapter.js';
-import { LlmError } from './types.js';
+import { LlmError, MAX_OUTPUT_TOKENS } from './types.js';
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 
@@ -134,7 +134,7 @@ describe('buildClaudeRequest', () => {
     const body = JSON.parse(init.body as string);
 
     expect(body.model).toBe(CLAUDE_DEFAULT_MODEL);
-    expect(body.max_tokens).toBe(1024);
+    expect(body.max_tokens).toBe(MAX_OUTPUT_TOKENS);
     expect(body.system).toBe('sys');
     expect(body.messages).toEqual([{ role: 'user', content: 'usr' }]);
 

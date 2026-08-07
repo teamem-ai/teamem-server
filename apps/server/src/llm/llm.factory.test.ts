@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { f1Output } from '../compiler/f1/output.js';
 import { llmProviderConfig } from '../config/llm.js';
 import { createLlmClient, DEFAULT_MODELS, SCHEMA_ENVELOPE_PROPERTY } from './factory.js';
-import { LlmError, type FetchLike, type LlmProviderKind } from './types.js';
+import { LlmError, MAX_OUTPUT_TOKENS, type FetchLike, type LlmProviderKind } from './types.js';
 
 /* ── Fixtures ──────────────────────────────────────────────────────────────── */
 
@@ -173,6 +173,12 @@ describe('structured — success path for each BYO provider', () => {
     expect(req.headers['authorization']).toBeUndefined();
     // Forced single-tool use, provider-native structured output.
     expect(req.body).toMatchObject({
+      // A cap that's too tight doesn't error — the provider silently
+      // truncates and returns 200, so the JSON comes back unterminated and
+      // fails schema validation with no hint it was ever a length problem.
+      // Pins down a real production failure (F2's mergedBody can run to
+      // 50,000 chars, far past the 1,024-token cap this used to send).
+      max_tokens: MAX_OUTPUT_TOKENS,
       tool_choice: { type: 'tool', name: 'record_structured_output' },
       tools: expect.arrayContaining([
         expect.objectContaining({
@@ -211,6 +217,11 @@ describe('structured — success path for each BYO provider', () => {
     expect(req.headers['authorization']).toBe(`Bearer ${API_KEYS.openai}`);
     expect(req.headers['x-api-key']).toBeUndefined();
     expect(req.body).toMatchObject({
+      // Same length-truncation concern as the Claude path above — the
+      // OpenAI-compatible request previously sent no max_tokens at all,
+      // leaving truncation entirely up to whatever default the routed
+      // backend happened to apply.
+      max_tokens: MAX_OUTPUT_TOKENS,
       response_format: {
         type: 'json_schema',
         json_schema: {
