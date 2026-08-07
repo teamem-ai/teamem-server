@@ -144,11 +144,14 @@ export function buildApp(deps: AppDeps = {}) {
   // Governance routes (teams, projects, keys) — wired when db is available.
   // These are web-session-authenticated and require a valid OAuth session cookie.
   if (deps.db) {
-    // Read host/port from env for the MCP command formatter; defaults
-    // match the standard Compose development topology.
-    const mcpHost = process.env['TEAMEM_HOST'] ?? '0.0.0.0';
+    // Same resolution config/env.ts uses for GitHub OAuth's redirect_uri —
+    // TEAMEM_BASE_URL when set, otherwise localhost on the configured port.
+    // Reading it independently here (rather than threading parseServerEnv's
+    // result through) previously meant this could silently disagree with
+    // OAuth about what "this server" is reachable at.
     const mcpPort = Number(process.env['TEAMEM_PORT'] ?? 8080);
-    const mcpConfig = { host: mcpHost, port: mcpPort };
+    const mcpBaseUrl = process.env['TEAMEM_BASE_URL'] || `http://localhost:${mcpPort}`;
+    const mcpConfig = { baseUrl: mcpBaseUrl };
     app.route('/', buildTeamsRoutes({ db: deps.db, mcpConfig }));
     app.route('/', buildProjectsRoutes({ db: deps.db }));
     app.route('/', buildKeysRoutes({ db: deps.db, mcpConfig }));

@@ -158,7 +158,7 @@ const BOOTSTRAP_PROVIDER_KIND = 'teamem';
 export async function runBootstrap(
   db: AppDb,
   args: BootstrapArgs,
-  /** Server host/port for the pasteable MCP command (DUA-211). */
+  /** Server base URL for the pasteable MCP command (DUA-211). */
   mcpConfig?: McpCommandConfig,
 ): Promise<BootstrapResult> {
   // --- Team (idempotent by name) ---
@@ -304,7 +304,7 @@ async function ensureBootstrapKey(
   projectId: string,
   principalId: string | null,
   rotate: boolean,
-  /** Server host/port for the pasteable MCP command (DUA-211). */
+  /** Server base URL for the pasteable MCP command (DUA-211). */
   mcpConfig?: McpCommandConfig,
 ): Promise<BootstrapResult['key']> {
   // Look for an existing, non-revoked bootstrap key for this project
@@ -413,11 +413,11 @@ export async function bootstrapMain(args?: BootstrapArgs): Promise<void> {
     // Verify connectivity
     await db.$client.query('SELECT 1');
 
-    // Read validated server host/port for the pasteable MCP command (DUA-211).
-    // Uses the same Zod-validated parser the server itself uses — no
-    // hand-rolled Number() or duplicate validation.
-    const { host, port } = parseServerEnv();
-    const mcpConfig = { host, port };
+    // Read the validated server base URL for the pasteable MCP command
+    // (DUA-211) — the same value GitHub OAuth's redirect_uri is built from,
+    // via the same Zod-validated parser the server itself uses.
+    const { baseUrl } = parseServerEnv();
+    const mcpConfig = { baseUrl };
 
     const result = await runBootstrap(db, parsedArgs, mcpConfig);
 

@@ -30,7 +30,7 @@ import {
 import type { McpCommandConfig } from './format-mcp-command.js';
 
 /** Explicit MCP config for integration tests so we never depend on env. */
-const TEST_MCP_CONFIG: McpCommandConfig = { host: 'localhost', port: 8080 };
+const TEST_MCP_CONFIG: McpCommandConfig = { baseUrl: 'http://localhost:8080' };
 
 const url = process.env['TEST_DATABASE_URL'];
 

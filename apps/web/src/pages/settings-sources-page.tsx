@@ -75,9 +75,15 @@ export function SettingsSourcesPage() {
   const hasWriteKey = keys.length > 0;
   const selectedKey = keys.find((k) => k.id === selectedKeyId);
 
+  // Same-origin with the API (BASE = ""), so the browser's own address bar
+  // is always the right host — no hardcoded localhost that breaks the
+  // moment this is deployed behind a real domain.
+  const serverBaseUrl =
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
+
   const selectedToken = setupToken ?? (selectedKey ? "<paste-key>" : "<token>");
-  const cliCommand = `teamem init --url http://localhost:8080 --token ${selectedToken} --project ${effectiveProjectId}`;
-  const mcpCommand = mintedMcpCommand ?? `claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer ${selectedToken}"`;
+  const cliCommand = `teamem init --url ${serverBaseUrl} --token ${selectedToken} --project ${effectiveProjectId}`;
+  const mcpCommand = mintedMcpCommand ?? `claude mcp add --transport http teamem ${serverBaseUrl}/mcp --header "Authorization: Bearer ${selectedToken}"`;
 
   async function handleMintSetupKey() {
     if (!canManage || !teamId) return;
