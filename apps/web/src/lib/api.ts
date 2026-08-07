@@ -319,15 +319,21 @@ export async function fetchJobDetail(
   );
 }
 
-/** Re-run a failed compile job. Admin+ only — the server enforces this too. */
+/**
+ * Re-run a compile job's events. Admin+ only — the server enforces this too.
+ * `mode: 'failed'` (default) only re-runs events that failed, leaving
+ * already-compiled/skipped ones alone; `'all'` re-runs every event,
+ * mirroring GitHub Actions' "re-run failed jobs" vs "re-run all jobs".
+ */
 export async function retryJob(
   jobId: string,
   projectId: string,
-): Promise<{ id: string; status: JobStatus }> {
-  const res = await post<{ requestId: string; data: { id: string; status: JobStatus } }>(
-    `/jobs/${encodeURIComponent(jobId)}/retry`,
-    { projectId },
-  );
+  mode: "failed" | "all" = "failed",
+): Promise<{ id: string; status: JobStatus; mode: "failed" | "all" }> {
+  const res = await post<{
+    requestId: string;
+    data: { id: string; status: JobStatus; mode: "failed" | "all" };
+  }>(`/jobs/${encodeURIComponent(jobId)}/retry`, { projectId, mode });
   return res.data;
 }
 

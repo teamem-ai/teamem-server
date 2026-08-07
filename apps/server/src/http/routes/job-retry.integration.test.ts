@@ -102,9 +102,13 @@ describe.skipIf(!url)('POST /v1/jobs/:id/retry (live Postgres)', () => {
   // ── Helpers ───────────────────────────────────────────────────────────
 
   async function seedJob(
-    overrides: Partial<{ status: string; error: { code: string; message: string } }> = {},
+    overrides: Partial<{
+      status: string;
+      error: { code: string; message: string } | null;
+    }> = {},
   ): Promise<string> {
     const jobId = randomUUID();
+    const defaultError = { code: 'f1_http_error', message: 'boom' };
     await db.insert(schema.jobs).values({
       id: jobId,
       teamId,
@@ -117,7 +121,7 @@ describe.skipIf(!url)('POST /v1/jobs/:id/retry (live Postgres)', () => {
       initiatedByPrincipalId: null,
       initiatedByConnector: null,
       eventCount: 1,
-      error: overrides.error ?? { code: 'f1_http_error', message: 'boom' },
+      error: 'error' in overrides ? overrides.error : defaultError,
       createdAt: new Date(),
       startedAt: new Date(),
       finishedAt: new Date(),
@@ -183,7 +187,7 @@ describe.skipIf(!url)('POST /v1/jobs/:id/retry (live Postgres)', () => {
 
       expect(res.status).toBe(200);
       const json = await res.json();
-      expect(json.data).toEqual({ id: jobId, status: 'queued' });
+      expect(json.data).toEqual({ id: jobId, status: 'queued', mode: 'failed' });
 
       const jobRows = await db.execute(
         `SELECT status, error, started_at, finished_at FROM jobs WHERE id = '${jobId}'`,
@@ -212,6 +216,9 @@ describe.skipIf(!url)('POST /v1/jobs/:id/retry (live Postgres)', () => {
   it('owner can also retry (role ladder — admin is the floor, not the ceiling)', async () => {
     const session = await createTestSession(db, { teamId, role: 'owner' });
     const jobId = await seedJob({ status: 'failed' });
+    const eventId = `evt_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    await seedEvent(eventId);
+    await seedJobEvent(jobId, eventId, 'failed');
 
     try {
       const res = await app.request(`/v1/jobs/${jobId}/retry`, {
@@ -220,6 +227,146 @@ describe.skipIf(!url)('POST /v1/jobs/:id/retry (live Postgres)', () => {
         body: JSON.stringify({ projectId }),
       });
       expect(res.status).toBe(200);
+    } finally {
+      await deleteTestSession(db, session.sessionId);
+    }
+  });
+
+  // ── Mode-aware retry: a "completed" job with a mix of outcomes ─────────
+  // compile-job.ts only fails the JOB when EVERY event fails, so a job with
+  // some compiled, some skipped, and some failed events is 'completed' —
+  // this is the real shape a user reported (58 events, 40 failed, status
+  // 'Completed'). mode: 'failed' (default) must leave the already-settled
+  // events alone; mode: 'all' resets everything.
+
+  it("mode 'failed' on a completed job resets only failed events, leaves compiled/skipped alone", async () => {
+    const session = await createTestSession(db, { teamId, role: 'admin' });
+    const jobId = await seedJob({ status: 'completed', error: null });
+
+    const compiledEventId = `evt_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const skippedEventId = `evt_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const failedEventId = `evt_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    await seedEvent(compiledEventId);
+    await seedEvent(skippedEventId);
+    await seedEvent(failedEventId);
+    await seedJobEvent(jobId, compiledEventId, 'compiled');
+    await seedJobEvent(jobId, skippedEventId, 'skipped');
+    await seedJobEvent(jobId, failedEventId, 'failed');
+
+    try {
+      const res = await app.request(`/v1/jobs/${jobId}/retry`, {
+        method: 'POST',
+        headers: { Cookie: session.cookieHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, mode: 'failed' }),
+      });
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data).toEqual({ id: jobId, status: 'queued', mode: 'failed' });
+
+      const eventRows = await db.execute(
+        `SELECT event_id, status FROM job_events WHERE job_id = '${jobId}' ORDER BY event_id`,
+      );
+      const byId = Object.fromEntries(
+        eventRows.rows.map((r) => [(r as Record<string, unknown>)['event_id'], (r as Record<string, unknown>)['status']]),
+      );
+      expect(byId[compiledEventId]).toBe('compiled');
+      expect(byId[skippedEventId]).toBe('skipped');
+      expect(byId[failedEventId]).toBe('pending');
+
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      await deleteTestSession(db, session.sessionId);
+    }
+  });
+
+  it("mode 'all' on a completed job resets every event, including already-compiled/skipped ones", async () => {
+    const session = await createTestSession(db, { teamId, role: 'admin' });
+    const jobId = await seedJob({ status: 'completed', error: null });
+
+    const compiledEventId = `evt_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const skippedEventId = `evt_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const failedEventId = `evt_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    await seedEvent(compiledEventId);
+    await seedEvent(skippedEventId);
+    await seedEvent(failedEventId);
+    await seedJobEvent(jobId, compiledEventId, 'compiled');
+    await seedJobEvent(jobId, skippedEventId, 'skipped');
+    await seedJobEvent(jobId, failedEventId, 'failed');
+
+    try {
+      const res = await app.request(`/v1/jobs/${jobId}/retry`, {
+        method: 'POST',
+        headers: { Cookie: session.cookieHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, mode: 'all' }),
+      });
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data).toEqual({ id: jobId, status: 'queued', mode: 'all' });
+
+      const eventRows = await db.execute(
+        `SELECT status FROM job_events WHERE job_id = '${jobId}'`,
+      );
+      expect(eventRows.rows.every((r) => (r as Record<string, unknown>)['status'] === 'pending')).toBe(true);
+    } finally {
+      await deleteTestSession(db, session.sessionId);
+    }
+  });
+
+  it("mode 'failed' with zero failed events returns 409 and touches nothing", async () => {
+    const session = await createTestSession(db, { teamId, role: 'admin' });
+    const jobId = await seedJob({ status: 'completed', error: null });
+    const compiledEventId = `evt_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    await seedEvent(compiledEventId);
+    await seedJobEvent(jobId, compiledEventId, 'compiled');
+
+    try {
+      const res = await app.request(`/v1/jobs/${jobId}/retry`, {
+        method: 'POST',
+        headers: { Cookie: session.cookieHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, mode: 'failed' }),
+      });
+      expect(res.status).toBe(409);
+      expect(sendSpy).not.toHaveBeenCalled();
+
+      const jobRows = await db.execute(`SELECT status FROM jobs WHERE id = '${jobId}'`);
+      expect((jobRows.rows[0] as Record<string, unknown>)['status']).toBe('completed');
+      const eventRows = await db.execute(`SELECT status FROM job_events WHERE job_id = '${jobId}'`);
+      expect((eventRows.rows[0] as Record<string, unknown>)['status']).toBe('compiled');
+    } finally {
+      await deleteTestSession(db, session.sessionId);
+    }
+  });
+
+  it("an omitted mode defaults to 'failed'", async () => {
+    const session = await createTestSession(db, { teamId, role: 'admin' });
+    const jobId = await seedJob({ status: 'completed', error: null });
+    const compiledEventId = `evt_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    const failedEventId = `evt_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    await seedEvent(compiledEventId);
+    await seedEvent(failedEventId);
+    await seedJobEvent(jobId, compiledEventId, 'compiled');
+    await seedJobEvent(jobId, failedEventId, 'failed');
+
+    try {
+      const res = await app.request(`/v1/jobs/${jobId}/retry`, {
+        method: 'POST',
+        headers: { Cookie: session.cookieHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId }),
+      });
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data.mode).toBe('failed');
+
+      const eventRows = await db.execute(
+        `SELECT event_id, status FROM job_events WHERE job_id = '${jobId}' ORDER BY event_id`,
+      );
+      const byId = Object.fromEntries(
+        eventRows.rows.map((r) => [(r as Record<string, unknown>)['event_id'], (r as Record<string, unknown>)['status']]),
+      );
+      expect(byId[compiledEventId]).toBe('compiled');
+      expect(byId[failedEventId]).toBe('pending');
     } finally {
       await deleteTestSession(db, session.sessionId);
     }

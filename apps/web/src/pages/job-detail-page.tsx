@@ -205,7 +205,7 @@ export function JobDetailPage() {
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [retrying, setRetrying] = useState(false);
+  const [retrying, setRetrying] = useState<"failed" | "all" | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -244,12 +244,12 @@ export function JobDetailPage() {
     }
   };
 
-  const handleRetry = async () => {
+  const handleRetry = async (mode: "failed" | "all") => {
     if (!id || !projectId || retrying) return;
-    setRetrying(true);
+    setRetrying(mode);
     setRetryError(null);
     try {
-      await retryJob(id, projectId);
+      await retryJob(id, projectId, mode);
       // Re-fetch so the page reflects the reset (queued) state immediately
       // rather than waiting for the worker to finish and a manual reload.
       const result = await fetchJobDetail(id, projectId);
@@ -259,7 +259,7 @@ export function JobDetailPage() {
         err instanceof ApiError ? err.message : "Failed to retry job",
       );
     } finally {
-      setRetrying(false);
+      setRetrying(null);
     }
   };
 
@@ -362,7 +362,10 @@ export function JobDetailPage() {
             >
               —
             </span>
-            <JobStatusPill status={job.status as JobStatus} />
+            <JobStatusPill
+              status={job.status as JobStatus}
+              hasFailures={failedCount > 0}
+            />
             <div className="ch-actions">
               <button
                 className="copy-chip"
@@ -422,28 +425,35 @@ export function JobDetailPage() {
           </div>
         </div>
 
-        {/* Error card (only for failed jobs) */}
-        {isFailed && job.error && (
+        {/* Error / retry card — shown for a job-level failure (isFailed &&
+            job.error) AND for a "completed" job with some failed events:
+            compile-job.ts only fails the JOB when EVERY event fails, so a
+            partial failure (e.g. 40/58) never sets job.error at all. */}
+        {(isFailed || failedCount > 0) && (
           <div
             className="card"
             style={isNoLlmProvider ? { borderColor: "var(--red)" } : undefined}
           >
             <div className="card-head">
-              <h3 style={isFailed ? { color: "var(--red)" } : undefined}>
-                Error
+              <h3 style={{ color: "var(--red)" }}>
+                {job.error ? "Error" : "Some events failed"}
               </h3>
-              <div className="ch-actions">
-                <code
-                  className="mono text-[12px]"
-                  style={{ color: "var(--red)" }}
-                >
-                  {job.error.code}
-                </code>
-              </div>
+              {job.error && (
+                <div className="ch-actions">
+                  <code
+                    className="mono text-[12px]"
+                    style={{ color: "var(--red)" }}
+                  >
+                    {job.error.code}
+                  </code>
+                </div>
+              )}
             </div>
             <div className="card-body">
               <p className="text-[13.5px] leading-relaxed">
-                {job.error.message}
+                {job.error
+                  ? job.error.message
+                  : `${failedCount} of ${job.eventCount} events failed to compile — see the per-event results below.`}
               </p>
               <div className="flex items-center gap-2 mt-[14px]">
                 {isNoLlmProvider && (
@@ -455,20 +465,30 @@ export function JobDetailPage() {
                     Go to LLM settings
                   </a>
                 )}
-                {canRetry && (
+                {canRetry && failedCount > 0 && (
                   <button
                     className="btn btn-outline btn-sm"
-                    onClick={handleRetry}
-                    disabled={retrying}
+                    onClick={() => handleRetry("failed")}
+                    disabled={retrying !== null}
                   >
                     <RotateCw />
-                    {retrying ? "Retrying…" : "Retry"}
+                    {retrying === "failed" ? "Retrying…" : "Retry failed"}
+                  </button>
+                )}
+                {canRetry && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => handleRetry("all")}
+                    disabled={retrying !== null}
+                  >
+                    <RotateCw />
+                    {retrying === "all" ? "Retrying…" : "Retry all"}
                   </button>
                 )}
                 <span className="text-[12.5px] text-text-3">
                   {isNoLlmProvider
                     ? "Events are stored safely — they can be re-compiled after adding a provider."
-                    : "Re-runs compilation for this job's events."}
+                    : "\"Retry failed\" leaves compiled/skipped events untouched; \"Retry all\" re-runs every event."}
                 </span>
               </div>
               {retryError && (

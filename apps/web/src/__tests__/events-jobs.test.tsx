@@ -691,24 +691,26 @@ describe("JobDetailPage", () => {
 
   // ── Retry button ──────────────────────────────────────────────────────────
 
-  it("shows a Retry button for a failed job (admin+)", async () => {
+  it("shows Retry failed + Retry all buttons for a failed job (admin+)", async () => {
     mockFetchResponse(mockFailedJobDetailResponse);
     renderJobDetail("failed-job-uuid-000000000000000");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry failed" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry all" })).toBeInTheDocument();
     });
   });
 
-  it("does not show a Retry button for a non-failed job", async () => {
+  it("does not show retry buttons for a job with no failures", async () => {
     mockFetchResponse(mockJobDetailResponse);
     renderJobDetail("eaf45a04-7c3d-4a1b-9f2c-8d7e6a5b4c3d");
     await waitFor(() => {
       expect(screen.getByText("Processing")).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry failed" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry all" })).toBeNull();
   });
 
-  it("does not show a Retry button for a failed job when the session role is below admin", async () => {
+  it("does not show retry buttons for a failed job when the session role is below admin", async () => {
     vi.mocked(useSession).mockReturnValue({
       teamId: "team_test",
       role: "member",
@@ -719,24 +721,25 @@ describe("JobDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("no_llm_provider")).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry failed" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry all" })).toBeNull();
   });
 
-  it("retrying calls POST /v1/jobs/:id/retry and re-fetches the job", async () => {
+  it('"Retry failed" calls POST /v1/jobs/:id/retry with mode:failed and re-fetches the job', async () => {
     mockFetchResponse(mockFailedJobDetailResponse);
     renderJobDetail("failed-job-uuid-000000000000000");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry failed" })).toBeInTheDocument();
     });
 
     mockFetchResponse({
       requestId: "req-retry",
-      data: { id: "failed-job-uuid-000000000000000", status: "queued" },
+      data: { id: "failed-job-uuid-000000000000000", status: "queued", mode: "failed" },
     });
     const requeuedJob = { ...mockFailedJob, status: "queued", error: undefined };
     mockFetchResponse({ requestId: "req-2", data: requeuedJob });
 
-    fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry failed" }));
 
     await waitFor(() => {
       expect(screen.getByText("Queued")).toBeInTheDocument();
@@ -750,14 +753,42 @@ describe("JobDetailPage", () => {
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toMatchObject({
       projectId: TEST_PROJECT_ID,
+      mode: "failed",
     });
+  });
+
+  it('"Retry all" calls POST /v1/jobs/:id/retry with mode:all', async () => {
+    mockFetchResponse(mockFailedJobDetailResponse);
+    renderJobDetail("failed-job-uuid-000000000000000");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Retry all" })).toBeInTheDocument();
+    });
+
+    mockFetchResponse({
+      requestId: "req-retry",
+      data: { id: "failed-job-uuid-000000000000000", status: "queued", mode: "all" },
+    });
+    const requeuedJob = { ...mockFailedJob, status: "queued", error: undefined };
+    mockFetchResponse({ requestId: "req-2", data: requeuedJob });
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry all" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Queued")).toBeInTheDocument();
+    });
+
+    const retryCall = mockFetch.mock.calls.find(([url]) =>
+      String(url).includes("/retry"),
+    );
+    const [, init] = retryCall as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ mode: "all" });
   });
 
   it("shows an error message when the retry request fails", async () => {
     mockFetchResponse(mockFailedJobDetailResponse);
     renderJobDetail("failed-job-uuid-000000000000000");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry failed" })).toBeInTheDocument();
     });
 
     mockFetchResponse(
@@ -768,10 +799,63 @@ describe("JobDetailPage", () => {
       409,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry failed" }));
 
     await waitFor(() => {
       expect(screen.getByText("Job is no longer 'failed'")).toBeInTheDocument();
     });
+  });
+
+  // ── Partial failure ("completed" job with some failed events) ─────────────
+  // compile-job.ts only fails the JOB when EVERY event fails, so a job with
+  // some compiled, some skipped, and some failed events is "completed" —
+  // the exact shape a real user reported ("58 events, 40 failed, status
+  // shows Completed — is this right?").
+
+  it('shows "Completed with errors" and both retry buttons for a completed job with failed events', async () => {
+    const mockPartialFailureJob = {
+      ...mockJob,
+      status: "completed",
+      eventCount: 58,
+      events: [
+        { eventId: "evt_c1", status: "compiled" as const, conceptIds: ["550e8400-e29b-41d4-a716-446655440000"] },
+        { eventId: "evt_s1", status: "skipped" as const, reason: "no_knowledge" as const },
+        { eventId: "evt_f1", status: "failed" as const, error: { code: "f1_http_error", message: "boom" } },
+        { eventId: "evt_f2", status: "failed" as const, error: { code: "f1_http_error", message: "boom" } },
+      ],
+    };
+    mockFetchResponse({ requestId: "req-1", data: mockPartialFailureJob });
+    renderJobDetail("eaf45a04-7c3d-4a1b-9f2c-8d7e6a5b4c3d");
+
+    await waitFor(() => {
+      expect(screen.getByText("Completed with errors")).toBeInTheDocument();
+    });
+    // No job-level error on a partial-failure job — the summary sentence
+    // stands in for it.
+    expect(
+      screen.getByText(/2 of 58 events failed to compile/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry failed" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry all" })).toBeInTheDocument();
+  });
+
+  it('shows plain "Completed" (not "with errors") when a completed job has no failures', async () => {
+    const mockCleanCompletedJob = {
+      ...mockJob,
+      status: "completed",
+      events: [
+        { eventId: "evt_001", status: "compiled" as const, conceptIds: ["550e8400-e29b-41d4-a716-446655440000"] },
+        { eventId: "evt_002", status: "skipped" as const, reason: "no_knowledge" as const },
+      ],
+      eventCount: 2,
+    };
+    mockFetchResponse({ requestId: "req-1", data: mockCleanCompletedJob });
+    renderJobDetail("eaf45a04-7c3d-4a1b-9f2c-8d7e6a5b4c3d");
+    await waitFor(() => {
+      expect(screen.getByText("Completed")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Completed with errors")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry failed" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry all" })).toBeNull();
   });
 });

@@ -129,9 +129,16 @@ export function createCompileJobHandler(deps: CompileHandlerDeps): CompileJobHan
     );
 
     try {
-      // 3. Load the event IDs for this job.
+      // 3. Load the event IDs for this job — only ones still `pending`.
+      //    A fresh job has every event `pending`, so this is a no-op there;
+      //    a partial retry (job-retry.ts, mode: 'failed') resets only the
+      //    failed events back to `pending` and leaves already-`compiled`/
+      //    `skipped` ones alone, and this filter is what keeps the worker
+      //    from redoing (and re-billing) that already-settled work.
       const jobEvents = await getJobEvents(db, teamId, projectId, jobId);
-      const eventIds = jobEvents.map((je) => je.eventId);
+      const eventIds = jobEvents
+        .filter((je) => je.status === 'pending')
+        .map((je) => je.eventId);
 
       if (eventIds.length === 0) {
         // No events to compile — mark the job as failed since there is

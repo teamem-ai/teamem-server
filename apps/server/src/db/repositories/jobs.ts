@@ -417,10 +417,18 @@ export async function updateJobStatus(
 }
 
 /**
- * Reset a failed job back to `queued` so the worker's normal claim path
- * (`claimJob`) picks it up again, and reset its per-event outcomes back to
- * `pending` so the job detail page reflects the new attempt in progress
- * rather than stale failure text (DUA — job retry).
+ * Reset a job back to `queued` so the worker's normal claim path
+ * (`claimJob`) picks it up again, and reset the targeted per-event outcomes
+ * back to `pending` so the job detail page reflects the new attempt in
+ * progress rather than stale failure text (DUA — job retry).
+ *
+ * `mode: 'failed'` resets only `job_events` currently `failed`, leaving
+ * `compiled`/`skipped` rows untouched — the worker (queue/worker.ts) only
+ * ever loads `pending` events for a job, so a `compiled` event is never
+ * revisited and never double-charges an LLM call. `mode: 'all'` resets
+ * every event regardless of outcome, mirroring "re-run all jobs" in CI —
+ * a deliberate full re-run, not a no-op (F2 will re-evaluate even an
+ * event that already merged cleanly).
  *
  * This is a genuine retry of the SAME job row — same id, same original
  * `initiated_by_*` provenance — not a new job. Fabricating a new initiator
@@ -428,15 +436,23 @@ export async function updateJobStatus(
  * original ingestion (§5.4); reusing the row keeps that fact intact while
  * only the lifecycle state changes.
  *
- * The `WHERE status = 'failed'` clause makes this atomic and a no-op
- * (returns undefined) for any other status, so a double-click or a stale
- * page can't reset a job that's already queued/processing/completed.
+ * The job's `WHERE status IN ('failed', 'completed')` clause makes the reset
+ * atomic and a no-op (returns undefined) for any other status, so a
+ * double-click or a stale page can't reset a job that's already
+ * queued/processing. `completed` is included because compile-job.ts only
+ * fails the JOB when EVERY event fails — a job with some compiled, some
+ * skipped, and some failed events is `completed` with a nonzero failed
+ * count, and that's the shape retry is most commonly used on. Eligibility
+ * (e.g. "does this job actually have a failed event to retry") is the
+ * caller's responsibility — this function only enforces "not already
+ * running".
  */
 export async function resetJobForRetry(
   db: AppDb,
   teamId: string,
   projectId: string,
   jobId: string,
+  mode: 'failed' | 'all',
 ): Promise<JobRow | undefined> {
   const rows = await db
     .update(schema.jobs)
@@ -451,13 +467,25 @@ export async function resetJobForRetry(
         eq(schema.jobs.id, jobId),
         eq(schema.jobs.teamId, teamId),
         eq(schema.jobs.projectId, projectId),
-        eq(schema.jobs.status, 'failed'),
+        or(
+          eq(schema.jobs.status, 'failed'),
+          eq(schema.jobs.status, 'completed'),
+        ),
       ),
     )
     .returning(JOB_COLUMNS);
 
   const job = rows[0];
   if (!job) return undefined;
+
+  const jobEventConditions = [
+    eq(schema.jobEvents.teamId, teamId),
+    eq(schema.jobEvents.projectId, projectId),
+    eq(schema.jobEvents.jobId, jobId),
+  ];
+  if (mode === 'failed') {
+    jobEventConditions.push(eq(schema.jobEvents.status, 'failed'));
+  }
 
   await db
     .update(schema.jobEvents)
@@ -468,13 +496,7 @@ export async function resetJobForRetry(
       conceptUuids: null,
       updatedAt: new Date(),
     })
-    .where(
-      and(
-        eq(schema.jobEvents.teamId, teamId),
-        eq(schema.jobEvents.projectId, projectId),
-        eq(schema.jobEvents.jobId, jobId),
-      ),
-    );
+    .where(and(...jobEventConditions));
 
   return job;
 }
