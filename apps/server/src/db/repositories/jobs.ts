@@ -416,6 +416,69 @@ export async function updateJobStatus(
   return rows[0];
 }
 
+/**
+ * Reset a failed job back to `queued` so the worker's normal claim path
+ * (`claimJob`) picks it up again, and reset its per-event outcomes back to
+ * `pending` so the job detail page reflects the new attempt in progress
+ * rather than stale failure text (DUA — job retry).
+ *
+ * This is a genuine retry of the SAME job row — same id, same original
+ * `initiated_by_*` provenance — not a new job. Fabricating a new initiator
+ * for a UI-triggered retry would misrepresent who/what actually caused the
+ * original ingestion (§5.4); reusing the row keeps that fact intact while
+ * only the lifecycle state changes.
+ *
+ * The `WHERE status = 'failed'` clause makes this atomic and a no-op
+ * (returns undefined) for any other status, so a double-click or a stale
+ * page can't reset a job that's already queued/processing/completed.
+ */
+export async function resetJobForRetry(
+  db: AppDb,
+  teamId: string,
+  projectId: string,
+  jobId: string,
+): Promise<JobRow | undefined> {
+  const rows = await db
+    .update(schema.jobs)
+    .set({
+      status: 'queued',
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+    })
+    .where(
+      and(
+        eq(schema.jobs.id, jobId),
+        eq(schema.jobs.teamId, teamId),
+        eq(schema.jobs.projectId, projectId),
+        eq(schema.jobs.status, 'failed'),
+      ),
+    )
+    .returning(JOB_COLUMNS);
+
+  const job = rows[0];
+  if (!job) return undefined;
+
+  await db
+    .update(schema.jobEvents)
+    .set({
+      status: 'pending',
+      error: null,
+      reason: null,
+      conceptUuids: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(schema.jobEvents.teamId, teamId),
+        eq(schema.jobEvents.projectId, projectId),
+        eq(schema.jobEvents.jobId, jobId),
+      ),
+    );
+
+  return job;
+}
+
 // ── Per-event compilation status (for compilation endpoint) ──────────────
 
 /**

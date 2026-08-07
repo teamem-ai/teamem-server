@@ -19,6 +19,21 @@ import { JobsPage } from "@/pages/jobs-page";
 import { JobDetailPage } from "@/pages/job-detail-page";
 import { AppShell } from "@/components/layout/app-shell";
 import { AuditWriteFailedError } from "@/lib/api";
+import { useSession } from "@/lib/session";
+
+// JobDetailPage reads role via useSession() to gate the Retry button.
+// renderJobDetail() below intentionally doesn't wrap pages in a real
+// ScopeProvider (useSession's real implementation throws without one, per
+// lib/scope.tsx), so it's mocked at the module level instead — a default of
+// "owner" here means every existing test below sees the button available
+// unless a test explicitly overrides the mock for a lower role.
+vi.mock("@/lib/session", () => ({
+  useSession: vi.fn(() => ({
+    teamId: "team_test",
+    role: "owner",
+    projectId: "prj_demo00000000000000000000",
+  })),
+}));
 
 // ── Mock fetch ──────────────────────────────────────────────────────────────
 
@@ -47,6 +62,12 @@ afterAll(() => {
 
 afterEach(() => {
   mockFetch.mockReset();
+  // Restore the default "owner" role for any test that overrode it.
+  vi.mocked(useSession).mockReturnValue({
+    teamId: "team_test",
+    role: "owner",
+    projectId: TEST_PROJECT_ID,
+  });
   cleanup();
 });
 
@@ -665,6 +686,92 @@ describe("JobDetailPage", () => {
       const pendingTag = screen.getByText("Pending");
       // "Pending" should be in a .jr-tag.pending element
       expect(pendingTag.closest(".jr-tag.pending")).toBeTruthy();
+    });
+  });
+
+  // ── Retry button ──────────────────────────────────────────────────────────
+
+  it("shows a Retry button for a failed job (admin+)", async () => {
+    mockFetchResponse(mockFailedJobDetailResponse);
+    renderJobDetail("failed-job-uuid-000000000000000");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument();
+    });
+  });
+
+  it("does not show a Retry button for a non-failed job", async () => {
+    mockFetchResponse(mockJobDetailResponse);
+    renderJobDetail("eaf45a04-7c3d-4a1b-9f2c-8d7e6a5b4c3d");
+    await waitFor(() => {
+      expect(screen.getByText("Processing")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
+  });
+
+  it("does not show a Retry button for a failed job when the session role is below admin", async () => {
+    vi.mocked(useSession).mockReturnValue({
+      teamId: "team_test",
+      role: "member",
+      projectId: TEST_PROJECT_ID,
+    });
+    mockFetchResponse(mockFailedJobDetailResponse);
+    renderJobDetail("failed-job-uuid-000000000000000");
+    await waitFor(() => {
+      expect(screen.getByText("no_llm_provider")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
+  });
+
+  it("retrying calls POST /v1/jobs/:id/retry and re-fetches the job", async () => {
+    mockFetchResponse(mockFailedJobDetailResponse);
+    renderJobDetail("failed-job-uuid-000000000000000");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument();
+    });
+
+    mockFetchResponse({
+      requestId: "req-retry",
+      data: { id: "failed-job-uuid-000000000000000", status: "queued" },
+    });
+    const requeuedJob = { ...mockFailedJob, status: "queued", error: undefined };
+    mockFetchResponse({ requestId: "req-2", data: requeuedJob });
+
+    fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Queued")).toBeInTheDocument();
+    });
+
+    const retryCall = mockFetch.mock.calls.find(([url]) =>
+      String(url).includes("/retry"),
+    );
+    expect(retryCall).toBeTruthy();
+    const [, init] = retryCall as [string, RequestInit];
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      projectId: TEST_PROJECT_ID,
+    });
+  });
+
+  it("shows an error message when the retry request fails", async () => {
+    mockFetchResponse(mockFailedJobDetailResponse);
+    renderJobDetail("failed-job-uuid-000000000000000");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument();
+    });
+
+    mockFetchResponse(
+      {
+        requestId: "req-retry-fail",
+        error: { code: "conflict", message: "Job is no longer 'failed'" },
+      },
+      409,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Job is no longer 'failed'")).toBeInTheDocument();
     });
   });
 });

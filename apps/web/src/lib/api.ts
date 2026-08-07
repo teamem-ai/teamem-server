@@ -319,6 +319,18 @@ export async function fetchJobDetail(
   );
 }
 
+/** Re-run a failed compile job. Admin+ only — the server enforces this too. */
+export async function retryJob(
+  jobId: string,
+  projectId: string,
+): Promise<{ id: string; status: JobStatus }> {
+  const res = await post<{ requestId: string; data: { id: string; status: JobStatus } }>(
+    `/jobs/${encodeURIComponent(jobId)}/retry`,
+    { projectId },
+  );
+  return res.data;
+}
+
 export type { Job, JobEventResult, JobStatus, JobInitiator };
 
 // ── Session (used by login/invite flows, distinct from fetchMe: returns

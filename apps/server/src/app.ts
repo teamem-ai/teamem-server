@@ -17,6 +17,7 @@ import {
   type EventsWriteDeps,
 } from './http/routes/events-write.js';
 import { buildJobsReadRoutes } from './http/routes/jobs-read.js';
+import { buildJobRetryRoutes } from './http/routes/job-retry.js';
 import {
   buildConnectorWebhookRoutes,
 } from './http/routes/connector-webhook.js';
@@ -195,6 +196,13 @@ export function buildApp(deps: AppDeps = {}) {
     app.route(
       '/',
       buildJobsReadRoutes({ db: deps.db }),
+    );
+
+    // Job retry — session-only, admin+ (see job-retry.ts for the role/
+    // provenance rationale).
+    app.route(
+      '/',
+      buildJobRetryRoutes({ db: deps.db, queue: deps.queue }),
     );
 
     // Connector webhook routes (no Bearer-token auth — webhook signatures
