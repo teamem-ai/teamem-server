@@ -447,6 +447,12 @@
   .banner .b-title {
     font-weight: 600;
   }
+  .banner .b-actions {
+    margin-left: auto;
+    flex: none;
+    display: flex;
+    gap: 8px;
+  }
   .banner.info {
     background: var(--blue-soft);
     border-color: transparent;
@@ -886,6 +892,252 @@
     width: 12px;
     height: 12px;
     color: var(--text-3);
+  }
+
+  /* ---------- tag pill ---------- */
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    font: 500 11.5px/1.6 var(--font-sans);
+    padding: 2px 8px;
+    border-radius: 99px;
+    background: var(--surface-2);
+    color: var(--text-2);
+    white-space: nowrap;
+  }
+  .tag:hover {
+    background: var(--surface-3);
+    text-decoration: none;
+  }
+
+  /* ---------- evidence item ---------- */
+  .ev-item {
+    display: flex;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    background: var(--surface);
+    transition:
+      border-color 0.15s,
+      background 0.15s;
+    align-items: flex-start;
+  }
+  a.ev-item:hover {
+    border-color: var(--accent);
+    text-decoration: none;
+    background: var(--accent-soft);
+  }
+  .ev-item .ev-ic {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-sm);
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+  .ev-item .ev-main {
+    min-width: 0;
+    flex: 1;
+  }
+  .ev-item .ev-kind {
+    font: 600 12px var(--font-sans);
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ev-item .ev-ref {
+    font: 400 12px/1.5 var(--font-mono);
+    color: var(--text-2);
+    word-break: break-all;
+    margin-top: 3px;
+  }
+  .ev-item .ev-time {
+    font-size: 11.5px;
+    color: var(--text-3);
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .ev-item .ev-ext {
+    color: var(--text-3);
+    margin-left: auto;
+    flex: none;
+  }
+
+  /* ---------- timeline ---------- */
+  .timeline {
+    position: relative;
+    padding-left: 22px;
+  }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 6px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: var(--border);
+  }
+  .tl-item {
+    position: relative;
+    padding: 0 0 18px;
+  }
+  .tl-item:last-child {
+    padding-bottom: 0;
+  }
+  .tl-item .tl-dot {
+    position: absolute;
+    left: -22px;
+    top: 4px;
+    width: 14px;
+    height: 14px;
+    border-radius: 99px;
+    background: var(--surface);
+    border: 2.5px solid var(--accent);
+  }
+  .tl-item .tl-dot.gray {
+    border-color: var(--border-strong);
+  }
+  .tl-item .tl-time {
+    font: 500 12px var(--font-mono);
+    color: var(--text-3);
+  }
+  .tl-item .tl-title {
+    font-size: 13.5px;
+    margin-top: 2px;
+  }
+  .tl-item .tl-sub {
+    font-size: 12.5px;
+    color: var(--text-2);
+    margin-top: 2px;
+  }
+
+  /* ---------- markdown body (concept body rendering) ---------- */
+  .md {
+    font-size: 14.5px;
+    line-height: 1.75;
+    color: var(--text);
+  }
+  .md h2 {
+    font-size: 19px;
+    margin: 26px 0 10px;
+    letter-spacing: -0.01em;
+  }
+  .md h3 {
+    font-size: 16px;
+    margin: 22px 0 8px;
+  }
+  .md h4 {
+    font-size: 14.5px;
+    margin: 18px 0 6px;
+  }
+  .md h2:first-child,
+  .md h3:first-child {
+    margin-top: 0;
+  }
+  .md p {
+    margin: 0 0 12px;
+  }
+  .md ul,
+  .md ol {
+    margin: 0 0 12px;
+    padding-left: 22px;
+    /* Tailwind's preflight resets list-style to none on every ul/ol — the
+       design mockup (no preflight) relies on the browser default, so it
+       has to be restored explicitly here or markdown lists render with no
+       bullets/numbers at all. */
+    list-style: revert;
+  }
+  .md li {
+    margin: 5px 0;
+  }
+  .md code {
+    font: 400 12.5px var(--font-mono);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  .md strong {
+    font-weight: 600;
+  }
+  .md a.ilink {
+    color: var(--accent);
+    border-bottom: 1px dashed var(--accent);
+  }
+
+  /* ---------- concept detail page ---------- */
+  .concept-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 330px;
+    gap: 24px;
+    align-items: start;
+    margin-top: 20px;
+  }
+  .rail {
+    position: sticky;
+    top: 76px; /* topbar (56px, see tailwind.config.js `topbar`) + 20px gap */
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  @media (max-width: 1020px) {
+    .concept-grid {
+      grid-template-columns: 1fr;
+    }
+    .rail {
+      position: static;
+    }
+  }
+  .c-head {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .c-badges {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .c-title {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.3;
+    max-width: 840px;
+  }
+  .c-meta {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: 12.5px;
+    color: var(--text-3);
+  }
+  .c-tags {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .contrib-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .contrib-row:last-child {
+    border-bottom: 0;
+  }
+  .rail .card-body {
+    padding: 16px;
   }
 
   /* ---------- responsive ---------- */
