@@ -337,6 +337,142 @@ describe('structured — failure paths', () => {
     ).rejects.toMatchObject({ kind: 'schema_validation_failed', requestId: 'req-v' });
   });
 
+  it('output_truncated (not schema_validation_failed) when OpenAI-family content is cut off mid-JSON and finish_reason is "length"', async () => {
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [
+              {
+                finish_reason: 'length',
+                // Truncated mid-word — exactly what a max_tokens cutoff produces.
+                message: { content: '{"answer": "Post' },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-trunc-1',
+      }),
+    ).rejects.toMatchObject({ kind: 'output_truncated', requestId: 'req-trunc-1' });
+  });
+
+  it('output_truncated when OpenAI-family content parses as JSON but is missing a field because finish_reason is "length"', async () => {
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [
+              {
+                finish_reason: 'length',
+                message: { content: JSON.stringify({ answer: 'Postgres' }) }, // missing `count`
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-trunc-2',
+      }),
+    ).rejects.toMatchObject({ kind: 'output_truncated' });
+  });
+
+  it('does not report output_truncated when finish_reason is absent and the schema simply does not match', async () => {
+    // Regression guard: a genuine model mistake (no truncation involved)
+    // must still surface as schema_validation_failed, not output_truncated.
+    const fetch = makeRecorder(() => okOpenAi({ answer: 42 }), []);
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-notrunc',
+      }),
+    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+  });
+
+  it('output_truncated when Claude stop_reason is "max_tokens" and the partial tool_use input fails the schema', async () => {
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            stop_reason: 'max_tokens',
+            content: [
+              {
+                type: 'tool_use',
+                name: 'record_structured_output',
+                input: { answer: 'incomplete' }, // missing `count`
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[0], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-trunc-claude',
+      }),
+    ).rejects.toMatchObject({ kind: 'output_truncated', provider: 'claude' });
+  });
+
+  it('a Claude stop_reason of "max_tokens" does not fail the call when the tool_use input still validates', async () => {
+    // Edge case: generation was cut off, but the forced tool call itself had
+    // already completed validly before the cutoff — must not be misreported
+    // as a truncation failure.
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            stop_reason: 'max_tokens',
+            content: [
+              { type: 'tool_use', name: 'record_structured_output', input: validValue },
+            ],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[0], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-trunc-ok',
+    });
+
+    expect(result.output).toEqual(validValue);
+  });
+
   it('empty_output when chat completion has no choices', async () => {
     const fetch = makeRecorder(
       () => new Response(JSON.stringify({ model: 'gpt-4o', choices: [] }), { status: 200 }),

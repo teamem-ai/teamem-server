@@ -102,6 +102,15 @@ export interface ClaudeExtracted {
   providerModel: string;
   /** Token counts from `usage`, when the envelope carried them. */
   usage?: LlmUsage;
+  /**
+   * True when Anthropic's own `stop_reason: "max_tokens"` says generation
+   * was cut off by {@link MAX_OUTPUT_TOKENS} — the adapter still returns
+   * whatever `tool_use.input` is present (its job is extraction, not
+   * validation; see the class doc), but the factory's Zod re-validation
+   * uses this flag to tell a truncation failure apart from a genuine model
+   * mistake (`output_truncated` vs `schema_validation_failed`).
+   */
+  truncated: boolean;
 }
 
 /**
@@ -133,6 +142,7 @@ export function parseClaudeResponse(
   const providerModel =
     typeof envelope.model === 'string' ? envelope.model : fallbackModel;
   const usage = parseClaudeUsage(envelope.usage);
+  const truncated = envelope.stop_reason === 'max_tokens';
 
   const content = envelope.content;
   if (!Array.isArray(content)) {
@@ -146,8 +156,8 @@ export function parseClaudeResponse(
       block.name === CLAUDE_TOOL_NAME
     ) {
       return usage
-        ? { value: block.input, providerModel, usage }
-        : { value: block.input, providerModel };
+        ? { value: block.input, providerModel, usage, truncated }
+        : { value: block.input, providerModel, truncated };
     }
   }
 

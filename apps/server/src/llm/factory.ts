@@ -243,7 +243,16 @@ async function runStructured<T>(
     if (!validation.success) {
       // Suppress the ZodError: it details the provider's raw payload and must
       // not escape via Error.cause (§5.3). The kind + requestId are enough.
-      throw new LlmError('schema_validation_failed', provider, request.requestId);
+      //
+      // When the provider's own signal says it stopped because it hit the
+      // output token limit, report that distinctly rather than letting a
+      // length problem masquerade as a model correctness problem — see
+      // LlmErrorKind.output_truncated.
+      throw new LlmError(
+        extracted.truncated ? 'output_truncated' : 'schema_validation_failed',
+        provider,
+        request.requestId,
+      );
     }
 
     const result: import('./types.js').LlmResponse<T> = {
@@ -449,6 +458,13 @@ interface Extracted {
   value: unknown;
   providerModel: string;
   usage?: import('./types.js').LlmUsage;
+  /**
+   * True when the provider's own `finish_reason: "length"` says generation
+   * was cut off by {@link import('./types.js').MAX_OUTPUT_TOKENS} — lets
+   * `runStructured` tell a truncation failure apart from a genuine model
+   * mistake (`output_truncated` vs `schema_validation_failed`).
+   */
+  truncated: boolean;
 }
 
 function extractStructured(
@@ -491,6 +507,7 @@ function parseOpenAiFamily(
   if (!isObject(first) || !isObject(first.message)) {
     throw new LlmError('empty_output', provider, requestId);
   }
+  const truncated = first.finish_reason === 'length';
   const content = first.message.content;
   if (typeof content !== 'string' || content.trim() === '') {
     throw new LlmError('empty_output', provider, requestId);
@@ -503,11 +520,17 @@ function parseOpenAiFamily(
       provider,
       requestId,
       'schema_validation_failed',
-      `model content was not valid JSON: ${content}`,
+      `model content was not valid JSON${truncated ? ' (finish_reason: length)' : ''}: ${content}`,
     );
-    throw new LlmError('schema_validation_failed', provider, requestId);
+    throw new LlmError(
+      truncated ? 'output_truncated' : 'schema_validation_failed',
+      provider,
+      requestId,
+    );
   }
-  return usage ? { value, providerModel, usage } : { value, providerModel };
+  return usage
+    ? { value, providerModel, usage, truncated }
+    : { value, providerModel, truncated };
 }
 
 /**

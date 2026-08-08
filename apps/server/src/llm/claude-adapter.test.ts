@@ -293,6 +293,22 @@ describe('parseClaudeResponse — success paths', () => {
     expect(result.value).toEqual(partialInput);
   });
 
+  it('sets truncated: true when stop_reason is "max_tokens", false otherwise', () => {
+    const truncated = parseClaudeResponse(
+      claudeResponse({ stop_reason: 'max_tokens' }),
+      'req-7a',
+      CLAUDE_DEFAULT_MODEL,
+    );
+    expect(truncated.truncated).toBe(true);
+
+    const notTruncated = parseClaudeResponse(
+      claudeResponse({ stop_reason: 'tool_use' }),
+      'req-7b',
+      CLAUDE_DEFAULT_MODEL,
+    );
+    expect(notTruncated.truncated).toBe(false);
+  });
+
   it('handles null/undefined input gracefully (passed through for Zod to reject)', () => {
     const raw = JSON.stringify({
       model: CLAUDE_DEFAULT_MODEL,
