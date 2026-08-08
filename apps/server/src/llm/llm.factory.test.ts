@@ -839,6 +839,43 @@ describe('structured — timeout and abort', () => {
       }),
     ).rejects.toMatchObject({ kind: 'aborted', requestId: 'req-a' });
   });
+
+  it('timeout (not provider_error) when the abort fires while reading the response body', async () => {
+    // The fetch call itself resolves — headers come back fine — but reading
+    // the streamed body runs past the deadline, so the abort lands inside
+    // response.text() rather than the fetch() call. This is the real F2
+    // "slow, oversized mergedBody" case that used to be mislabeled
+    // provider_error.
+    const fetch: FetchLike = async (_input, init) => {
+      const signal = init?.signal;
+      const bodyReadThatNeverFinishes = () =>
+        new Promise<string>((_resolve, reject) => {
+          if (signal) {
+            signal.addEventListener('abort', () => {
+              const err = new Error('The operation was aborted');
+              err.name = 'AbortError';
+              reject(err);
+            });
+          }
+        });
+      return {
+        ok: true,
+        status: 200,
+        text: bodyReadThatNeverFinishes,
+      } as unknown as Response;
+    };
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        timeoutMs: 10,
+        requestId: 'req-body-timeout',
+      }),
+    ).rejects.toMatchObject({ kind: 'timeout', requestId: 'req-body-timeout' });
+  });
 });
 
 /* ── Redaction counterexample: no secrets or bodies escape via errors ─────── */

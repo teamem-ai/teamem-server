@@ -274,6 +274,23 @@ async function runStructured<T>(
     return extracted.usage ? { ...result, usage: extracted.usage } : result;
   } catch (err) {
     if (err instanceof LlmError) throw err;
+    // Our AbortController is tripped by exactly one thing — the timeout timer
+    // below — so a set `aborted` flag here means the deadline elapsed. The
+    // fetch-call path (above) already classifies its own abort as `timeout`;
+    // this covers the abort landing LATER, while streaming the response body
+    // (`response.text()`), which otherwise fell through to `provider_error`.
+    // Real-world trigger: a slow, oversized F2 mergedBody that generates past
+    // the deadline mid-stream. Reporting it as `timeout` (not an opaque
+    // provider error) is what makes that diagnosable.
+    if (controller.signal.aborted) {
+      logLlmDebug(
+        provider,
+        request.requestId,
+        'timeout',
+        `request exceeded ${timeout}ms and was aborted mid-stream`,
+      );
+      throw new LlmError('timeout', provider, request.requestId);
+    }
     // Unexpected failure — wrap as a provider_error without attaching the
     // raw error as cause (§5.3: logs/inspect must not leak provider internals).
     // Opt-in debug logging records the cause (e.g. a JSON parse error when the
