@@ -526,6 +526,107 @@ describe('structured — failure paths', () => {
   });
 });
 
+/* ── Lenient JSON repair: raw control chars inside string values ─────────────
+ *
+ * Real production cause (finish_reason: "stop" — NOT a truncation): a model
+ * asked for a long free-text field (F1 body, F2 mergedBody) writes a genuine
+ * paragraph break as a literal newline byte instead of the JSON-required
+ * `\n` escape. `response_format` constrains the shape but doesn't guarantee
+ * every backing model (openrouter proxies many) does fully grammar-
+ * constrained JSON encoding of its own string content. */
+
+describe('structured — repairs a raw control char inside a JSON string value', () => {
+  it('openai family: parses successfully when message.content has a literal newline inside a string, not just an escaped \\n', async () => {
+    // Built with a real JS-source `\n` so `brokenContent` contains an actual
+    // newline byte, exactly like a model that forgot to escape it. Passing
+    // this through the outer JSON.stringify (as a real API response would)
+    // correctly escapes it at the wire level — the bug only shows up one
+    // layer in, when application code JSON.parses `message.content` itself.
+    const brokenContent = '{"answer": "line one\nline two", "count": 3}';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: brokenContent } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-repair-openai',
+    });
+
+    expect(result.output).toEqual({ answer: 'line one\nline two', count: 3 });
+  });
+
+  it('claude: repairs a raw newline inside an envelope-wrapped string value too', async () => {
+    const brokenInner = '{"answer": "line one\nline two", "count": 3}';
+    const stringOrObject = z.union([z.string(), answerSchema]);
+    const fetch = makeRecorder(() => okClaude({ result: brokenInner }), []);
+    const client = createLlmClient(byoConfigs[0], { fetch });
+
+    const result = await client.structured({
+      schema: stringOrObject,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-repair-claude',
+    });
+
+    expect(result.output).toEqual({ answer: 'line one\nline two', count: 3 });
+  });
+
+  it('does not double-escape already-correct \\n sequences', async () => {
+    // A well-behaved model that escaped its newline correctly must still
+    // round-trip unchanged — the repair only touches raw control bytes,
+    // never a `\` that's already there.
+    const fetch = makeRecorder(() => okOpenAi({ answer: 'line one\nline two', count: 3 }), []);
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-no-double-escape',
+    });
+
+    expect(result.output).toEqual({ answer: 'line one\nline two', count: 3 });
+  });
+
+  it('still throws schema_validation_failed when the content is unrepairable', async () => {
+    // Missing closing brace — a genuinely malformed payload, not just a raw
+    // control char. The repair pass must not mask this as a false success.
+    const brokenContent = '{"answer": "Postgres", "count": 3';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: brokenContent } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-unrepairable',
+      }),
+    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+  });
+});
+
 /* ── Timeout / abort boundary ─────────────────────────────────────────────── */
 
 describe('structured — timeout and abort', () => {

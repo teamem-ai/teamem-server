@@ -462,6 +462,89 @@ function buildRequest(
 /* Response parsing                                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * Escape raw control characters (literal newline/CR/tab) found *inside* a
+ * JSON string literal, leaving everything else — including already-correct
+ * `\n`/`\r`/`\t` escape sequences — untouched.
+ *
+ * Real-world cause this repairs: `finish_reason: "stop"` (not truncated —
+ * generation completed normally), yet `JSON.parse` still throws, because a
+ * model asked for a long free-text field (F1 `body`, F2 `mergedBody`) wrote
+ * genuine paragraph breaks as literal newline bytes instead of the two-
+ * character `\n` escape the JSON spec requires inside a string. Not every
+ * provider/model routed through an OpenAI-compatible endpoint enforces
+ * strict JSON encoding of its own `response_format` output — `response_format`
+ * still constrains the *shape*, but a model that isn't running fully
+ * grammar-constrained decoding can still emit an illegal raw control byte
+ * inside a string value while getting the surrounding structure right.
+ *
+ * This is wire-format leniency, not "free text + regex parsing" (§5.2's red
+ * line): the provider-native structured-output mechanism (forced tool use /
+ * `response_format: json_schema`) is unchanged, and the Zod schema is still
+ * the final authority on every field's shape and content after this runs —
+ * this only widens what counts as valid JSON syntax before that check.
+ *
+ * Tracks `\`-escaping so it never turns an already-escaped `\n` (backslash
+ * then `n`) into a double-escaped `\\n`, and tracks unescaped `"` to know
+ * whether the current character is inside a string literal at all.
+ */
+function repairUnescapedJsonControlChars(raw: string): string {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of raw) {
+    if (escaped) {
+      result += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      result += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      result += ch;
+      continue;
+    }
+    if (inString) {
+      if (ch === '\n') {
+        result += '\\n';
+        continue;
+      }
+      if (ch === '\r') {
+        result += '\\r';
+        continue;
+      }
+      if (ch === '\t') {
+        result += '\\t';
+        continue;
+      }
+    }
+    result += ch;
+  }
+  return result;
+}
+
+/**
+ * Parse a provider's JSON string, retrying once with
+ * {@link repairUnescapedJsonControlChars} if the first attempt fails. Throws
+ * the original error when even the repaired text won't parse, so the caller's
+ * error handling/diagnostics see the same failure they always would have.
+ */
+function parseJsonLeniently(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch (firstErr) {
+    try {
+      return JSON.parse(repairUnescapedJsonControlChars(raw));
+    } catch {
+      throw firstErr;
+    }
+  }
+}
+
 interface Extracted {
   value: unknown;
   providerModel: string;
@@ -522,7 +605,7 @@ function parseOpenAiFamily(
   }
   let value: unknown;
   try {
-    value = JSON.parse(content);
+    value = parseJsonLeniently(content);
   } catch {
     // Report the actual finish_reason value (not just whether it matched
     // "length") — OpenRouter proxies arbitrary backing models, and a model
@@ -806,7 +889,7 @@ function unwrapEnvelope(value: unknown, wrapped: boolean): unknown {
   const inner = value[SCHEMA_ENVELOPE_PROPERTY];
   if (typeof inner === 'string') {
     try {
-      return JSON.parse(inner);
+      return parseJsonLeniently(inner);
     } catch {
       return inner;
     }
