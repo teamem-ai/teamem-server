@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Check,
   X,
@@ -85,6 +85,11 @@ export function SettingsLlmPage() {
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<LlmProvider>("openai");
+  const [selectedModel, setSelectedModel] = useState("");
+  const [models, setModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [modelOpen, setModelOpen] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{
     ok: boolean;
@@ -99,14 +104,64 @@ export function SettingsLlmPage() {
       .then((data) => {
         setConfig(data);
         if (data.provider) setSelectedProvider(data.provider);
+        setSelectedModel(data.model ?? "");
       })
       .catch(() => setConfig(null))
       .finally(() => setLoading(false));
   }, [teamId, canManage]);
 
+  // Load the provider's available models. Uses the key typed into the field,
+  // or the sentinel "__STORED__" to use the saved key. Populates the dropdown.
+  const loadModels = useCallback(
+    async (provider: LlmProvider, hasStoredKey: boolean) => {
+      const key = apiKey.trim() ? apiKey : hasStoredKey ? "__STORED__" : "";
+      if (!key) {
+        setModelsError("Enter or save an API key first, then load models.");
+        return;
+      }
+      setLoadingModels(true);
+      setModelsError(null);
+      try {
+        const data = await fetchJson<{ models: string[] }>(
+          `/v1/teams/${teamId}/llm/models`,
+          { method: "POST", body: JSON.stringify({ provider, apiKey: key }) },
+        );
+        setModels(data.models);
+        if (data.models.length === 0) {
+          setModelsError("The provider returned no models for this key.");
+        }
+      } catch (err) {
+        setModels([]);
+        setModelsError(
+          err instanceof Error
+            ? err.message
+            : "Couldn't load models — check the API key.",
+        );
+      } finally {
+        setLoadingModels(false);
+      }
+    },
+    [apiKey, teamId],
+  );
+
+  // Auto-load models once when the page opens with a stored key, so the
+  // dropdown is populated for the saved provider without an extra click.
+  const autoLoadedRef = useRef(false);
+  useEffect(() => {
+    if (autoLoadedRef.current) return;
+    if (config?.hasKey && config.provider) {
+      autoLoadedRef.current = true;
+      void loadModels(config.provider, true);
+    }
+  }, [config, loadModels]);
+
   // Save config
   const handleSave = async () => {
-    if (!apiKey.trim()) {
+    const hasStoredKey = config?.hasKey ?? false;
+    // Use the typed key, or keep the saved one (so the user can change only
+    // the model without re-entering their key).
+    const keyToSend = apiKey.trim() ? apiKey : hasStoredKey ? "__STORED__" : "";
+    if (!keyToSend) {
       setSaveError("API key is required");
       return;
     }
@@ -115,13 +170,18 @@ export function SettingsLlmPage() {
     try {
       await fetchJson(`/v1/teams/${teamId}/llm`, {
         method: "PUT",
-        body: JSON.stringify({ provider: selectedProvider, apiKey }),
+        body: JSON.stringify({
+          provider: selectedProvider,
+          apiKey: keyToSend,
+          ...(selectedModel ? { model: selectedModel } : {}),
+        }),
       });
       setApiKey("");
       const data = await fetchJson<LlmConfigResponse>(
         `/v1/teams/${teamId}/llm`
       );
       setConfig(data);
+      setSelectedModel(data.model ?? "");
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -224,7 +284,18 @@ export function SettingsLlmPage() {
                       "provider-opt text-left",
                       selectedProvider === p.id && "sel"
                     )}
-                    onClick={() => setSelectedProvider(p.id)}
+                    onClick={() => {
+                      if (p.id === selectedProvider) return;
+                      setSelectedProvider(p.id);
+                      // Models and the chosen model are provider-specific.
+                      setModels([]);
+                      setModelsError(null);
+                      // Keep the saved model only when returning to the
+                      // configured provider; otherwise reset to the default.
+                      setSelectedModel(
+                        p.id === config?.provider ? config?.model ?? "" : ""
+                      );
+                    }}
                   >
                     <span className="radio" />
                     <div>
@@ -337,6 +408,116 @@ export function SettingsLlmPage() {
                     Replacing the key takes effect on the next compile job.
                   </p>
                 </div>
+              </div>
+
+              {/* ── Model (typeahead) ─────────────────────────────────── */}
+              <div className="field mt-4 mb-0" style={{ maxWidth: 520 }}>
+                <label className="label" htmlFor="llmmodel">
+                  Model
+                </label>
+                <div className="flex gap-2 items-center">
+                  <div className="relative flex-1">
+                    <input
+                      id="llmmodel"
+                      className="input w-full"
+                      type="text"
+                      value={selectedModel}
+                      placeholder="Provider default — type or pick a model"
+                      autoComplete="off"
+                      role="combobox"
+                      aria-expanded={modelOpen}
+                      aria-autocomplete="list"
+                      onChange={(e) => {
+                        setSelectedModel(e.target.value);
+                        setModelOpen(true);
+                      }}
+                      onFocus={() => setModelOpen(true)}
+                      // Delay so a click on an option registers before closing.
+                      onBlur={() => setTimeout(() => setModelOpen(false), 150)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setModelOpen(false);
+                      }}
+                    />
+                    {modelOpen && (() => {
+                      // Show all models when the field holds an exact match
+                      // (so you can browse to another), else filter by input.
+                      const q = selectedModel.trim().toLowerCase();
+                      const list = models.includes(selectedModel)
+                        ? models
+                        : models.filter((m) => m.toLowerCase().includes(q));
+                      if (list.length === 0) return null;
+                      return (
+                        <ul
+                          role="listbox"
+                          className="card"
+                          style={{
+                            position: "absolute",
+                            zIndex: 20,
+                            top: "calc(100% + 4px)",
+                            left: 0,
+                            right: 0,
+                            maxHeight: 240,
+                            overflowY: "auto",
+                            padding: 4,
+                            margin: 0,
+                            listStyle: "none",
+                          }}
+                        >
+                          {list.slice(0, 100).map((m) => (
+                            <li key={m} role="option" aria-selected={m === selectedModel}>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm w-full"
+                                style={{ justifyContent: "flex-start", fontWeight: m === selectedModel ? 600 : 400 }}
+                                // onMouseDown fires before the input's onBlur.
+                                onMouseDown={() => {
+                                  setSelectedModel(m);
+                                  setModelOpen(false);
+                                }}
+                              >
+                                {m}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      );
+                    })()}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={() => loadModels(selectedProvider, hasExistingKey)}
+                    disabled={loadingModels}
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    {loadingModels
+                      ? "Loading…"
+                      : models.length
+                        ? "Reload"
+                        : "Load models"}
+                  </button>
+                  {selectedModel && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setSelectedModel("")}
+                      title="Use the provider default"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {modelsError && (
+                  <p className="hint" style={{ color: "var(--amber)" }}>
+                    {modelsError}
+                  </p>
+                )}
+                <p className="hint">
+                  The model that compiles events into knowledge. Start typing to
+                  filter, or clear the field to use the{" "}
+                  <strong>provider default</strong>. Load models to populate the
+                  list from your provider.
+                </p>
               </div>
 
               {saveError && (

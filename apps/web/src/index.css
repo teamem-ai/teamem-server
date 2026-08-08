@@ -415,6 +415,26 @@
     border: 1px solid var(--border);
   }
 
+  /* ---------- icon sizing (base) ---------- */
+  /* Mirrors docs/ui-design/assets/main.css line 69-71 — the global default
+     was never ported, so every bare <svg className="ic"> (GitHub mark on
+     the sign-in button, feature-list icons, etc.) fell back to intrinsic/
+     browser SVG sizing instead of the design system's 16px default. */
+  svg.ic {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    vertical-align: -3px;
+  }
+  svg.ic.lg {
+    width: 20px;
+    height: 20px;
+  }
+  svg.ic.sm {
+    width: 13px;
+    height: 13px;
+  }
+
   /* ---------- banners ---------- */
   .banner {
     @apply flex gap-[10px] items-start p-3 rounded text-[13px] leading-[1.5] border;
@@ -426,6 +446,12 @@
   }
   .banner .b-title {
     font-weight: 600;
+  }
+  .banner .b-actions {
+    margin-left: auto;
+    flex: none;
+    display: flex;
+    gap: 8px;
   }
   .banner.info {
     background: var(--blue-soft);
@@ -511,6 +537,17 @@
   .cmd-block .copy-btn:hover {
     background: #3f3f46;
     color: #fafafa;
+  }
+  .cmd-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-2);
+    margin-bottom: 6px;
+  }
+  .cmd-label svg.ic {
+    color: var(--text-3);
   }
 
   /* ---------- key reveal block ---------- */
@@ -776,12 +813,23 @@
   /* ---------- provider pick ---------- */
   .provider-pick {
     display: grid;
+    /* Two-up grid (design reference main.css:451). Without explicit columns,
+       grid falls back to a single implicit column, so the four providers
+       stack lopsided instead of aligning in a 2×2. The mobile media query
+       below collapses this back to one column. */
+    grid-template-columns: 1fr 1fr;
     gap: 10px;
   }
   .provider-opt {
     display: flex;
     gap: 10px;
     align-items: flex-start;
+    /* The design reference renders these as <div>; the app uses <button> for
+       real keyboard/click semantics, and a <button> defaults to
+       text-align:center. Without this reset each provider name is centered
+       over its (wider) subtitle instead of left-aligned above it, so the
+       four names land at different offsets and look unaligned. */
+    text-align: left;
     padding: 13px 14px;
     border: 1.5px solid var(--border);
     border-radius: var(--r);
@@ -795,6 +843,16 @@
   .provider-opt.sel {
     border-color: var(--accent);
     background: var(--accent-soft);
+  }
+  .provider-opt .po-name {
+    font-weight: 600;
+    font-size: 13.5px;
+  }
+  .provider-opt .po-sub {
+    font-size: 12px;
+    color: var(--text-3);
+    margin-top: 2px;
+    line-height: 1.45;
   }
   .provider-opt .radio {
     width: 16px;
@@ -834,6 +892,252 @@
     width: 12px;
     height: 12px;
     color: var(--text-3);
+  }
+
+  /* ---------- tag pill ---------- */
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    font: 500 11.5px/1.6 var(--font-sans);
+    padding: 2px 8px;
+    border-radius: 99px;
+    background: var(--surface-2);
+    color: var(--text-2);
+    white-space: nowrap;
+  }
+  .tag:hover {
+    background: var(--surface-3);
+    text-decoration: none;
+  }
+
+  /* ---------- evidence item ---------- */
+  .ev-item {
+    display: flex;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    background: var(--surface);
+    transition:
+      border-color 0.15s,
+      background 0.15s;
+    align-items: flex-start;
+  }
+  a.ev-item:hover {
+    border-color: var(--accent);
+    text-decoration: none;
+    background: var(--accent-soft);
+  }
+  .ev-item .ev-ic {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-sm);
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+  .ev-item .ev-main {
+    min-width: 0;
+    flex: 1;
+  }
+  .ev-item .ev-kind {
+    font: 600 12px var(--font-sans);
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ev-item .ev-ref {
+    font: 400 12px/1.5 var(--font-mono);
+    color: var(--text-2);
+    word-break: break-all;
+    margin-top: 3px;
+  }
+  .ev-item .ev-time {
+    font-size: 11.5px;
+    color: var(--text-3);
+    margin-top: 4px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .ev-item .ev-ext {
+    color: var(--text-3);
+    margin-left: auto;
+    flex: none;
+  }
+
+  /* ---------- timeline ---------- */
+  .timeline {
+    position: relative;
+    padding-left: 22px;
+  }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 6px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: var(--border);
+  }
+  .tl-item {
+    position: relative;
+    padding: 0 0 18px;
+  }
+  .tl-item:last-child {
+    padding-bottom: 0;
+  }
+  .tl-item .tl-dot {
+    position: absolute;
+    left: -22px;
+    top: 4px;
+    width: 14px;
+    height: 14px;
+    border-radius: 99px;
+    background: var(--surface);
+    border: 2.5px solid var(--accent);
+  }
+  .tl-item .tl-dot.gray {
+    border-color: var(--border-strong);
+  }
+  .tl-item .tl-time {
+    font: 500 12px var(--font-mono);
+    color: var(--text-3);
+  }
+  .tl-item .tl-title {
+    font-size: 13.5px;
+    margin-top: 2px;
+  }
+  .tl-item .tl-sub {
+    font-size: 12.5px;
+    color: var(--text-2);
+    margin-top: 2px;
+  }
+
+  /* ---------- markdown body (concept body rendering) ---------- */
+  .md {
+    font-size: 14.5px;
+    line-height: 1.75;
+    color: var(--text);
+  }
+  .md h2 {
+    font-size: 19px;
+    margin: 26px 0 10px;
+    letter-spacing: -0.01em;
+  }
+  .md h3 {
+    font-size: 16px;
+    margin: 22px 0 8px;
+  }
+  .md h4 {
+    font-size: 14.5px;
+    margin: 18px 0 6px;
+  }
+  .md h2:first-child,
+  .md h3:first-child {
+    margin-top: 0;
+  }
+  .md p {
+    margin: 0 0 12px;
+  }
+  .md ul,
+  .md ol {
+    margin: 0 0 12px;
+    padding-left: 22px;
+    /* Tailwind's preflight resets list-style to none on every ul/ol — the
+       design mockup (no preflight) relies on the browser default, so it
+       has to be restored explicitly here or markdown lists render with no
+       bullets/numbers at all. */
+    list-style: revert;
+  }
+  .md li {
+    margin: 5px 0;
+  }
+  .md code {
+    font: 400 12.5px var(--font-mono);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
+  .md strong {
+    font-weight: 600;
+  }
+  .md a.ilink {
+    color: var(--accent);
+    border-bottom: 1px dashed var(--accent);
+  }
+
+  /* ---------- concept detail page ---------- */
+  .concept-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 330px;
+    gap: 24px;
+    align-items: start;
+    margin-top: 20px;
+  }
+  .rail {
+    position: sticky;
+    top: 76px; /* topbar (56px, see tailwind.config.js `topbar`) + 20px gap */
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  @media (max-width: 1020px) {
+    .concept-grid {
+      grid-template-columns: 1fr;
+    }
+    .rail {
+      position: static;
+    }
+  }
+  .c-head {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .c-badges {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .c-title {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.3;
+    max-width: 840px;
+  }
+  .c-meta {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: 12.5px;
+    color: var(--text-3);
+  }
+  .c-tags {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .contrib-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .contrib-row:last-child {
+    border-bottom: 0;
+  }
+  .rail .card-body {
+    padding: 16px;
   }
 
   /* ---------- responsive ---------- */
@@ -1169,6 +1473,290 @@
     opacity: 0.45;
     cursor: not-allowed;
     pointer-events: none;
+  }
+  .btn-lg {
+    padding: 11px 20px;
+    font-size: 14.5px;
+    border-radius: var(--r);
+  }
+  .btn-block {
+    width: 100%;
+  }
+
+  /* ---------- forms ---------- */
+  /* Mirrors docs/ui-design/assets/main.css lines 178-191 — completely
+     missing (only a stray .input:focus-visible existed, no base rule).
+     Used by 9 files (onboarding step 1, five Settings pages,
+     context-preview-page, project-scope-prompt, danger-confirm-dialog):
+     every one of them rendered labels running into unstyled, borderless
+     inputs. */
+  .field {
+    margin-bottom: 16px;
+  }
+  .label {
+    display: block;
+    font-weight: 500;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .label .req {
+    color: var(--red);
+    margin-left: 2px;
+  }
+  .hint {
+    font-size: 12.5px;
+    color: var(--text-3);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+  .hint.error {
+    color: var(--red);
+  }
+  .input,
+  .select,
+  textarea.input {
+    width: 100%;
+    font: 400 14px var(--font-sans);
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-sm);
+    padding: 9px 12px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .input::placeholder {
+    color: var(--text-3);
+  }
+  .input:focus,
+  .select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .input.mono {
+    font-size: 13px;
+  }
+  .input[disabled] {
+    background: var(--surface-2);
+    color: var(--text-3);
+    cursor: not-allowed;
+  }
+  .select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 32px;
+    cursor: pointer;
+  }
+
+  /* ---------- auth pages (login / invite) ---------- */
+  /* Mirrors docs/ui-design/login.html + docs/ui-design/invite.html —
+     these classes were referenced by login.tsx/invite.tsx but never
+     ported into this stylesheet, so the auth pages rendered unstyled
+     (no centering, no card width, no spacing). */
+  .auth {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    background: var(--bg);
+  }
+  .auth-card {
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+  }
+  .auth-card .logo-mark {
+    width: 44px;
+    height: 44px;
+    margin: 0 auto 16px;
+  }
+  .auth-card h1 {
+    font-size: 22px;
+    letter-spacing: -0.02em;
+  }
+  .auth-card .tagline {
+    color: var(--text-2);
+    margin-top: 8px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .auth-card .auth-box {
+    margin-top: 26px;
+  }
+  .auth-foot {
+    margin-top: 22px;
+    font-size: 12.5px;
+    color: var(--text-3);
+    line-height: 1.6;
+  }
+  .logo-mark {
+    display: inline-flex;
+  }
+  .auth-feats {
+    margin-top: 34px;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .auth-feats .af {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    font-size: 13px;
+    color: var(--text-2);
+    line-height: 1.5;
+  }
+  .auth-feats .af svg.ic {
+    color: var(--accent);
+    margin-top: 2px;
+  }
+
+  /* ---------- onboarding wizard ---------- */
+  /* Mirrors docs/ui-design/assets/main.css (wizard, wiz-top, wiz-body,
+     wiz-card, steps, step) plus the inline style block in
+     docs/ui-design/onboarding.html for the s-dot num/checkmark toggle.
+     None of this was ported, so the entire 5-step wizard (top bar, step
+     indicator, centered card) rendered with zero layout styling. */
+  .wizard {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+  }
+  .wiz-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .wiz-top .logo-mark {
+    width: 24px;
+    height: 24px;
+  }
+  .steps {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin: 0 auto;
+  }
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--text-3);
+    font-weight: 500;
+  }
+  .step .s-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 99px;
+    border: 1.5px solid var(--border-strong);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font: 600 11.5px var(--font-sans);
+    background: var(--surface);
+    color: var(--text-3);
+    flex: none;
+  }
+  .step .s-dot .ck {
+    display: none;
+  }
+  .step.done {
+    color: var(--text-2);
+  }
+  .step.done .s-dot {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+  }
+  .step.done .s-dot .num {
+    display: none;
+  }
+  .step.done .s-dot .ck {
+    display: block;
+  }
+  .step.now {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .step.now .s-dot {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .step-line {
+    width: 36px;
+    height: 1.5px;
+    background: var(--border-strong);
+    margin: 0 10px;
+  }
+  .wiz-body {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    padding: 40px 24px 24px;
+  }
+  .wiz-card {
+    width: 100%;
+    max-width: 640px;
+  }
+  .wiz-card h1 {
+    font-size: 20px;
+    letter-spacing: -0.02em;
+  }
+  .wiz-card .wiz-sub {
+    color: var(--text-2);
+    margin-top: 6px;
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+  .wiz-foot {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 24px;
+  }
+  .wiz-foot .spacer {
+    flex: 1;
+  }
+  @media (max-width: 900px) {
+    .steps .step .s-label {
+      display: none;
+    }
+  }
+  .divider {
+    height: 1px;
+    background: var(--border);
+    border: 0;
+    margin: 16px 0;
+  }
+  .stat-row {
+    display: flex;
+    gap: 28px;
+    padding: 4px 0;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stat .num {
+    font: 700 26px/1.1 var(--font-sans);
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .lbl {
+    font-size: 12.5px;
+    color: var(--text-3);
   }
 
   /* ---------- pulse dot animation ---------- */

@@ -58,7 +58,7 @@ describe.skipIf(!url)('Keys Routes — web key minting (live Postgres)', () => {
     app.notFound(notFoundHandler);
 
     // Key minting route (web-session-authenticated)
-    app.route('/', buildKeysRoutes({ db, mcpConfig: { host: 'test.example', port: 9999 } }));
+    app.route('/', buildKeysRoutes({ db, mcpConfig: { baseUrl: 'http://test.example:9999' } }));
 
     // Test data-plane route to verify minted keys work
     app.use('/v1/test-data', requireAuth(db as Parameters<typeof requireAuth>[0]));
@@ -180,7 +180,7 @@ describe.skipIf(!url)('Keys Routes — web key minting (live Postgres)', () => {
       // Response shape
       expect(data.id).toMatch(/^key_/);
       expect(data.name).toBe('My API Key');
-      expect(data.token).toMatch(/^tm_/);
+      expect(data.token).toMatch(/^tok_/);
       expect(data.token.length).toBeGreaterThan(40);
       expect(data.mcpCommand).toContain('claude mcp add');
       expect(data.mcpCommand).toContain(data.token);

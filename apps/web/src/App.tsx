@@ -43,8 +43,10 @@ export default function App() {
           {/* Onboarding wizard — focused flow, no app shell */}
           <Route path="/onboarding" element={<OnboardingPage />} />
 
-          {/* Redirect root to knowledge */}
-          <Route path="/" element={<Navigate to="/knowledge" replace />} />
+          {/* Root → onboarding: the wizard is the front door. Its entry
+              guard sorts every arrival — signed-out → GitHub sign-in step,
+              onboarded (has a project) → /knowledge, mid-setup → the steps. */}
+          <Route path="/" element={<Navigate to="/onboarding" replace />} />
 
           {/* Main app routes */}
           <Route element={<AppShell />}>

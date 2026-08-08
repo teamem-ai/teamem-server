@@ -52,9 +52,20 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-teamem}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-teamem}
+      # Public URL this instance is reached at. Drives the GitHub OAuth
+      # redirect_uri and every generated invite link — defaults to
+      # localhost, which breaks both the moment this is deployed behind a
+      # real domain. Must match the GitHub App's Callback URL exactly.
+      TEAMEM_BASE_URL: ${TEAMEM_BASE_URL:-}
       # Single-process mode: when true, the server embeds the pg-boss
       # compile worker — bring up only `postgres server` and skip `worker`.
       TEAMEM_ALL_IN_ONE: ${TEAMEM_ALL_IN_ONE:-false}
+      # Automatic schema migration on boot (default on). The server applies
+      # pending drizzle migrations before serving, so a fresh volume needs no
+      # manual migrate step. Set to "false" to run migrations out-of-band.
+      TEAMEM_AUTO_MIGRATE: ${TEAMEM_AUTO_MIGRATE:-}
+      # Opt-in LLM failure diagnostics (also on the worker). Off by default.
+      TEAMEM_LLM_DEBUG: ${TEAMEM_LLM_DEBUG:-}
       # GitHub App / webhook / OAuth (same App for all three roles)
       TEAMEM_GITHUB_WEBHOOK_SECRET: ${TEAMEM_GITHUB_WEBHOOK_SECRET:-}
       TEAMEM_GITHUB_APP_ID: ${TEAMEM_GITHUB_APP_ID:-}
@@ -103,6 +114,9 @@ services:
       TEAMEM_OPENAI_COMPAT_BASE_URL: ${TEAMEM_OPENAI_COMPAT_BASE_URL:-}
       TEAMEM_OPENAI_COMPAT_API_KEY: ${TEAMEM_OPENAI_COMPAT_API_KEY:-}
       TEAMEM_LLM_ENCRYPTION_KEY: ${TEAMEM_LLM_ENCRYPTION_KEY:-}
+      # Opt-in: log the underlying cause of LLM provider_error / http_error
+      # (scrubbed of secrets) to help debug compile failures. Off by default.
+      TEAMEM_LLM_DEBUG: ${TEAMEM_LLM_DEBUG:-}
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'node.*worker\\.js' || exit 1"]
       interval: 10s

@@ -15,7 +15,7 @@
  * provider responses (N3/N7).
  */
 import { randomUUID, createHash } from 'node:crypto';
-import { and, eq, or, lt, sql } from 'drizzle-orm';
+import { and, eq, or, lt, inArray, sql } from 'drizzle-orm';
 import * as schema from '../../db/schema.js';
 import type { AppDb } from '../../db/client.js';
 import type { ScopeContext } from '../../auth/scope.js';
@@ -414,6 +414,162 @@ export async function updateJobStatus(
     .returning(JOB_COLUMNS);
 
   return rows[0];
+}
+
+/**
+ * Reset a job back to `queued` so the worker's normal claim path
+ * (`claimJob`) picks it up again, and reset the targeted per-event outcomes
+ * back to `pending` so the job detail page reflects the new attempt in
+ * progress rather than stale failure text (DUA — job retry).
+ *
+ * `mode: 'failed'` resets only `job_events` currently `failed`, leaving
+ * `compiled`/`skipped` rows untouched — the worker (queue/worker.ts) only
+ * ever loads `pending` events for a job, so a `compiled` event is never
+ * revisited and never double-charges an LLM call. `mode: 'all'` resets
+ * every event regardless of outcome, mirroring "re-run all jobs" in CI —
+ * a deliberate full re-run, not a no-op (F2 will re-evaluate even an
+ * event that already merged cleanly).
+ *
+ * This is a genuine retry of the SAME job row — same id, same original
+ * `initiated_by_*` provenance — not a new job. Fabricating a new initiator
+ * for a UI-triggered retry would misrepresent who/what actually caused the
+ * original ingestion (§5.4); reusing the row keeps that fact intact while
+ * only the lifecycle state changes.
+ *
+ * The job's `WHERE status IN ('failed', 'completed')` clause makes the reset
+ * atomic and a no-op (returns undefined) for any other status, so a
+ * double-click or a stale page can't reset a job that's already
+ * queued/processing. `completed` is included because compile-job.ts only
+ * fails the JOB when EVERY event fails — a job with some compiled, some
+ * skipped, and some failed events is `completed` with a nonzero failed
+ * count, and that's the shape retry is most commonly used on. Eligibility
+ * (e.g. "does this job actually have a failed event to retry") is the
+ * caller's responsibility — this function only enforces "not already
+ * running".
+ */
+export async function resetJobForRetry(
+  db: AppDb,
+  teamId: string,
+  projectId: string,
+  jobId: string,
+  mode: 'failed' | 'all',
+): Promise<JobRow | undefined> {
+  const rows = await db
+    .update(schema.jobs)
+    .set({
+      status: 'queued',
+      error: null,
+      startedAt: null,
+      finishedAt: null,
+    })
+    .where(
+      and(
+        eq(schema.jobs.id, jobId),
+        eq(schema.jobs.teamId, teamId),
+        eq(schema.jobs.projectId, projectId),
+        or(
+          eq(schema.jobs.status, 'failed'),
+          eq(schema.jobs.status, 'completed'),
+        ),
+      ),
+    )
+    .returning(JOB_COLUMNS);
+
+  const job = rows[0];
+  if (!job) return undefined;
+
+  const jobEventConditions = [
+    eq(schema.jobEvents.teamId, teamId),
+    eq(schema.jobEvents.projectId, projectId),
+    eq(schema.jobEvents.jobId, jobId),
+  ];
+  if (mode === 'failed') {
+    jobEventConditions.push(eq(schema.jobEvents.status, 'failed'));
+  }
+
+  await db
+    .update(schema.jobEvents)
+    .set({
+      status: 'pending',
+      error: null,
+      reason: null,
+      conceptUuids: null,
+      updatedAt: new Date(),
+    })
+    .where(and(...jobEventConditions));
+
+  return job;
+}
+
+/**
+ * Reclaim jobs stuck in `processing` because the worker that claimed them
+ * died (crash, forced container restart) before reaching a terminal state.
+ *
+ * When a worker is killed mid-job, pg-boss redelivers the message once its
+ * own `expireInSeconds` elapses — but `claimJob`'s `WHERE status='queued'`
+ * guard means that redelivery sees `status='processing'` (the dead attempt's
+ * write survives), treats it as "another worker already has this", and
+ * returns cleanly without touching the row. pg-boss then considers its
+ * message complete and never redelivers it again. The result: the job row
+ * is orphaned at `processing` forever, and `/retry` (job-retry.ts) refuses
+ * to touch it because it still looks "already running".
+ *
+ * Not tenant-scoped — called on a timer by both worker entrypoints
+ * (queue/stale-job-reclaimer.ts) as system housekeeping, matching the
+ * purge/maintenance exception to red line 5.5, since it must see every
+ * team's stuck jobs to reclaim them. Safe under multi-replica deployments
+ * (`docker compose --scale worker=N`): the threshold is `started_at` age,
+ * not "is a worker currently alive", so a job genuinely still in flight on
+ * a live replica won't be older than `staleAfterMs` — callers should pass
+ * at least the compile queue's `expireInSeconds`, since pg-boss itself
+ * won't consider a delivery abandoned any sooner.
+ *
+ * `job_events` still `pending` under a reclaimed job are also marked
+ * `failed` — those are exactly the events the dead worker never got to.
+ * Marking them `failed` (rather than leaving them silently `pending`
+ * forever) is what makes the existing "Retry failed" mode pick them back
+ * up; already-`compiled`/`skipped` events are left untouched, same as an
+ * ordinary retry.
+ */
+export async function reclaimStaleProcessingJobs(
+  db: AppDb,
+  staleAfterMs: number,
+): Promise<JobRow[]> {
+  const cutoff = new Date(Date.now() - staleAfterMs);
+  const error = {
+    code: 'worker_interrupted',
+    message:
+      'This job did not finish — the worker processing it was interrupted ' +
+      '(e.g. restarted) before it could complete. Retry to resume.',
+  };
+
+  const reclaimed = await db
+    .update(schema.jobs)
+    .set({ status: 'failed', error, finishedAt: new Date() })
+    .where(
+      and(
+        eq(schema.jobs.status, 'processing'),
+        lt(schema.jobs.startedAt, cutoff),
+      ),
+    )
+    .returning(JOB_COLUMNS);
+
+  if (reclaimed.length === 0) return [];
+
+  await db
+    .update(schema.jobEvents)
+    .set({ status: 'failed', error, updatedAt: new Date() })
+    .where(
+      and(
+        inArray(
+          schema.jobEvents.jobId,
+          reclaimed.map((job) => job.id),
+        ),
+        eq(schema.jobEvents.status, 'pending'),
+      ),
+    );
+
+  return reclaimed;
 }
 
 // ── Per-event compilation status (for compilation endpoint) ──────────────

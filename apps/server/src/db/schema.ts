@@ -695,6 +695,9 @@ export const llmConfig = pgTable(
       .primaryKey()
       .references(() => teams.id, { onDelete: 'cascade' }),
     provider: text('provider').notNull(), // 'anthropic' | 'openai' | 'openrouter' | 'custom'
+    // Provider-native model id used for compilation (e.g. 'gpt-4o-2024-08-06').
+    // Null → the server's per-provider DEFAULT_MODELS is used.
+    model: text('model'),
     apiKeyEncrypted: text('api_key_encrypted'), // AES-256-GCM encrypted — null when not configured
     embeddingAvailable: boolean('embedding_available').notNull().default(false),
     lastTestOk: boolean('last_test_ok'),

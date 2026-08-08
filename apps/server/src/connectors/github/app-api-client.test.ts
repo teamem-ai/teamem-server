@@ -412,3 +412,102 @@ describe('getPullRequest', () => {
     ).rejects.toThrow(GitHubApiError);
   });
 });
+
+// ── listInstallationRepositories ─────────────────────────────────────────────
+
+describe('listInstallationRepositories', () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+  let client: ReturnType<typeof createGitHubApiClient>;
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    client = createGitHubApiClient(fakeCredentials(), mockFetch);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns the full_name of each repository on a single page', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        total_count: 2,
+        repositories: [
+          { id: 1, full_name: 'duan-li/laravel-11-getting-started' },
+          { id: 2, full_name: 'duan-li/another-repo' },
+        ],
+      }),
+    });
+
+    const result = await client.listInstallationRepositories();
+
+    expect(result).toEqual([
+      'duan-li/laravel-11-getting-started',
+      'duan-li/another-repo',
+    ]);
+    const url = mockFetch.mock.calls[0]?.[0] as string;
+    expect(url).toBe('https://api.github.com/installation/repositories?per_page=100&page=1');
+  });
+
+  it('returns an empty array when the installation has no repositories', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ total_count: 0, repositories: [] }),
+    });
+
+    const result = await client.listInstallationRepositories();
+    expect(result).toEqual([]);
+  });
+
+  it('paginates across multiple pages (100+ repositories)', async () => {
+    const page1 = Array.from({ length: 100 }, (_, i) => ({
+      id: i,
+      full_name: `org/repo-${i}`,
+    }));
+    const page2 = [{ id: 100, full_name: 'org/repo-100' }];
+
+    let call = 0;
+    mockFetch.mockImplementation(async () => {
+      call += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          total_count: 101,
+          repositories: call === 1 ? page1 : page2,
+        }),
+      };
+    });
+
+    const result = await client.listInstallationRepositories();
+
+    expect(result).toHaveLength(101);
+    expect(result[0]).toBe('org/repo-0');
+    expect(result[100]).toBe('org/repo-100');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[1]?.[0]).toContain('page=2');
+  });
+
+  it('throws GitHubApiError on 401 (no leaking of the raw body)', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => 'Bad credentials',
+    });
+
+    await expect(client.listInstallationRepositories()).rejects.toThrow(GitHubApiError);
+  });
+
+  it('throws on a malformed response (missing repositories field)', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ total_count: 1 }),
+    });
+
+    await expect(client.listInstallationRepositories()).rejects.toThrow(GitHubApiError);
+  });
+});

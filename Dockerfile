@@ -64,6 +64,11 @@ WORKDIR /app
 COPY --from=build --chown=node:node /production/server/package.json ./apps/server/package.json
 COPY --from=build --chown=node:node /production/server/node_modules ./apps/server/node_modules
 COPY --from=build --chown=node:node /workspace/apps/server/dist ./apps/server/dist
+# Drizzle SQL migrations — applied automatically on server boot (see
+# apps/server/src/db/migrate.ts). drizzle-kit is dev-only and absent from the
+# runtime image, so the compiled server uses drizzle-orm's migrator to apply
+# these on startup; a fresh Postgres volume gets its schema with no manual step.
+COPY --from=build --chown=node:node /workspace/apps/server/drizzle ./apps/server/drizzle
 # Static web SPA (built by Vite). Served directly by the server on the same
 # port via a SPA fallback middleware — no separate web container.
 COPY --from=build --chown=node:node /workspace/apps/web/dist ./apps/web/dist

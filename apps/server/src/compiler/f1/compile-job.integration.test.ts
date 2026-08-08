@@ -766,7 +766,7 @@ describe.skipIf(!url)('compile-job handler (live Postgres)', () => {
       // payload, prompt, or credential.
       const serialized = JSON.stringify(row!.error);
       expect(serialized).toContain('TEAMEM_ANTHROPIC_API_KEY');
-      expect(serialized).not.toContain('tm_');
+      expect(serialized).not.toContain('tok_');
     });
 
     it('ignores a delivery whose scope fields are missing', async () => {

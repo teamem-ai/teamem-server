@@ -17,6 +17,7 @@ import {
   type EventsWriteDeps,
 } from './http/routes/events-write.js';
 import { buildJobsReadRoutes } from './http/routes/jobs-read.js';
+import { buildJobRetryRoutes } from './http/routes/job-retry.js';
 import {
   buildConnectorWebhookRoutes,
 } from './http/routes/connector-webhook.js';
@@ -53,6 +54,7 @@ import { buildInvitesRoutes } from './http/routes/invites.js';
 import { inviteLookupHandler } from './http/routes/invite-lookup.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
 import type { EmbeddingClient } from './llm/embedding/port.js';
+import type { GitHubApiClient } from './connectors/github/app-api-client.js';
 import { createSpaMiddleware } from './http/spa.js';
 
 export interface AppDeps extends HealthDeps {
@@ -66,6 +68,14 @@ export interface AppDeps extends HealthDeps {
   embeddingClient?: EmbeddingClient | null;
   /** Optional GitHub OAuth config for user login (M2-AUTH-02). */
   githubOAuth?: GitHubOAuthConfig;
+  /** True when the GitHub App is fully configured (env.ts githubAppConfigured).
+   *  Drives Settings → Ingestion's GitHub "Connected" status. */
+  githubAppConfigured?: boolean;
+  /** True when TEAMEM_GITHUB_WEBHOOK_SECRET is set. */
+  githubWebhookConfigured?: boolean;
+  /** Present when App ID + installation ID + private key are all configured —
+   *  used to fetch the live installed-repository list for Settings → Ingestion. */
+  githubApiClient?: GitHubApiClient;
 }
 
 type AppEnv = { Variables: { healthDeps: HealthDeps } };
@@ -135,16 +145,27 @@ export function buildApp(deps: AppDeps = {}) {
   // Governance routes (teams, projects, keys) — wired when db is available.
   // These are web-session-authenticated and require a valid OAuth session cookie.
   if (deps.db) {
-    // Read host/port from env for the MCP command formatter; defaults
-    // match the standard Compose development topology.
-    const mcpHost = process.env['TEAMEM_HOST'] ?? '0.0.0.0';
+    // Same resolution config/env.ts uses for GitHub OAuth's redirect_uri —
+    // TEAMEM_BASE_URL when set, otherwise localhost on the configured port.
+    // Reading it independently here (rather than threading parseServerEnv's
+    // result through) previously meant this could silently disagree with
+    // OAuth about what "this server" is reachable at.
     const mcpPort = Number(process.env['TEAMEM_PORT'] ?? 8080);
-    const mcpConfig = { host: mcpHost, port: mcpPort };
+    const mcpBaseUrl = process.env['TEAMEM_BASE_URL'] || `http://localhost:${mcpPort}`;
+    const mcpConfig = { baseUrl: mcpBaseUrl };
     app.route('/', buildTeamsRoutes({ db: deps.db, mcpConfig }));
     app.route('/', buildProjectsRoutes({ db: deps.db }));
     app.route('/', buildKeysRoutes({ db: deps.db, mcpConfig }));
     app.route('/', buildLlmConfigRoutes({ db: deps.db }));
-    app.route('/', buildConnectorStatusRoutes({ db: deps.db }));
+    app.route(
+      '/',
+      buildConnectorStatusRoutes({
+        db: deps.db,
+        githubAppConfigured: deps.githubAppConfigured,
+        githubWebhookConfigured: deps.githubWebhookConfigured,
+        githubApiClient: deps.githubApiClient,
+      }),
+    );
 
     // E2E test setup route — only mounted when TEAMEM_E2E_SECRET is set.
     const e2eSecret = process.env['TEAMEM_E2E_SECRET'];
@@ -175,6 +196,13 @@ export function buildApp(deps: AppDeps = {}) {
     app.route(
       '/',
       buildJobsReadRoutes({ db: deps.db }),
+    );
+
+    // Job retry — session-only, admin+ (see job-retry.ts for the role/
+    // provenance rationale).
+    app.route(
+      '/',
+      buildJobRetryRoutes({ db: deps.db, queue: deps.queue }),
     );
 
     // Connector webhook routes (no Bearer-token auth — webhook signatures

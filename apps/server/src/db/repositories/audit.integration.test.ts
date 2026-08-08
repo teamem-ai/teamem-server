@@ -255,7 +255,7 @@ describe.skipIf(!url)('audit repository (live Postgres)', () => {
     expect(row.requestId).not.toContain('{');
     expect(row.requestId).not.toContain('<private>');
     expect(row.requestId).not.toContain('Bearer');
-    expect(row.requestId).not.toContain('tm_');
+    expect(row.requestId).not.toContain('tok_');
 
     // The action is a simple dot-notation string — not a payload
     expect(row.action).toBe('event.payload_read');
@@ -267,7 +267,7 @@ describe.skipIf(!url)('audit repository (live Postgres)', () => {
 
     // No key material is present
     expect(row.credentialId).toBe('key_abc123def456');
-    expect(row.credentialId).not.toContain('tm_'); // key_... IDs, not tokens
+    expect(row.credentialId).not.toContain('tok_'); // key_... IDs, not tokens
 
     // Verify we can't accidentally store extra data by checking column count
     const columnNames = Object.keys(row);

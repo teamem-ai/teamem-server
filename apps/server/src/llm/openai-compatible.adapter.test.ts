@@ -31,7 +31,7 @@ import { createServer, type Server } from 'node:http';
 import { z } from 'zod';
 
 import { f1Output } from '../compiler/f1/output.js';
-import { createLlmClient, SCHEMA_ENVELOPE_PROPERTY } from './factory.js';
+import { createLlmClient } from './factory.js';
 import { LlmError, type FetchLike } from './types.js';
 
 /* ── Test-only HTTP fixture server (an OpenAI-compatible endpoint) ──────────── */
@@ -145,18 +145,6 @@ function openAiEnvelope(value: unknown, model = 'local-f1-model'): unknown {
   };
 }
 
-/**
- * Build the envelope for a schema whose root is a union.
- *
- * `f1Output` is a discriminated union, so the factory sends it wrapped in a
- * `result` property (OpenAI rejects a root-level `oneOf` outright) and unwraps
- * the response. Provider fixtures for F1 must therefore reply in the wrapped
- * shape, exactly as a real endpoint honoring the schema would.
- */
-function openAiF1Envelope(value: unknown, model = 'local-f1-model'): unknown {
-  return openAiEnvelope({ [SCHEMA_ENVELOPE_PROPERTY]: value }, model);
-}
-
 /* ── Network-blocking fetch guard ──────────────────────────────────────────── */
 
 /**
@@ -196,7 +184,7 @@ const validF1Extract = {
 describe('OpenAI-compatible adapter — local structured-output endpoint', () => {
   it('runs a real F1 extraction through the custom config pointed at a local endpoint (real fetch)', async () => {
     const fixture = await startFixture(() => ({
-      body: openAiF1Envelope(validF1Extract),
+      body: openAiEnvelope(validF1Extract),
     }));
     try {
       const attempted: string[] = [];
@@ -234,15 +222,19 @@ describe('OpenAI-compatible adapter — local structured-output endpoint', () =>
       expect(sent.response_format.type).toBe('json_schema');
       expect(sent.response_format.json_schema.name).toBe('teamem_structured_output');
       // The F1 discriminated union renders to a root oneOf, which OpenAI-
-      // compatible endpoints reject; the root that goes on the wire must be a
-      // plain object carrying the union one level down.
+      // compatible endpoints reject — and, per the real 400 this pins down,
+      // some backends reject oneOf even nested one level down inside an
+      // envelope. The root on the wire is instead the branches' properties
+      // flattened into one permissive object; no oneOf survives anywhere.
       const wireSchema = sent.response_format.json_schema.schema;
       expect(wireSchema.type).toBe('object');
       expect(wireSchema.oneOf).toBeUndefined();
-      const inner = (wireSchema.properties as Record<string, { oneOf?: unknown[] }>)[
-        SCHEMA_ENVELOPE_PROPERTY
-      ]!;
-      expect(inner.oneOf).toHaveLength(2);
+      const properties = wireSchema.properties as Record<string, unknown>;
+      expect(properties['oneOf']).toBeUndefined();
+      expect(Object.keys(properties)).toEqual(
+        expect.arrayContaining(['action', 'type', 'title', 'body', 'path', 'tags', 'confidence', 'reason']),
+      );
+      expect(wireSchema.required).toEqual(['action']);
       // No $schema anchor leaked onto the wire.
       expect(wireSchema.$schema).toBeUndefined();
     } finally {
@@ -254,7 +246,7 @@ describe('OpenAI-compatible adapter — local structured-output endpoint', () =>
 
   it('with external network blocked, the custom path still works and contacts only the local host', async () => {
     const fixture = await startFixture(() => ({
-      body: openAiF1Envelope({ action: 'skip', reason: 'no knowledge here' }),
+      body: openAiEnvelope({ action: 'skip', reason: 'no knowledge here' }),
     }));
     try {
       const attempted: string[] = [];
@@ -279,7 +271,7 @@ describe('OpenAI-compatible adapter — local structured-output endpoint', () =>
   });
 
   it('proves the guard rejects an external host: a custom baseUrl pointing off-host fails (no silent rewrite to localhost)', async () => {
-    const fixture = await startFixture(() => ({ body: openAiF1Envelope(validF1Extract) }));
+    const fixture = await startFixture(() => ({ body: openAiEnvelope(validF1Extract) }));
     try {
       const attempted: string[] = [];
       const client = createLlmClient(
@@ -314,7 +306,7 @@ describe('OpenAI-compatible adapter — local structured-output endpoint', () =>
   it('malformed structured data (wrong shape) yields an explicit schema_validation_failed', async () => {
     // Provider returns valid JSON, but it is missing required F1 fields.
     const fixture = await startFixture(() => ({
-      body: openAiF1Envelope({
+      body: openAiEnvelope({
         action: 'extract',
         title: 'no body, no path, no type',
       }),
@@ -420,7 +412,7 @@ describe('OpenAI-compatible adapter — local structured-output endpoint', () =>
   /* ── Explicit timeout over the real network boundary ───────────────────── */
 
   it('a slow local endpoint is killed by the explicit timeout and yields a timeout failure', async () => {
-    const fixture = await startFixture(() => ({ body: openAiF1Envelope(validF1Extract), delayMs: 300 }));
+    const fixture = await startFixture(() => ({ body: openAiEnvelope(validF1Extract), delayMs: 300 }));
     try {
       const client = createLlmClient(
         { kind: 'custom', baseUrl: fixture.baseUrl, apiKey: 'k' },
@@ -446,7 +438,7 @@ describe('OpenAI-compatible adapter — local structured-output endpoint', () =>
     // The model "helpfully" adds a uuid and createdAt. f1Output is a
     // strictObject union, so unknown keys must be rejected (no silent drop).
     const fixture = await startFixture(() => ({
-      body: openAiF1Envelope({
+      body: openAiEnvelope({
         ...validF1Extract,
         uuid: 'should-not-leak-through',
         createdAt: '2026-01-01T00:00:00.000Z',

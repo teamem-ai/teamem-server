@@ -38,7 +38,7 @@ import {
   buildClaudeRequest,
   parseClaudeResponse,
 } from './claude-adapter.js';
-import { LlmError } from './types.js';
+import { LlmError, MAX_OUTPUT_TOKENS } from './types.js';
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 
@@ -134,7 +134,7 @@ describe('buildClaudeRequest', () => {
     const body = JSON.parse(init.body as string);
 
     expect(body.model).toBe(CLAUDE_DEFAULT_MODEL);
-    expect(body.max_tokens).toBe(1024);
+    expect(body.max_tokens).toBe(MAX_OUTPUT_TOKENS);
     expect(body.system).toBe('sys');
     expect(body.messages).toEqual([{ role: 'user', content: 'usr' }]);
 
@@ -291,6 +291,22 @@ describe('parseClaudeResponse — success paths', () => {
       CLAUDE_DEFAULT_MODEL,
     );
     expect(result.value).toEqual(partialInput);
+  });
+
+  it('sets truncated: true when stop_reason is "max_tokens", false otherwise', () => {
+    const truncated = parseClaudeResponse(
+      claudeResponse({ stop_reason: 'max_tokens' }),
+      'req-7a',
+      CLAUDE_DEFAULT_MODEL,
+    );
+    expect(truncated.truncated).toBe(true);
+
+    const notTruncated = parseClaudeResponse(
+      claudeResponse({ stop_reason: 'tool_use' }),
+      'req-7b',
+      CLAUDE_DEFAULT_MODEL,
+    );
+    expect(notTruncated.truncated).toBe(false);
   });
 
   it('handles null/undefined input gracefully (passed through for Zod to reject)', () => {

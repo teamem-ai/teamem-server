@@ -30,7 +30,7 @@ import {
 import type { McpCommandConfig } from './format-mcp-command.js';
 
 /** Explicit MCP config for integration tests so we never depend on env. */
-const TEST_MCP_CONFIG: McpCommandConfig = { host: 'localhost', port: 8080 };
+const TEST_MCP_CONFIG: McpCommandConfig = { baseUrl: 'http://localhost:8080' };
 
 const url = process.env['TEST_DATABASE_URL'];
 
@@ -101,7 +101,7 @@ describe.skipIf(!url)('bootstrap command (live Postgres)', () => {
 
     // Token printed exactly once on creation
     expect(result.key.token).toBeDefined();
-    expect(result.key.token).toMatch(/^tm_[A-Za-z0-9_-]{40,}$/);
+    expect(result.key.token).toMatch(/^tok_[A-Za-z0-9_-]{40,}$/);
 
     // MCP add command (DUA-211): present when token is present
     expect(result.key.mcpAddCommand).toBeDefined();

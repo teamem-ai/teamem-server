@@ -11,6 +11,10 @@
  *   - "My teams" only returns teams where the user has a membership row.
  *   - No API key (Bearer token) can use these endpoints — they are
  *     web-session-exclusive (governance belongs to web roles only).
+ *   - Self-serve creation by a memberless caller is rejected once any team
+ *     already exists — see the guard in POST /v1/teams. Without it, any
+ *     signed-in GitHub account (not just invited ones) could spin up its
+ *     own team on someone else's self-hosted instance.
  */
 import { Hono, type Context } from 'hono';
 import { randomBytes } from 'node:crypto';
@@ -25,6 +29,7 @@ import {
   InvalidRequestError,
   NotFoundError,
   InternalError,
+  ForbiddenError,
   REQUEST_ID_KEY,
 } from '../errors.js';
 import {
@@ -58,11 +63,33 @@ export function buildTeamsRoutes(deps: TeamsDeps): Hono {
 
   // ── POST /v1/teams ─────────────────────────────────────────────────────
   // Create a new team. The session user automatically becomes the owner.
-  // No team membership check is needed here — the user may have no team yet
-  // (this is the onboarding path).
   routes.post('/v1/teams', requireWebSession(db), async (c: Context) => {
     const requestId = c.get(REQUEST_ID_KEY) as string;
     const sessionUser = getSessionUser(c);
+
+    // Self-serve team creation is the true first-run bootstrap path only —
+    // ensureTeamMembership (auth/oauth-github.ts) already auto-creates the
+    // first team + owner membership at login the moment no team exists yet,
+    // so by the time this route can even be reached, a team already exists.
+    // A signed-in caller with no membership anywhere hitting this endpoint
+    // is therefore never a legitimate "first user" — self-hosted teamem is
+    // not an open multi-tenant signup surface, and letting any GitHub
+    // account spin up its own team here was the actual hole (a removed or
+    // never-invited visitor could always just make a new one). Existing
+    // members creating an additional team for their own org are unaffected.
+    const existingMembership = await db.$client.query(
+      `SELECT 1 FROM memberships WHERE user_id = $1 LIMIT 1`,
+      [sessionUser.userId],
+    );
+    if (existingMembership.rows.length === 0) {
+      const teamCountResult = await db.$client.query(`SELECT COUNT(*)::int AS count FROM teams`);
+      const teamCount = teamCountResult.rows[0]?.['count'] as number;
+      if (teamCount > 0) {
+        throw new ForbiddenError(
+          'Self-serve team creation is not available on this portal — ask an existing team owner for an invite',
+        );
+      }
+    }
 
     // Parse and validate request body
     let body: unknown;

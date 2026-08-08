@@ -82,6 +82,25 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
     void load();
   }, [load]);
 
+  // Defense-in-depth against the browser back/forward cache (bfcache):
+  // the server sends Cache-Control: no-store on the HTML shell so pages
+  // should not be bfcache-eligible at all, but header behavior isn't
+  // perfectly uniform across browsers/versions. If a page ever IS
+  // restored from bfcache (event.persisted === true — no network request,
+  // full in-memory DOM/JS state restored as-is), re-run the real /auth/me
+  // check so a session that was revoked while the page was cached (e.g.
+  // sign-out from another tab, or via back navigation after logout) is
+  // caught immediately instead of showing stale authenticated content.
+  useEffect(() => {
+    function handlePageShow(event: PageTransitionEvent) {
+      if (event.persisted) {
+        void load();
+      }
+    }
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, [load]);
+
   const setProjectId = useCallback((id: string) => {
     setProjectIdState(id);
     window.localStorage.setItem(PROJECT_STORAGE_KEY, id);
@@ -111,4 +130,12 @@ export function useScope(): ScopeState {
   const ctx = useContext(ScopeContext);
   if (!ctx) throw new Error("useScope must be used within a ScopeProvider");
   return ctx;
+}
+
+/** Like {@link useScope} but returns null instead of throwing when there is no
+ *  ScopeProvider above. Lets a helper reconcile against the real scope when
+ *  one exists (the whole app runs inside AppShell's provider) while still
+ *  working in isolated unit tests that render a page without the provider. */
+export function useScopeOptional(): ScopeState | null {
+  return useContext(ScopeContext);
 }

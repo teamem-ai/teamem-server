@@ -68,6 +68,24 @@ const rawPullRequestDetailSchema = z
 /** Schema for the array returned by GET …/commits/{sha}/pulls. */
 const rawPullRequestArraySchema = z.array(z.unknown());
 
+/**
+ * Schema for a single repository entry in the
+ * GET /installation/repositories response. `.passthrough()` lets the many
+ * other fields GitHub returns through without validation error — only
+ * `full_name` is consumed.
+ */
+const rawInstallationRepoSchema = z
+  .object({ full_name: z.string().min(1) })
+  .passthrough();
+
+/** Schema for the GET /installation/repositories response envelope. */
+const rawInstallationRepositoriesResponseSchema = z
+  .object({
+    total_count: z.number().int().nonnegative(),
+    repositories: z.array(rawInstallationRepoSchema),
+  })
+  .passthrough();
+
 // ── API types (derived from Zod schemas for consumers) ───────────────────────
 
 /** Validated PR shape from the commits/{sha}/pulls endpoint. */
@@ -152,6 +170,14 @@ export interface GitHubApiClient {
     repo: string,
     number: number,
   ): Promise<GitHubPullRequestDetail | null>;
+
+  /**
+   * List the `owner/repo` full names the App's installation has access to
+   * (GET /installation/repositories — requires an installation token, i.e. a
+   * credentials provider; unauthenticated calls will 404). Paginates through
+   * all pages (100/page), capped at 20 pages (2000 repos) as a sane bound.
+   */
+  listInstallationRepositories(): Promise<string[]>;
 }
 
 /**
@@ -303,6 +329,29 @@ export function createGitHubApiClient(
 
       const pr = validate(rawPullRequestDetailSchema, data, `pulls/${number}`);
       return mapPullRequestDetail(pr);
+    },
+
+    async listInstallationRepositories(): Promise<string[]> {
+      const names: string[] = [];
+      const MAX_PAGES = 20;
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const { data, error } = await request(
+          `/installation/repositories?per_page=100&page=${page}`,
+        );
+        if (error) throw error;
+        if (data === null) break; // 404 — no installation access from this token
+
+        const parsed = validate(
+          rawInstallationRepositoriesResponseSchema,
+          data,
+          `installation/repositories (page ${page})`,
+        );
+        for (const repo of parsed.repositories) {
+          names.push(repo.full_name);
+        }
+        if (parsed.repositories.length < 100) break; // last page
+      }
+      return names;
     },
   };
 }

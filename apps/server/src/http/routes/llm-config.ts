@@ -27,6 +27,7 @@ import {
 } from '../errors.js';
 import {
   llmConfigRequest as llmConfigRequestSchema,
+  llmModelsRequest as llmModelsRequestSchema,
   type LlmConfigResponse,
   type LlmProvider,
 } from '@teamem/schema';
@@ -46,6 +47,7 @@ function rowToResponse(
   if (!row) {
     return {
       provider: null,
+      model: null,
       hasKey: false,
       lastTest: null,
       semanticRetrieval: {
@@ -58,6 +60,7 @@ function rowToResponse(
 
   return {
     provider: row.provider as LlmProvider,
+    model: row.model ?? null,
     hasKey: row.apiKeyEncrypted !== null,
     lastTest: row.lastTestAt
       ? {
@@ -84,6 +87,60 @@ const PROVIDER_TEST_URLS: Record<LlmProvider, string> = {
   // Base URL is the /v1 root (per env.ts). The test function appends /models.
   custom: process.env['TEAMEM_OPENAI_COMPAT_BASE_URL'] ?? '',
 };
+
+/** Base /models URLs (no query params) for listing a provider's models. */
+const PROVIDER_MODELS_URLS: Record<LlmProvider, string> = {
+  anthropic: 'https://api.anthropic.com/v1/models',
+  openai: 'https://api.openai.com/v1/models',
+  openrouter: 'https://openrouter.ai/api/v1/models',
+  // /v1 root from env; the lister appends /models.
+  custom: process.env['TEAMEM_OPENAI_COMPAT_BASE_URL'] ?? '',
+};
+
+/**
+ * List the model ids a provider exposes for the given key. All four providers
+ * (and OpenAI-compatible custom endpoints) return `{ data: [{ id }] }`, so the
+ * ids are parsed uniformly. Throws on an unreachable endpoint or a rejected
+ * key so the caller can surface "couldn't list models — check the key".
+ */
+async function listProviderModels(
+  provider: LlmProvider,
+  apiKey: string,
+): Promise<string[]> {
+  let url = PROVIDER_MODELS_URLS[provider];
+  if (provider === 'custom' && url) {
+    url = url.replace(/\/$/, '') + '/models';
+  }
+  if (!url) {
+    throw new Error('No models endpoint configured for this provider');
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (provider === 'anthropic') {
+    headers['x-api-key'] = apiKey;
+    headers['anthropic-version'] = '2023-06-01';
+  } else {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(url, { headers, signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`provider returned ${res.status}`);
+    }
+    const json = (await res.json()) as { data?: Array<{ id?: unknown }> };
+    const data = Array.isArray(json?.data) ? json.data : [];
+    const models = data
+      .map((m) => (typeof m?.id === 'string' ? m.id : null))
+      .filter((id): id is string => id !== null);
+    // Stable, readable order for the dropdown.
+    return Array.from(new Set(models)).sort();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 async function testProviderConnection(
   provider: LlmProvider,
@@ -135,6 +192,8 @@ export function buildLlmConfigRoutes(deps: LlmConfigDeps): Hono {
   routes.use('/v1/teams/:teamId/llm', requireTeamMembership(db));
   routes.use('/v1/teams/:teamId/llm/test', requireWebSession(db));
   routes.use('/v1/teams/:teamId/llm/test', requireTeamMembership(db));
+  routes.use('/v1/teams/:teamId/llm/models', requireWebSession(db));
+  routes.use('/v1/teams/:teamId/llm/models', requireTeamMembership(db));
 
   // ── GET /v1/teams/:teamId/llm ────────────────────────────────────────
   routes.get('/v1/teams/:teamId/llm', async (c: Context) => {
@@ -181,18 +240,42 @@ export function buildLlmConfigRoutes(deps: LlmConfigDeps): Hono {
         } as unknown as Record<string, unknown>);
       }
 
-      const { provider, apiKey } = parsed.data;
+      const { provider, apiKey, model } = parsed.data;
+      // PUT replaces the config; an omitted model means "use the provider
+      // default" (stored as null), which is also correct when the provider
+      // changes and a previously-chosen model no longer applies.
+      const modelToStore = model ?? null;
 
-      // Encrypt the API key at rest (AES-256-GCM). Throws if
-      // TEAMEM_LLM_ENCRYPTION_KEY is not configured.
-      let apiKeyEncrypted: string;
-      try {
-        apiKeyEncrypted = encryptApiKey(apiKey);
-      } catch (err) {
-        throw new InternalError(
-          'Server encryption key not configured — cannot store LLM provider key',
-          { cause: err },
-        );
+      // Resolve the encrypted key:
+      //  - omitted        → keep any existing key (may be null): lets the user
+      //                     record a provider choice before they have a key
+      //                     (e.g. onboarding), or change only the model.
+      //  - "__STORED__"   → keep the existing key; error if there is none.
+      //  - a real key     → encrypt it at rest (AES-256-GCM; throws if
+      //                     TEAMEM_LLM_ENCRYPTION_KEY is not configured).
+      let apiKeyEncrypted: string | null;
+      if (apiKey === undefined || apiKey === '__STORED__') {
+        const rows = await db
+          .select({ encrypted: schema.llmConfig.apiKeyEncrypted })
+          .from(schema.llmConfig)
+          .where(eq(schema.llmConfig.teamId, teamId))
+          .limit(1);
+        const existing = rows[0]?.encrypted ?? null;
+        if (apiKey === '__STORED__' && !existing) {
+          throw new InvalidRequestError(
+            'No stored API key to keep — provide an API key.',
+          );
+        }
+        apiKeyEncrypted = existing;
+      } else {
+        try {
+          apiKeyEncrypted = encryptApiKey(apiKey);
+        } catch (err) {
+          throw new InternalError(
+            'Server encryption key not configured — cannot store LLM provider key',
+            { cause: err },
+          );
+        }
       }
 
       const embeddingAvailable = provider !== 'anthropic';
@@ -203,6 +286,7 @@ export function buildLlmConfigRoutes(deps: LlmConfigDeps): Hono {
           .values({
             teamId,
             provider,
+            model: modelToStore,
             apiKeyEncrypted,
             embeddingAvailable,
           })
@@ -210,6 +294,7 @@ export function buildLlmConfigRoutes(deps: LlmConfigDeps): Hono {
             target: schema.llmConfig.teamId,
             set: {
               provider,
+              model: modelToStore,
               apiKeyEncrypted,
               embeddingAvailable,
               updatedAt: new Date(),
@@ -222,6 +307,7 @@ export function buildLlmConfigRoutes(deps: LlmConfigDeps): Hono {
             requestId,
             teamId,
             provider,
+            model: modelToStore,
             updatedByUserId: ws.userId,
           }),
         );
@@ -301,6 +387,72 @@ export function buildLlmConfigRoutes(deps: LlmConfigDeps): Hono {
       }
 
       return c.json({ requestId, data: result });
+    },
+  );
+
+  // ── POST /v1/teams/:teamId/llm/models ────────────────────────────────
+  // List the models the provider exposes for the given key, for the model
+  // picker. apiKey may be "__STORED__" to use the saved key.
+  routes.post(
+    '/v1/teams/:teamId/llm/models',
+    requireRole('admin'),
+    async (c: Context) => {
+      const requestId = c.get(REQUEST_ID_KEY) as string;
+      const ws = getWebSession(c);
+      const teamId = ws.scope.teamId;
+
+      let body: unknown;
+      try {
+        body = await c.req.json();
+      } catch {
+        throw new InvalidRequestError('Request body is not valid JSON');
+      }
+
+      const parsed = llmModelsRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new InvalidRequestError('Request body validation failed', {
+          issues: parsed.error.issues.map((i) => ({
+            path: i.path.join('.'),
+            message: i.message,
+          })),
+        } as unknown as Record<string, unknown>);
+      }
+
+      const { provider } = parsed.data;
+      let key = parsed.data.apiKey;
+      if (key === '__STORED__') {
+        try {
+          const rows = await db
+            .select({ encrypted: schema.llmConfig.apiKeyEncrypted })
+            .from(schema.llmConfig)
+            .where(eq(schema.llmConfig.teamId, teamId))
+            .limit(1);
+          const encrypted = rows[0]?.encrypted;
+          if (!encrypted) {
+            throw new InvalidRequestError('No stored key to list models with');
+          }
+          const decrypted = decryptApiKey(encrypted);
+          if (!decrypted) {
+            throw new InvalidRequestError('Could not read the stored key');
+          }
+          key = decrypted;
+        } catch (err) {
+          if (err instanceof InvalidRequestError) throw err;
+          throw new InvalidRequestError('Could not read the stored key');
+        }
+      }
+
+      let models: string[];
+      try {
+        models = await listProviderModels(provider, key);
+      } catch {
+        // Provider unreachable or key rejected — surface as a client-facing
+        // failure so the picker can prompt the user to check the key. The
+        // provider's raw error is never forwarded (§5.3).
+        throw new InvalidRequestError('Could not list models from the provider');
+      }
+
+      return c.json({ requestId, data: { models } });
     },
   );
 

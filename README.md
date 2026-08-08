@@ -172,7 +172,29 @@ docker compose port postgres 5432
 # Expected: 127.0.0.1:5432 (not 0.0.0.0)
 ```
 
-### 4. Open the portal
+### 4. Run database migrations
+
+**This step is required and does not happen automatically.** No service in
+`docker-compose.yml` runs `drizzle-kit migrate` on boot — `/healthz` is a
+liveness probe, not a schema check, so a fresh Postgres volume comes up
+"healthy" with zero tables. Skipping this step means the first sign-in
+attempt fails at the database layer (`relation "users" does not exist`),
+surfaced to the browser only as a generic "Sign-in didn't complete." error.
+
+The runtime image has no `pnpm`/source (the `Dockerfile` only copies build
+output), so migrations run from the host against the loopback Postgres port:
+
+```sh
+pnpm install --frozen-lockfile
+set -a; . ./.env; set +a
+DATABASE_URL="postgres://${POSTGRES_USER:-teamem}:${POSTGRES_PASSWORD}@127.0.0.1:${TEAMEM_PG_PORT:-5432}/${POSTGRES_DB:-teamem}" \
+  pnpm --filter @teamem/server db:migrate
+```
+
+Expect `[✓] migrations applied successfully!` and 17 tables afterward
+(`docker compose exec postgres psql -U teamem -d teamem -c '\dt'`).
+
+### 5. Open the portal
 
 Navigate to [http://localhost:8080](http://localhost:8080) and click
 **Sign in with GitHub**.
@@ -191,7 +213,7 @@ After sign-in you land on the app landing page. From there you can:
 - Invite team members in **Members**.
 - Configure the webhook on your GitHub App to start ingesting events.
 
-### 5. Wire up GitHub webhook (for event ingestion)
+### 6. Wire up GitHub webhook (for event ingestion)
 
 Go to your GitHub App settings → **Webhook** and set:
 - **Payload URL**: `http://<your-host>:8080/v1/webhooks/github`

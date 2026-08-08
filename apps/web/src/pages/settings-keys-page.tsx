@@ -424,7 +424,7 @@ export function SettingsKeysPage() {
       )}
       <p className="text-xs text-text-3 mt-2.5">
         Key IDs (<code className="text-[11px]">key_…</code>) are identifiers,
-        safe to display. The secret token (<code className="text-[11px]">tm_…</code>)
+        safe to display. The secret token (<code className="text-[11px]">tok_…</code>)
         is shown once at minting — we store only its hash.
       </p>
 

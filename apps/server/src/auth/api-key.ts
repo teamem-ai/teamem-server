@@ -11,14 +11,15 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const TOKEN_BYTES = 32; // 256-bit entropy
-const TOKEN_PREFIX = 'tm_';
+const TOKEN_PREFIX = 'tok_';
 const HASH_ALGORITHM = 'sha256';
 
 /**
  * Generate a high-entropy plaintext API key token.
  *
- * Format: `tm_<base64url>` where the random part is 256 bits.
- * The prefix helps identify the string as a teamem API key.
+ * Format: `tok_<base64url>` where the random part is 256 bits. The `tok_`
+ * prefix reads clearly as "token" (and is deliberately distinct from the
+ * `team_` team id and the `key_` key id, which are NOT secrets).
  *
  * SECURITY: The returned plaintext must be shown to the user exactly once
  * and then discarded. It must NEVER be logged, stored, or included in
@@ -65,16 +66,19 @@ export function verifyToken(token: string, storedHash: string): boolean {
  * Accepts only: `Bearer <token>` (case-insensitive scheme).
  * Returns the token string if valid, or `null` for any malformed input.
  *
- * Valid tokens match: /^tm_[A-Za-z0-9_-]{40,}$/
- * (base64url without padding, 32 bytes = ~43 chars)
+ * Valid tokens match: /^(?:tok_|tm_)[A-Za-z0-9_-]{40,}$/
+ * (base64url without padding, 32 bytes = ~43 chars). New tokens use the
+ * `tok_` prefix; the legacy `tm_` prefix is still accepted so keys minted
+ * before the rename keep working.
  */
 export function parseBearerToken(authorizationHeader: string | null): string | null {
   if (!authorizationHeader) {
     return null;
   }
 
-  // Strict: exactly "Bearer " prefix, case-insensitive scheme
-  const match = /^Bearer\s+(tm_[A-Za-z0-9_-]{40,})$/i.exec(authorizationHeader.trim());
+  // Strict: exactly "Bearer " prefix, case-insensitive scheme. Accept the new
+  // `tok_` prefix and the legacy `tm_` prefix (backward compatibility).
+  const match = /^Bearer\s+((?:tok_|tm_)[A-Za-z0-9_-]{40,})$/i.exec(authorizationHeader.trim());
   if (!match?.[1]) {
     return null;
   }

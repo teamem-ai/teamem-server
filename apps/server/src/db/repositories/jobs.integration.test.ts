@@ -28,6 +28,7 @@ import {
   upsertJobEvent,
   getJobEvents,
   findJobByIdempotencyKey,
+  reclaimStaleProcessingJobs,
   IdempotencyConflictError,
   type CreateJobRequest,
 } from './jobs.js';
@@ -1102,6 +1103,122 @@ describe.skipIf(!url)('jobs repository (live Postgres)', () => {
     const scopeA = projectScope(teamA, projectA);
     const foundA = await getJob(db, scopeA, job.id);
     expect(foundA).toBeDefined();
+  });
+
+  // ── reclaimStaleProcessingJobs ────────────────────────────────────────────
+
+  describe('reclaimStaleProcessingJobs', () => {
+    it('reclaims a job stuck in processing past the threshold, failing only its pending events', async () => {
+      const teamId = freshTeamId();
+      const projectId = freshProjectId();
+      await seedTeam(teamId);
+      await seedProject(teamId, projectId);
+      await seedEvent(teamId, projectId, 'evt_compiled');
+      await seedEvent(teamId, projectId, 'evt_pending');
+
+      const { job } = await createJob(
+        db,
+        makeCreateJobRequest(teamId, projectId, { eventCount: 2 }),
+      );
+      await claimJob(db, teamId, projectId, job.id);
+      // Simulate a worker that claimed this job 20 minutes ago and then died
+      // mid-processing — well past any reasonable staleness threshold.
+      await db.execute(
+        sql`UPDATE jobs SET started_at = now() - interval '20 minutes' WHERE id = ${job.id}`,
+      );
+
+      await upsertJobEvent(db, {
+        teamId,
+        projectId,
+        jobId: job.id,
+        eventId: 'evt_compiled',
+        status: 'compiled',
+      });
+      await upsertJobEvent(db, {
+        teamId,
+        projectId,
+        jobId: job.id,
+        eventId: 'evt_pending',
+        status: 'pending',
+      });
+
+      const reclaimed = await reclaimStaleProcessingJobs(db, 10 * 60_000);
+
+      expect(reclaimed).toHaveLength(1);
+      expect(reclaimed[0]!.id).toBe(job.id);
+      expect(reclaimed[0]!.status).toBe('failed');
+      expect(reclaimed[0]!.error).toMatchObject({ code: 'worker_interrupted' });
+      expect(reclaimed[0]!.finishedAt).toBeInstanceOf(Date);
+
+      const events = await getJobEvents(db, teamId, projectId, job.id);
+      const compiled = events.find((e) => e.eventId === 'evt_compiled');
+      const pending = events.find((e) => e.eventId === 'evt_pending');
+      // Already-compiled events are untouched, same guarantee as an
+      // ordinary "retry failed" — the dead worker's redo shouldn't
+      // re-charge an LLM call for work that already succeeded.
+      expect(compiled!.status).toBe('compiled');
+      // The event the dead worker never got to is now `failed`, so the
+      // existing "Retry failed" mode picks it back up.
+      expect(pending!.status).toBe('failed');
+      expect(pending!.error).toMatchObject({ code: 'worker_interrupted' });
+    });
+
+    it('does not reclaim a job still within the staleness threshold', async () => {
+      const teamId = freshTeamId();
+      const projectId = freshProjectId();
+      await seedTeam(teamId);
+      await seedProject(teamId, projectId);
+      await seedEvent(teamId, projectId, 'evt_a');
+
+      const { job } = await createJob(db, makeCreateJobRequest(teamId, projectId));
+      await claimJob(db, teamId, projectId, job.id); // started_at = now()
+
+      const reclaimed = await reclaimStaleProcessingJobs(db, 10 * 60_000);
+
+      expect(reclaimed).toHaveLength(0);
+      const current = await getJob(db, projectScope(teamId, projectId), job.id);
+      expect(current!.status).toBe('processing');
+    });
+
+    it('does not touch queued, completed, or failed jobs', async () => {
+      const teamId = freshTeamId();
+      const projectId = freshProjectId();
+      await seedTeam(teamId);
+      await seedProject(teamId, projectId);
+
+      const { job: queuedJob } = await createJob(
+        db,
+        makeCreateJobRequest(teamId, projectId, { idempotencyKey: 'k1' }),
+      );
+      const { job: completedJob } = await createJob(
+        db,
+        makeCreateJobRequest(teamId, projectId, { idempotencyKey: 'k2' }),
+      );
+      await updateJobStatus(db, teamId, projectId, completedJob.id, 'completed');
+      const { job: failedJob } = await createJob(
+        db,
+        makeCreateJobRequest(teamId, projectId, { idempotencyKey: 'k3' }),
+      );
+      await updateJobStatus(db, teamId, projectId, failedJob.id, 'failed', {
+        error: { code: 'x', message: 'x' },
+      });
+
+      // A threshold of 0ms would reclaim any `processing` job regardless of
+      // age — proves the status filter, not just the age filter, is doing
+      // the excluding here.
+      const reclaimed = await reclaimStaleProcessingJobs(db, 0);
+
+      expect(reclaimed).toHaveLength(0);
+      expect(
+        (await getJob(db, projectScope(teamId, projectId), queuedJob.id))!.status,
+      ).toBe('queued');
+      expect(
+        (await getJob(db, projectScope(teamId, projectId), completedJob.id))!.status,
+      ).toBe('completed');
+      expect(
+        (await getJob(db, projectScope(teamId, projectId), failedJob.id))!.status,
+      ).toBe('failed');
+    });
   });
 
   // ── Database constraint enforcement ──────────────────────────────────────
