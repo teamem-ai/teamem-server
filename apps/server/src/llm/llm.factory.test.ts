@@ -599,9 +599,145 @@ describe('structured — repairs a raw control char inside a JSON string value',
     expect(result.output).toEqual({ answer: 'line one\nline two', count: 3 });
   });
 
+  it('repairs an under-escaped backslash inside a string (PHP-namespace case)', async () => {
+    // JS source `\\M` is a single backslash + M at runtime, so this content
+    // holds `App\Models\User` with single backslashes — an illegal JSON
+    // escape (`\M`, `\U`) exactly like Claude 3 Haiku emits for PHP FQCNs.
+    const brokenContent = '{"answer": "uses App\\Models\\User", "count": 4}';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: brokenContent } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-repair-backslash',
+    });
+
+    // The literal-backslash reading is the intended one for a namespace.
+    expect(result.output).toEqual({ answer: 'uses App\\Models\\User', count: 4 });
+  });
+
+  it('extracts JSON the model wrapped in a prose preamble (F2 "Based on the analysis…" case)', async () => {
+    const wrapped =
+      'Based on the analysis of the candidate concepts, the relationship is:\n\n' +
+      '{"answer": "Postgres", "count": 7}';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: wrapped } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-prose-pre',
+    });
+
+    expect(result.output).toEqual({ answer: 'Postgres', count: 7 });
+  });
+
+  it('extracts JSON with both a prose preamble and a trailing explanation', async () => {
+    const wrapped =
+      'After analyzing, I determined the following:\n\n' +
+      '{"answer": "Postgres", "count": 7}\n\n' +
+      'Rationale: it is the closest existing concept.';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: wrapped } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-prose-both',
+    });
+
+    expect(result.output).toEqual({ answer: 'Postgres', count: 7 });
+  });
+
+  it('strips a Markdown ```json code fence around the JSON', async () => {
+    const fenced = '```json\n{"answer": "Postgres", "count": 7}\n```';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: fenced } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-fence',
+    });
+
+    expect(result.output).toEqual({ answer: 'Postgres', count: 7 });
+  });
+
+  it('combines extraction with control-char repair (prose wrapper + literal newline inside the JSON)', async () => {
+    const wrapped =
+      'Here is the result:\n\n{"answer": "line one\nline two", "count": 3}';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: wrapped } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-prose-plus-newline',
+    });
+
+    expect(result.output).toEqual({ answer: 'line one\nline two', count: 3 });
+  });
+
   it('still throws schema_validation_failed when the content is unrepairable', async () => {
     // Missing closing brace — a genuinely malformed payload, not just a raw
-    // control char. The repair pass must not mask this as a false success.
+    // control char. The repair/extraction passes must not mask this as a
+    // false success.
     const brokenContent = '{"answer": "Postgres", "count": 3';
     const fetch = makeRecorder(
       () =>
@@ -622,6 +758,34 @@ describe('structured — repairs a raw control char inside a JSON string value',
         systemPrompt: 'sys',
         userPrompt: 'usr',
         requestId: 'req-unrepairable',
+      }),
+    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+  });
+
+  it('leaves an unescaped inner double-quote as an honest schema_validation_failed (not fabricated content)', async () => {
+    // `the "from" address` with the inner quotes unescaped: where the string
+    // value really ends is ambiguous, so this stays a genuine failure rather
+    // than risk inventing content by guessing.
+    const brokenContent = '{"answer": "the "from" address", "count": 3}';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: brokenContent } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-unescaped-quote',
       }),
     ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
   });

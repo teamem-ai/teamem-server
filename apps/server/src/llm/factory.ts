@@ -462,43 +462,64 @@ function buildRequest(
 /* Response parsing                                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/** The characters JSON permits immediately after a backslash inside a string. */
+const VALID_JSON_ESCAPE_CHARS = new Set([
+  '"',
+  '\\',
+  '/',
+  'b',
+  'f',
+  'n',
+  'r',
+  't',
+  'u',
+]);
+
 /**
- * Escape raw control characters (literal newline/CR/tab) found *inside* a
- * JSON string literal, leaving everything else — including already-correct
- * `\n`/`\r`/`\t` escape sequences — untouched.
+ * Repair two classes of JSON-spec violation a weak model commits *inside* a
+ * string literal, leaving well-formed content untouched:
  *
- * Real-world cause this repairs: `finish_reason: "stop"` (not truncated —
- * generation completed normally), yet `JSON.parse` still throws, because a
- * model asked for a long free-text field (F1 `body`, F2 `mergedBody`) wrote
- * genuine paragraph breaks as literal newline bytes instead of the two-
- * character `\n` escape the JSON spec requires inside a string. Not every
- * provider/model routed through an OpenAI-compatible endpoint enforces
- * strict JSON encoding of its own `response_format` output — `response_format`
- * still constrains the *shape*, but a model that isn't running fully
- * grammar-constrained decoding can still emit an illegal raw control byte
- * inside a string value while getting the surrounding structure right.
+ *  1. Raw control characters — a genuine paragraph break written as a literal
+ *     newline byte instead of the two-character `\n` escape the spec requires.
+ *  2. Invalid escape sequences — a lone backslash the model meant literally
+ *     but did not double, e.g. a PHP namespace `App\Models\User` written with
+ *     single backslashes, so `\M` is an illegal JSON escape. We assume the
+ *     literal-backslash reading (the only one that ever produced these) and
+ *     double it to `\\M`.
+ *
+ * Real-world cause: `finish_reason: "stop"` (generation completed normally),
+ * yet `JSON.parse` still throws. A model routed through an OpenAI-compatible
+ * `response_format` endpoint that isn't running fully grammar-constrained
+ * decoding constrains the output *shape* but can still mis-encode the *bytes*
+ * of a long free-text field (F1 `body`, F2 `mergedBody`).
  *
  * This is wire-format leniency, not "free text + regex parsing" (§5.2's red
- * line): the provider-native structured-output mechanism (forced tool use /
- * `response_format: json_schema`) is unchanged, and the Zod schema is still
- * the final authority on every field's shape and content after this runs —
- * this only widens what counts as valid JSON syntax before that check.
- *
- * Tracks `\`-escaping so it never turns an already-escaped `\n` (backslash
- * then `n`) into a double-escaped `\\n`, and tracks unescaped `"` to know
- * whether the current character is inside a string literal at all.
+ * line): the provider-native structured-output mechanism is unchanged and the
+ * Zod schema remains the sole authority on every field after this runs — this
+ * only widens what counts as valid JSON *syntax* before that check. It does
+ * NOT attempt to repair an unescaped inner double-quote (e.g. a body that
+ * writes `the "from" address` without escaping): where a string literal
+ * actually ends is then genuinely ambiguous, and guessing would risk
+ * fabricating content — that failure mode stays an honest
+ * `schema_validation_failed`.
  */
-function repairUnescapedJsonControlChars(raw: string): string {
+function repairJsonStringLiterals(raw: string): string {
   let result = '';
   let inString = false;
   let escaped = false;
   for (const ch of raw) {
     if (escaped) {
-      result += ch;
       escaped = false;
+      // `ch` follows a backslash inside a string. If it isn't a valid escape,
+      // the model meant a literal backslash — we already emitted one `\`, so
+      // add a second to form `\\` before this char.
+      if (!VALID_JSON_ESCAPE_CHARS.has(ch)) {
+        result += '\\';
+      }
+      result += ch;
       continue;
     }
-    if (ch === '\\') {
+    if (inString && ch === '\\') {
       result += ch;
       escaped = true;
       continue;
@@ -528,21 +549,92 @@ function repairUnescapedJsonControlChars(raw: string): string {
 }
 
 /**
- * Parse a provider's JSON string, retrying once with
- * {@link repairUnescapedJsonControlChars} if the first attempt fails. Throws
- * the original error when even the repaired text won't parse, so the caller's
- * error handling/diagnostics see the same failure they always would have.
+ * Extract the outermost JSON value ({...} or [...]) from a response the model
+ * wrapped in surrounding text, returning `null` when no such value is found.
+ *
+ * A weak model told (via `response_format`) to answer with JSON often still
+ * adds a prose preamble ("Based on the analysis, the relationship is:"), a
+ * trailing explanation, or a Markdown ```json code fence — none of which the
+ * spec allows, so `JSON.parse` of the whole response throws. Recovering the
+ * structured payload the model *did* produce from that wrapper is the same
+ * wire-format leniency as {@link repairJsonStringLiterals} and
+ * {@link unwrapEnvelope}: the extracted value is still handed to the Zod
+ * schema, which stays the sole authority on whether it's acceptable.
+ *
+ * Scans with brace/bracket depth while respecting string literals and escapes,
+ * so a `{` or `}` inside a string value never mis-terminates the scan.
  */
-function parseJsonLeniently(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch (firstErr) {
-    try {
-      return JSON.parse(repairUnescapedJsonControlChars(raw));
-    } catch {
-      throw firstErr;
+function extractJsonValue(raw: string): string | null {
+  let s = raw.trim();
+  // Strip a Markdown code fence (```json … ``` or ``` … ```) if present.
+  const fence = s.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
+  if (fence?.[1] !== undefined) {
+    s = fence[1].trim();
+  }
+
+  const start = s.search(/[{[]/);
+  if (start === -1) return null;
+  const open = s[start];
+  const close = open === '{' ? '}' : ']';
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === open) {
+      depth++;
+    } else if (ch === close) {
+      depth--;
+      if (depth === 0) {
+        return s.slice(start, i + 1);
+      }
     }
   }
+  return null;
+}
+
+/**
+ * Parse a provider's JSON string, escalating through progressively more
+ * tolerant recovery steps and throwing the ORIGINAL parse error if none
+ * succeed — so diagnostics still show the raw failure the model actually
+ * produced. Each step only widens accepted JSON *syntax*; the Zod schema
+ * downstream remains the authority on content (§5.2).
+ *
+ * Order matters: try the raw text first (the common, well-formed case), then
+ * string-literal repair, then extraction from a prose/fence wrapper, then
+ * both together (a wrapped payload whose inner JSON also has raw control
+ * chars or under-escaped backslashes — both seen together in real F2 output).
+ */
+function parseJsonLeniently(raw: string): unknown {
+  const candidates = [raw, repairJsonStringLiterals(raw)];
+  const extracted = extractJsonValue(raw);
+  if (extracted !== null && extracted !== raw) {
+    candidates.push(extracted, repairJsonStringLiterals(extracted));
+  }
+
+  let firstErr: unknown;
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch (err) {
+      if (firstErr === undefined) firstErr = err;
+    }
+  }
+  throw firstErr;
 }
 
 interface Extracted {
