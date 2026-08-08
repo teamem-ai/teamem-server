@@ -17,6 +17,7 @@ import { runMigrations } from './db/migrate.js';
 import { createCompileQueue } from './queue/boss.js';
 import { startEmbeddedWorker } from './worker/embedded.js';
 import { createCompileJobHandler } from './queue/worker.js';
+import { startStaleJobReclaimer } from './queue/stale-job-reclaimer.js';
 import { createTeamLlmResolver } from './llm/resolve-team-llm.js';
 import { createEmbeddingClient } from './llm/embedding/factory.js';
 import { startServer } from './server.js';
@@ -138,7 +139,18 @@ export function createRuntimeStartup(config: {
         fallback: llmProvider,
       });
       const handler = createCompileJobHandler({ db: dbHandle.db, resolveLlm });
-      return startEmbeddedWorker(queue, handler);
+      const embeddedWorker = await startEmbeddedWorker(queue, handler);
+      // Recover jobs a previous process left stuck in `processing` when it
+      // was killed mid-job (see stale-job-reclaimer.ts) — otherwise those
+      // rows never reach a terminal state and `/retry` keeps rejecting them
+      // as "already running".
+      const staleJobReclaimer = startStaleJobReclaimer(dbHandle.db);
+      return {
+        async stop() {
+          staleJobReclaimer.stop();
+          await embeddedWorker.stop();
+        },
+      };
     },
   };
 }

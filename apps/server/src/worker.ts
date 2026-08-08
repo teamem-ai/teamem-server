@@ -19,6 +19,7 @@ import { parseServerEnv } from './config/env.js';
 import { fatalStartup, installShutdownHandlers } from './lifecycle.js';
 import { createCompileQueue } from './queue/boss.js';
 import { createCompileJobHandler } from './queue/worker.js';
+import { startStaleJobReclaimer } from './queue/stale-job-reclaimer.js';
 import { createTeamLlmResolver } from './llm/resolve-team-llm.js';
 import { createDbHandle } from './db/client.js';
 import type { CompileJobHandler } from './queue/boss.js';
@@ -55,7 +56,14 @@ export async function runWorker(): Promise<void> {
   await queue.start();
   await queue.work(handler);
 
+  // Recover jobs a previous worker process left stuck in `processing` when
+  // it was killed mid-job (see stale-job-reclaimer.ts) — otherwise those
+  // rows never reach a terminal state and `/retry` keeps rejecting them as
+  // "already running".
+  const staleJobReclaimer = startStaleJobReclaimer(db);
+
   installShutdownHandlers(async () => {
+    staleJobReclaimer.stop();
     await queue.offWork();
     await queue.stop();
     await dbHandle.close();
