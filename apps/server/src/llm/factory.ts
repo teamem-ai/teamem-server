@@ -144,12 +144,20 @@ export function createLlmClient(
 /**
  * Redact secrets and bound the length of a string before it is logged. Strips
  * Bearer tokens and `sk_`/`tok_`/`tm_`-style keys, and caps the length.
+ *
+ * The cap used to be 800 chars, which was tight enough that a genuinely
+ * truncated response and a merely long-but-complete one were visually
+ * indistinguishable in the log line — the debug log's own cap looked exactly
+ * like a max_tokens cutoff either way, defeating its purpose as a diagnostic.
+ * 4000 is still bounded (this path is opt-in via TEAMEM_LLM_DEBUG and never
+ * persisted — §5.3 only forbids retaining this in the database/audit trail),
+ * but large enough to show the actual end of most real F1/F2 outputs.
  */
 function scrubForDebug(s: string): string {
   return s
     .replace(/Bearer\s+[^\s"']+/gi, 'Bearer [REDACTED]')
     .replace(/\b(sk|tok|tm)[_-][A-Za-z0-9_-]+/g, '$1_[REDACTED]')
-    .slice(0, 800);
+    .slice(0, 4000);
 }
 
 /**
@@ -516,11 +524,15 @@ function parseOpenAiFamily(
   try {
     value = JSON.parse(content);
   } catch {
+    // Report the actual finish_reason value (not just whether it matched
+    // "length") — OpenRouter proxies arbitrary backing models, and a model
+    // that doesn't normalize to OpenAI's exact vocabulary would otherwise
+    // silently fail the `truncated` check with no trace of why.
     logLlmDebug(
       provider,
       requestId,
-      'schema_validation_failed',
-      `model content was not valid JSON${truncated ? ' (finish_reason: length)' : ''}: ${content}`,
+      truncated ? 'output_truncated' : 'schema_validation_failed',
+      `model content was not valid JSON (finish_reason: ${JSON.stringify(first.finish_reason)}): ${content}`,
     );
     throw new LlmError(
       truncated ? 'output_truncated' : 'schema_validation_failed',

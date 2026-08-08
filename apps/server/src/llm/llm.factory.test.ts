@@ -993,6 +993,63 @@ describe('TEAMEM_LLM_DEBUG diagnostic logging', () => {
     expect(warn.mock.calls.some((c) => String(c[0]).includes('llm_debug'))).toBe(false);
   });
 
+  it('logs kind: output_truncated (not schema_validation_failed) and the raw finish_reason when content is cut off by the token limit', async () => {
+    process.env['TEAMEM_LLM_DEBUG'] = '1';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'length', message: { content: '{"answer": "Post' } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({ schema: answerSchema, systemPrompt: 's', userPrompt: 'u', requestId: 'req-dbg-trunc' }),
+    ).rejects.toMatchObject({ kind: 'output_truncated' });
+
+    const line = warn.mock.calls.map((c) => String(c[0])).find((s) => s.includes('llm_debug'));
+    expect(line).toBeDefined();
+    const parsed = JSON.parse(line!);
+    expect(parsed.kind).toBe('output_truncated');
+    expect(parsed.detail).toContain('finish_reason: "length"');
+  });
+
+  it('logs the actual finish_reason value (not just a boolean) so a non-"length" truncation signal is still visible', async () => {
+    process.env['TEAMEM_LLM_DEBUG'] = '1';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'some-model',
+            // A backing model proxied through OpenRouter that doesn't
+            // normalize to OpenAI's exact "length" vocabulary — the debug
+            // log must still surface what it actually said.
+            choices: [{ finish_reason: 'max_tokens', message: { content: '{"answer": "Post' } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient({ kind: 'openrouter', apiKey: API_KEYS.openrouter }, { fetch });
+
+    await expect(
+      client.structured({ schema: answerSchema, systemPrompt: 's', userPrompt: 'u', requestId: 'req-dbg-other' }),
+    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+
+    const line = warn.mock.calls.map((c) => String(c[0])).find((s) => s.includes('llm_debug'));
+    expect(line).toBeDefined();
+    const parsed = JSON.parse(line!);
+    expect(parsed.kind).toBe('schema_validation_failed');
+    expect(parsed.detail).toContain('finish_reason: "max_tokens"');
+  });
+
   it('scrubs secrets from a logged http_error body', async () => {
     process.env['TEAMEM_LLM_DEBUG'] = '1';
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
