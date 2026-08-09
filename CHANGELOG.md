@@ -8,6 +8,37 @@ The format follows Keep a Changelog, and releases use Semantic Versioning.
 
 ### Added
 
+- License boundary audit (`pnpm license:check`): enforces root/server/web
+  AGPL-3.0-only and `packages/schema` MIT with no bleed — wrong declared
+  license, missing/incorrect LICENSE text, AGPL deps or imports leaking into
+  the MIT package, and missing LICENSE in the npm pack all fail the check.
+  Runs in CI (`licenses`) and in the release verification workflow.
+- Release hygiene guard (`.github/scripts/check-no-deploy.mjs`): the release
+  workflow must never deploy to a hosted environment; the marker scan runs on
+  every PR and again at tag time.
+- CI `build` job: server + web SPA must build on every PR, not only at release.
+- CI `release-hygiene` job for the no-deploy guard.
+- `docs/release-checklist.md`: pre-tag gates, release-note/demo-GIF placement
+  contract (founder-owned content), and post-release verification runbook.
+- Release verification workflow now runs the DB-backed integration suite
+  against real PostgreSQL/pgvector (previously only unit tests ran), plus the
+  license boundary audit.
+- Compose smoke CI — `required / compose (standard|all-in-one)`: both
+  deployment topologies are boot-tested on every PR (password enforcement,
+  health/readiness, migrations, bootstrap → ingest → compile job → worker,
+  scaling safety, SIGTERM), and a `compose` gate in the release workflow
+  blocks GitHub Release/GHCR publish if the container does not boot. The
+  smoke script previously existed but was never wired into CI; running it
+  caught a container startup crash that a build-only check cannot see.
+- `check-no-deploy.mjs` is now a side-effect-free module with a guarded CLI
+  entry point: importing it from `verify-release.mjs` no longer treats the
+  release tag as a workflow path (tag-time verification previously crashed
+  with ENOENT before reaching any check).
+- LLM provider-connection tests in the DB-backed integration suite are
+  hermetic: the provider HTTP boundary is faked via a `fetchImpl` seam, and
+  the live real-provider round-trip is opt-in (`TEAMEM_LLM_LIVE_TEST=1`).
+  The required `postgres` job no longer depends on outbound
+  api.openai.com reachability — that dependency is what made CI red on main.
 - Initial repository, frozen v0.2 contracts, database schema, and M0 architecture groundwork.
 - Job retry distinguishes **Retry failed** (re-run only the failed events) from **Retry all**, mirroring CI re-run semantics; failed events are re-run without redoing already compiled/skipped ones.
 - Jobs that finish with a mix of compiled and failed events show a distinct **Completed with errors** status instead of a plain **Completed**.

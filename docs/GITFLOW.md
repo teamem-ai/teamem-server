@@ -162,6 +162,10 @@ version and `schema-vX.Y.Z` tag stream; product releases do not bump it.
 
 Releases are deliberate, not created on every merge.
 
+> Run the concrete gate list, release-note/demo-GIF placement contract, and
+> post-release verification in [`docs/release-checklist.md`](./release-checklist.md)
+> before and after step 8.
+
 1. Decide the next version from merged `semver:*` labels.
 2. Create `release/vX.Y.Z` from current `main`.
 3. Update the version in:

@@ -16,6 +16,34 @@ import { globalErrorHandler, notFoundHandler } from '../errors.js';
 const url = process.env['TEST_DATABASE_URL'];
 
 /**
+ * Fake provider transport for the DB-backed CI job (M3-REL-01).
+ *
+ * The endpoint's outbound calls to api.openai.com & co are not guaranteed to
+ * be reachable from a CI runner; a real call with an invalid key timed out
+ * `required / postgres` on main and blocked every release. Only the external
+ * HTTP boundary is faked — Postgres, sessions, RBAC, and the provider
+ * decision logic remain real.
+ */
+function fakeProviderFetch(
+  options: { networkError?: boolean } = {},
+): typeof fetch {
+  return async (input, init) => {
+    if (options.networkError) {
+      throw new TypeError('fetch failed: network unreachable');
+    }
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    const auth = headers['Authorization'] ?? '';
+    // Mirror a real provider: the magic valid key is accepted (200), every
+    // other key is rejected as invalid (401).
+    const ok = auth === 'Bearer sk-valid-test-key';
+    return new Response(JSON.stringify({ data: [] }), {
+      status: ok ? 200 : 401,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+}
+
+/**
  * We run the suite only when a real Postgres is available. The skipped
  * count is reported so CI can surface the missing database signal.
  */
@@ -37,7 +65,12 @@ describe.skipIf(!url)('LLM Config Routes — live Postgres', () => {
     app.use('*', requestContext);
     app.onError(globalErrorHandler);
     app.notFound(notFoundHandler);
-    app.route('/', buildLlmConfigRoutes({ db }));
+    // The fake transport keeps the DB-backed CI job hermetic: outbound calls
+    // to api.openai.com & co are not guaranteed reachable from a runner and
+    // made `required / postgres` time out (M3-REL-01). The endpoint logic
+    // (real Postgres sessions/RBAC/provider decision) is what we test; only
+    // the external HTTP boundary is faked, which is the sanctioned seam.
+    app.route('/', buildLlmConfigRoutes({ db, fetchImpl: fakeProviderFetch() }));
   });
 
   afterAll(async () => {
@@ -221,23 +254,49 @@ describe.skipIf(!url)('LLM Config Routes — live Postgres', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('POST /v1/teams/:teamId/llm/test', () => {
-    // This test makes a REAL call to the provider endpoint with an invalid
-    // key and expects the endpoint to report ok:false. The endpoint itself
-    // allows the provider round-trip up to 10s (testProviderConnection's
-    // AbortController), but vitest's 5s default timeout killed the test
-    // mid-flight on slow CI networks (observed repeatedly on main). Give it
-    // headroom above the endpoint's own abort so the end-to-end check is
-    // reliable without mocking the provider.
-    it(
-      'returns not-ok for an invalid real key',
+    // Hermetic by default: the shared app injects a fake provider transport
+    // (fakeProviderFetch), so this suite never depends on api.openai.com being
+    // reachable from a CI runner. A rejected key maps to the endpoint's
+    // "not-ok" decision. The live provider round-trip is covered separately,
+    // opt-in via TEAMEM_LLM_LIVE_TEST=1.
+    it('returns not-ok when the provider rejects the key (401)', async () => {
+      const userId = await createUser(nextGithubId(), 'llmadmin');
+      const teamId = await createTeam('LLM Test Team');
+      await createProject(teamId, 'LLM Project');
+      await addMembership(userId, teamId, 'admin');
+      const sessionToken = await createSession(userId);
+
+      const res = await app.request(`/v1/teams/${teamId}/llm/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openai', apiKey: 'sk-invalid-test-key' }),
+      });
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data.ok).toBe(false);
+    });
+
+    // Live provider round-trip check. Opt in with TEAMEM_LLM_LIVE_TEST=1;
+    // deliberately skipped otherwise so the required DB-backed CI job never
+    // depends on outbound provider reachability (that dependency is what made
+    // `required / postgres` red on main in the first place).
+    it.skipIf(process.env['TEAMEM_LLM_LIVE_TEST'] !== '1')(
+      'returns not-ok against the real provider (live, opt-in)',
       async () => {
+        const live = new Hono();
+        live.use('*', requestContext);
+        live.onError(globalErrorHandler);
+        live.notFound(notFoundHandler);
+        live.route('/', buildLlmConfigRoutes({ db, fetchImpl: fetch })); // real transport
+
         const userId = await createUser(nextGithubId(), 'llmadmin');
-        const teamId = await createTeam('LLM Test Team');
+        const teamId = await createTeam('LLM Live Team');
         await createProject(teamId, 'LLM Project');
         await addMembership(userId, teamId, 'admin');
         const sessionToken = await createSession(userId);
 
-        const res = await app.request(`/v1/teams/${teamId}/llm/test`, {
+        const res = await live.request(`/v1/teams/${teamId}/llm/test`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
           body: JSON.stringify({ provider: 'openai', apiKey: 'sk-invalid-test-key' }),
@@ -247,8 +306,51 @@ describe.skipIf(!url)('LLM Config Routes — live Postgres', () => {
         const json = await res.json();
         expect(json.data.ok).toBe(false);
       },
-      { timeout: 15_000 },
     );
+
+    it('returns ok when the provider accepts the key (200)', async () => {
+      const userId = await createUser(nextGithubId(), 'llmadmin');
+      const teamId = await createTeam('LLM Ok Team');
+      await createProject(teamId, 'LLM Project');
+      await addMembership(userId, teamId, 'admin');
+      const sessionToken = await createSession(userId);
+
+      const res = await app.request(`/v1/teams/${teamId}/llm/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openai', apiKey: 'sk-valid-test-key' }),
+      });
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data.ok).toBe(true);
+    });
+
+    it('returns not-ok without a crash when the provider is unreachable', async () => {
+      const bounced = new Hono();
+      bounced.use('*', requestContext);
+      bounced.onError(globalErrorHandler);
+      bounced.notFound(notFoundHandler);
+      // A network failure (DNS/connect/timeout) maps to not-ok, not a 500.
+      bounced.route('/', buildLlmConfigRoutes({ db, fetchImpl: fakeProviderFetch({ networkError: true }) }));
+
+      const userId = await createUser(nextGithubId(), 'llmadmin');
+      const teamId = await createTeam('LLM Bounce Team');
+      await createProject(teamId, 'LLM Project');
+      await addMembership(userId, teamId, 'admin');
+      const sessionToken = await createSession(userId);
+
+      const res = await bounced.request(`/v1/teams/${teamId}/llm/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openai', apiKey: 'sk-invalid-test-key' }),
+      });
+
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.data.ok).toBe(false);
+      expect(json.data.latencyMs).toBeNull();
+    });
 
     it('rejects viewer from testing (403)', async () => {
       const userId = await createUser(nextGithubId(), 'llmviewer');

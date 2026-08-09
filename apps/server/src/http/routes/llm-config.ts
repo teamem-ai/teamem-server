@@ -37,6 +37,13 @@ import { encryptApiKey, decryptApiKey } from '../../llm/encrypt-key.js';
 
 export interface LlmConfigDeps {
   db: AppDb;
+  /**
+   * Transport used for outbound provider calls. Production code never sets
+   * this — it defaults to the global fetch. Integration tests inject a fake
+   * so the DB-backed CI job stays hermetic (no dependency on api.openai.com
+   * being reachable from a runner).
+   */
+  fetchImpl?: typeof fetch;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -106,6 +113,7 @@ const PROVIDER_MODELS_URLS: Record<LlmProvider, string> = {
 async function listProviderModels(
   provider: LlmProvider,
   apiKey: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<string[]> {
   let url = PROVIDER_MODELS_URLS[provider];
   if (provider === 'custom' && url) {
@@ -126,7 +134,7 @@ async function listProviderModels(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
-    const res = await fetch(url, { headers, signal: controller.signal });
+    const res = await fetchImpl(url, { headers, signal: controller.signal });
     if (!res.ok) {
       throw new Error(`provider returned ${res.status}`);
     }
@@ -145,6 +153,7 @@ async function listProviderModels(
 async function testProviderConnection(
   provider: LlmProvider,
   apiKey: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<{ ok: boolean; latencyMs: number | null }> {
   const start = Date.now();
   const controller = new AbortController();
@@ -169,7 +178,7 @@ async function testProviderConnection(
       headers['Authorization'] = `Bearer ${apiKey}`;
     }
 
-    const res = await fetch(url, { headers, signal: controller.signal });
+    const res = await fetchImpl(url, { headers, signal: controller.signal });
     const latencyMs = Date.now() - start;
 
     // Only HTTP 200 means the key was accepted. 401 means the endpoint exists
@@ -186,6 +195,7 @@ async function testProviderConnection(
 
 export function buildLlmConfigRoutes(deps: LlmConfigDeps): Hono {
   const { db } = deps;
+  const fetchImpl = deps.fetchImpl ?? fetch;
   const routes = new Hono();
 
   routes.use('/v1/teams/:teamId/llm', requireWebSession(db));
@@ -369,7 +379,7 @@ export function buildLlmConfigRoutes(deps: LlmConfigDeps): Hono {
         }
       }
 
-      const result = await testProviderConnection(testProvider, testKey);
+      const result = await testProviderConnection(testProvider, testKey, fetchImpl);
 
       // Update last_test results
       try {
@@ -444,7 +454,7 @@ export function buildLlmConfigRoutes(deps: LlmConfigDeps): Hono {
 
       let models: string[];
       try {
-        models = await listProviderModels(provider, key);
+        models = await listProviderModels(provider, key, fetchImpl);
       } catch {
         // Provider unreachable or key rejected — surface as a client-facing
         // failure so the picker can prompt the user to check the key. The

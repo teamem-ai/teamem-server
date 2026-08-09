@@ -16,6 +16,7 @@
     "lint": "eslint .",
     "typecheck": "pnpm -r run typecheck && pnpm run typecheck:scripts",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json",
+    "license:check": "node scripts/check-licenses.mjs",
     "test": "vitest run --passWithNoTests",
     "db:generate": "pnpm --filter @teamem/server db:generate",
     "db:migrate": "pnpm --filter @teamem/server db:migrate",
