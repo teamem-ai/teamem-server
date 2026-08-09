@@ -9,13 +9,17 @@
  * on every PR (ci.yml) and again at tag time (verify-release.mjs) so a future
  * change that sneaks a deploy step into release.yml fails fast in both places.
  *
- * Usage:
+ * The module is side-effect free when imported: `verify-release.mjs` imports
+ * `checkNoDeploy` and passes it the workflow path explicitly. The CLI entry
+ * point below only runs when this file is executed directly:
+ *
  *   node .github/scripts/check-no-deploy.mjs            # default: release.yml
  *   node .github/scripts/check-no-deploy.mjs <workflow> # custom path
  *
  * Exit code 0 = no deployment markers; non-zero = at least one hit.
  */
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 const FORBIDDEN_DEPLOY_PATTERNS = [
   /\bfly\.io\b/i,
@@ -34,7 +38,12 @@ const FORBIDDEN_DEPLOY_PATTERNS = [
 ];
 
 export function checkNoDeploy(workflowPath) {
-  const workflow = readFileSync(workflowPath, 'utf8');
+  let workflow;
+  try {
+    workflow = readFileSync(workflowPath, 'utf8');
+  } catch (error) {
+    throw new Error(`cannot read workflow ${workflowPath}: ${error.message}`);
+  }
   return workflow
     .split('\n')
     .map((line, index) => ({ line, index: index + 1 }))
@@ -42,16 +51,25 @@ export function checkNoDeploy(workflowPath) {
     .filter(({ line }) => FORBIDDEN_DEPLOY_PATTERNS.some((pattern) => pattern.test(line)));
 }
 
-const workflowPath = process.argv[2] ?? '.github/workflows/release.yml';
-const hits = checkNoDeploy(workflowPath);
+// CLI entry point — guarded so importing this module never executes it
+// (verify-release.mjs imports checkNoDeploy and hands it the workflow path;
+// in that context process.argv[2] is the release tag, not a file).
+const isDirectRun =
+  process.argv[1] !== undefined &&
+  pathToFileURL(process.argv[1]).href === import.meta.url;
 
-if (hits.length > 0) {
-  process.stderr.write(
-    `${workflowPath} must not deploy to a hosted environment; found deployment markers:\n` +
-      hits.map(({ line, index }) => `  line ${index}: ${line.trim()}`).join('\n') +
-      '\n',
-  );
-  process.exit(1);
+if (isDirectRun) {
+  const workflowPath = process.argv[2] ?? '.github/workflows/release.yml';
+  const hits = checkNoDeploy(workflowPath);
+
+  if (hits.length > 0) {
+    process.stderr.write(
+      `${workflowPath} must not deploy to a hosted environment; found deployment markers:\n` +
+        hits.map(({ line, index }) => `  line ${index}: ${line.trim()}`).join('\n') +
+        '\n',
+    );
+    process.exit(1);
+  }
+
+  process.stdout.write(`${workflowPath}: no hosted-environment deployment markers found.\n`);
 }
-
-process.stdout.write(`${workflowPath}: no hosted-environment deployment markers found.\n`);

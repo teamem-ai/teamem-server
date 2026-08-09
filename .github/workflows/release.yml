@@ -118,11 +118,33 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
+  compose:
+    name: verify compose topology (${{ matrix.mode }})
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        mode:
+          - standard
+          - all-in-one
+    env:
+      # Strong password only — the smoke script rejects weak/common ones.
+      POSTGRES_PASSWORD: ci-smoke-strong-password-8f3a9c
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./.github/actions/setup-pnpm
+      - name: Compose smoke test (${{ matrix.mode }})
+        run: bash scripts/m0-compose-smoke.sh --mode ${{ matrix.mode }}
+
   github-release:
     name: publish GitHub Release
     needs:
       - verify
       - container
+      - compose
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
