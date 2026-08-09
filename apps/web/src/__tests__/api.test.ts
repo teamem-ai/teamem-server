@@ -7,6 +7,7 @@ import {
   fetchProjects,
   searchConcepts,
   lookupInvite,
+  downloadExportFile,
 } from "@/lib/api";
 
 /**
@@ -226,6 +227,101 @@ describe("session scope endpoints", () => {
     const projects = await fetchProjects("team_1");
     expect(projects).toHaveLength(1);
     expect(projects[0]!.id).toBe("prj_1");
+  });
+});
+
+// ── OKF export (M3-EXPORT-05: consumes GET /v1/export) ──────────────────────
+
+describe("downloadExportFile", () => {
+  it("requests /v1/export with the projectId and returns the archive + server filename", async () => {
+    mockFetch.mockResolvedValue(
+      new Response(new Blob([new Uint8Array([31, 139, 8, 0])]), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/gzip",
+          "Content-Disposition": 'attachment; filename="web-app-okf-0.1.tar.gz"',
+        },
+      }),
+    );
+
+    const result = await downloadExportFile("prj_abc");
+    expect(result.filename).toBe("web-app-okf-0.1.tar.gz");
+    expect(result.blob.type).toBe("application/gzip");
+
+    const [url, init] = mockFetch.mock.calls[0]! as [string, RequestInit];
+    expect(url).toContain("/v1/export");
+    expect(new URL(url).searchParams.get("projectId")).toBe("prj_abc");
+    // Same-origin web session cookie, GET only.
+    expect((init as RequestInit).credentials).toBe("same-origin");
+  });
+
+  it("throws ApiError with the server envelope message on 403", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse(403, {
+        error: { code: "forbidden", message: "forbidden" },
+      }),
+    );
+
+    await expect(downloadExportFile("prj_abc")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 403,
+      code: "forbidden",
+      message: "forbidden",
+    });
+  });
+
+  it("throws AuditWriteFailedError when the export is blocked by a failed audit record (fail-closed, N7)", async () => {
+    mockFetch.mockResolvedValue(
+      jsonResponse(500, {
+        error: {
+          code: "internal",
+          message: "Export audit failed; download denied",
+          details: { audit_failed: true },
+        },
+      }),
+    );
+
+    await expect(downloadExportFile("prj_abc")).rejects.toMatchObject({
+      name: "AuditWriteFailedError",
+      status: 500,
+    });
+  });
+
+  it("throws ApiError for a non-JSON failure response instead of guessing", async () => {
+    mockFetch.mockResolvedValue(
+      new Response("oops", { status: 502, headers: { "Content-Type": "text/plain" } }),
+    );
+
+    await expect(downloadExportFile("prj_abc")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 502,
+    });
+  });
+
+  it("refuses a 200 that is not a gzip archive (contract violation, never a broken download)", async () => {
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ error: "html" }), {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+
+    await expect(downloadExportFile("prj_abc")).rejects.toMatchObject({
+      name: "ApiError",
+      code: "unexpected_response",
+    });
+  });
+
+  it("falls back to a deterministic filename when Content-Disposition is missing", async () => {
+    mockFetch.mockResolvedValue(
+      new Response(new Blob([new Uint8Array([1, 2, 3])]), {
+        status: 200,
+        headers: { "Content-Type": "application/gzip" },
+      }),
+    );
+
+    const result = await downloadExportFile("prj_abc");
+    expect(result.filename).toBe("teamem-okf-0.1.tar.gz");
   });
 });
 

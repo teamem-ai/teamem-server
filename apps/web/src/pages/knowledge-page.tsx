@@ -6,10 +6,11 @@ import { StatusBadge, type ConceptStatus } from "@/components/ui/status-badge";
 import { ConfidenceMeter } from "@/components/ui/confidence-meter";
 import { EmptyState } from "@/components/ui/empty-state";
 import { AvatarStack } from "@/components/ui/avatar-stack";
-import { DegradedBanner } from "@/components/ui/banner";
+import { Banner, DegradedBanner } from "@/components/ui/banner";
 import { ConceptRowSkeleton } from "@/components/ui/skeleton";
 import { ViewerInfoBanner } from "@/components/ui/permission-denied";
 import { fetchConcepts, searchConcepts, ApiError } from "@/lib/api";
+import { ExportOkfButton, useExportOkf } from "@/components/export/export-okf-button";
 import { useScope } from "@/lib/scope";
 import { relativeTime, formatFull } from "@/lib/date";
 import type { ConceptSummary, SearchResult } from "@teamem/schema";
@@ -57,6 +58,11 @@ export function KnowledgePage() {
   );
 
   const projectId = scope.projectId;
+
+  // OKF export entry (M3-EXPORT-05) — state machine for one download.
+  // projectId may be null (signed-out / no project): the hook guards the
+  // call and the button is only rendered once a real project is active.
+  const exportCtl = useExportOkf(projectId);
 
   const loadConcepts = useCallback(
     async (cursor?: string, append = false) => {
@@ -292,7 +298,38 @@ export function KnowledgePage() {
             carries its evidence.
           </p>
         </div>
+        {/* Export is member+ (server enforces the same gate); viewer never
+            sees the entry. Requires an active project to have something real
+            to package — without one the page already shows its honest
+            "No project yet" empty state. */}
+        {!isViewer && projectId && (
+          <div className="ph-actions">
+            <ExportOkfButton busy={exportCtl.busy} onDownload={exportCtl.download} />
+          </div>
+        )}
       </div>
+
+      {/* Export feedback — visible success (server-provided filename) or a
+          surfaced error with a retry; never a silent failure. */}
+      {exportCtl.feedback && (
+        <Banner
+          variant={exportCtl.feedback.variant}
+          className="mb-4"
+          role={exportCtl.feedback.variant === "error" ? "alert" : "status"}
+          actions={
+            exportCtl.feedback.variant === "error" ? (
+              <button
+                className="btn btn-sm btn-outline"
+                onClick={exportCtl.download}
+              >
+                Retry
+              </button>
+            ) : undefined
+          }
+        >
+          {exportCtl.feedback.message}
+        </Banner>
+      )}
 
       {/* Viewer info (role comes from the real session) */}
       {isViewer && <ViewerInfoBanner />}
