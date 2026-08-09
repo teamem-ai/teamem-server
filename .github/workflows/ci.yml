@@ -89,5 +89,12 @@ jobs:
           for migration in apps/server/drizzle/*.sql; do
             psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration"
           done
+      - name: Install uv (real okf-skills validator runtime, DUA-253)
+        # The okf-skills validator round-trip integration test runs the real
+        # upstream okf_validate.py via `uv run --script` (uv self-provisions
+        # pyyaml from the script's PEP 723 metadata). Without uv the test
+        # honestly SKIPS — a skip is never a pass — so CI installs uv to make
+        # the M3-EXPORT-06 exit check actually run.
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - name: Run tests against PostgreSQL/pgvector
         run: pnpm --filter @teamem/server test:integration
