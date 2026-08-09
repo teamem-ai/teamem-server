@@ -164,7 +164,15 @@ describe('concept (contract ①)', () => {
     lastConfirmed: '2026-07-10T09:30:00.000Z',
     schemaVersion: 1,
     firstSeen: '2026-05-12T00:00:00.000Z',
-    contributors: ['pri_01H'],
+    contributors: [
+      {
+        principalId: 'pri_01H',
+        kind: 'human',
+        provider: 'github',
+        displayName: 'octocat',
+        githubLogin: 'octocat',
+      },
+    ],
     evidence: [
       {
         kind: 'pr',

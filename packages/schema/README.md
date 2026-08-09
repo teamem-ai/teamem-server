@@ -20,7 +20,15 @@ compilations, concept/evidence, event, job, audit, and search DTOs.
 `CONTRACT_ADDITIVE_CHANGES`. The currently enumerated amendments are:
 
 - DUA-129: the generic connector persistence seam;
-- DUA-203: search request and response DTOs.
+- DUA-203: search request and response DTOs;
+- DUA-222: users/sessions/invites/memberships DTOs (M2 auth identity);
+- DUA-229: SessionStart context injection DTOs;
+- DUA-230: team/project governance + web-side key minting DTOs;
+- DUA-232: public invite-lookup response DTO;
+- DUA-234: concept contributor/evidence display refs;
+- DUA-248: OKF bundle format contract (bundle layout, per-concept
+  frontmatter with the canonical UUID preserved, `teamem://concept/<uuid>` →
+  relative Markdown link resolution — see `src/export.ts`).
 
 `src/contract.test.ts` pins both the frozen decisions and the additive
 changelog. Contract changes must remain explicit, versioned, impact-assessed,
