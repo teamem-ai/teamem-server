@@ -604,10 +604,12 @@ describe.skipIf(!url)('POST /v1/events (live Postgres)', () => {
       body: JSON.stringify(body),
     });
 
-    // Let the handler create the event + job (a single microtask tick is
-    // enough — the handler does all DB work synchronously before the first
-    // setTimeout in the poll loop).
-    await new Promise((r) => setTimeout(r, 50));
+    // Let the handler create the event + job (the handler does all DB work
+    // synchronously before the first setTimeout in the poll loop). 50ms proved
+    // too tight on loaded runners (flake cascade: the test then marked a stale
+    // or missing job and the real wait polled until the vitest timeout); 400ms
+    // absorbs scheduler hiccups while staying far under the 5s test budget.
+    await new Promise((r) => setTimeout(r, 400));
 
     // Find the newly-created job.
     const { rows: freshJobs } = await db.execute(

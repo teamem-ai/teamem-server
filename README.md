@@ -94,7 +94,9 @@ issue.
 
 Releases are versioned Git tags plus GitHub Releases and GHCR images. This
 repository publishes distributable artifacts; it does not deploy a hosted
-environment.
+environment. The [release checklist](./docs/release-checklist.md) is the
+pre-tag gate list, release-note/demo-GIF placement contract, and post-release
+verification runbook.
 
 ## Self-hosted deployment (≈ 30 minutes from zero)
 

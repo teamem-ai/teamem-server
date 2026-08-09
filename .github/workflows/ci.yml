@@ -29,6 +29,38 @@ jobs:
       - uses: ./.github/actions/setup-pnpm
       - run: pnpm lint
 
+  licenses:
+    name: required / licenses
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./.github/actions/setup-pnpm
+      - name: Audit the AGPL/MIT license boundary
+        run: pnpm license:check
+
+  release-hygiene:
+    name: required / release-hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Release automation must never deploy to a hosted environment
+        run: node .github/scripts/check-no-deploy.mjs
+
+  build:
+    name: required / build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: ./.github/actions/setup-pnpm
+      - name: Build server and web SPA
+        run: pnpm build
+
   typecheck:
     name: required / typecheck
     runs-on: ubuntu-latest

@@ -48,6 +48,8 @@ jobs:
         run: pnpm lint
       - name: Typecheck
         run: pnpm typecheck
+      - name: Audit the AGPL/MIT license boundary
+        run: pnpm license:check
       - name: Apply committed migrations
         shell: bash
         run: |
@@ -57,6 +59,8 @@ jobs:
           done
       - name: Test against PostgreSQL/pgvector
         run: pnpm test
+      - name: Run DB-backed integration tests against PostgreSQL/pgvector
+        run: pnpm --filter @teamem/server test:integration
 
   container:
     name: publish container

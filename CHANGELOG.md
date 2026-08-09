@@ -8,6 +8,21 @@ The format follows Keep a Changelog, and releases use Semantic Versioning.
 
 ### Added
 
+- License boundary audit (`pnpm license:check`): enforces root/server/web
+  AGPL-3.0-only and `packages/schema` MIT with no bleed — wrong declared
+  license, missing/incorrect LICENSE text, AGPL deps or imports leaking into
+  the MIT package, and missing LICENSE in the npm pack all fail the check.
+  Runs in CI (`licenses`) and in the release verification workflow.
+- Release hygiene guard (`.github/scripts/check-no-deploy.mjs`): the release
+  workflow must never deploy to a hosted environment; the marker scan runs on
+  every PR and again at tag time.
+- CI `build` job: server + web SPA must build on every PR, not only at release.
+- CI `release-hygiene` job for the no-deploy guard.
+- `docs/release-checklist.md`: pre-tag gates, release-note/demo-GIF placement
+  contract (founder-owned content), and post-release verification runbook.
+- Release verification workflow now runs the DB-backed integration suite
+  against real PostgreSQL/pgvector (previously only unit tests ran), plus the
+  license boundary audit.
 - Initial repository, frozen v0.2 contracts, database schema, and M0 architecture groundwork.
 - Job retry distinguishes **Retry failed** (re-run only the failed events) from **Retry all**, mirroring CI re-run semantics; failed events are re-run without redoing already compiled/skipped ones.
 - Jobs that finish with a mix of compiled and failed events show a distinct **Completed with errors** status instead of a plain **Completed**.
