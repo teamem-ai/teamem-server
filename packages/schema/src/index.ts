@@ -249,6 +249,37 @@ export const CONTRACT_ADDITIVE_CHANGES = [
     },
   },
   {
+    change: 'DUA-248: OKF bundle format contract (M3 export, contract + pure functions)',
+    summary:
+      'New export.ts module defining teamem\'s binding of the Open Knowledge ' +
+      'Format: a fixed bundle layout (reserved index.md catalog + log.md change ' +
+      'log + six per-type directories decisions/gotchas/conventions/runbooks/ ' +
+      'services/concepts), the per-concept YAML frontmatter (every concept DTO ' +
+      'field except body and the read-time evidenceCount, with the canonical ' +
+      'UUID always present), and the pure-function rule that resolves in-body ' +
+      'teamem://concept/<uuid> links to relative Markdown paths. Exports are ' +
+      'round-trip compatible: parseConceptPage(renderConceptPage(c)) recovers ' +
+      'the frontmatter exactly, which is what makes a future import endpoint ' +
+      '(SaaS backlog, not MVP) able to rebuild teamem identity from a bundle.',
+    impact: {
+      database: 'None — export is a read projection of existing concepts; no schema changes.',
+      api: 'None — no HTTP routes yet (M3-EXPORT-02 wires the writer; export is not an API feature).',
+      cli: 'None yet — the standalone CLI can consume the pure functions for local export when built.',
+      mcp: 'None — MCP serves concept pages, it does not export bundles.',
+      ui: 'None — apps/web does not consume the bundle format.',
+      compiler: "None — F1/F2 output stays concept DTOs; the bundle is derived at export time.",
+      export:
+        'This change IS the export contract surface: bundle layout, frontmatter ' +
+        'shape, link resolution, reserved-file rendering. Additive-only — no ' +
+        'existing contract entity is changed.',
+      externalTsConsumers:
+        'Fully additive: one new module (export.ts) with new exports; new ' +
+        'runtime dependency on the MIT-licensed yaml package for frontmatter ' +
+        'serialization/parsing (OKF mandates YAML). Existing imports are ' +
+        'unaffected. No published npm release of @teamem/schema exists yet.',
+    },
+  },
+  {
     change: 'DUA-232: public invite-lookup response DTO',
     summary:
       'New inviteLookupResponse DTO for the public GET /invites/:token ' +
@@ -297,3 +328,4 @@ export * from './search.js';
 export * from './context.js';
 export * from './governance.js';
 export * from './purge.js';
+export * from './export.js';

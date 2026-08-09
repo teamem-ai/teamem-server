@@ -87,6 +87,20 @@ describe('SPA middleware', () => {
     expect(await res.json()).toEqual({ data: [] });
   });
 
+  it('does not intercept unknown /v1 sub-paths — 404, not SPA', async () => {
+    const { app } = appWithDist(distDir);
+    // No /v1/nonexistent route exists and dist IS present: the SPA must
+    // not mask the API 404 with index.html (frozen error contract).
+    const res = await app.request('/v1/nonexistent');
+    expect(res.status).toBe(404);
+  });
+
+  it('does not intercept unknown /mcp sub-paths — 404, not SPA', async () => {
+    const { app } = appWithDist(distDir);
+    const res = await app.request('/mcp/nonexistent');
+    expect(res.status).toBe(404);
+  });
+
   it('does not intercept POST requests', async () => {
     const { app } = appWithDist(distDir);
     // POST to a path that would be served as an SPA file on GET.
