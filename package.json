@@ -23,6 +23,7 @@
     "test:integration": "pnpm --filter @teamem/server test:integration",
     "test:e2e": "pnpm --filter @teamem/server test:e2e",
     "test:compose": "pnpm --filter @teamem/server test:compose",
+    "e2e": "bash scripts/e2e.sh",
     "m0:f1-reliability": "pnpm --filter @teamem/server m0:f1-reliability"
   },
   "pnpm": {
