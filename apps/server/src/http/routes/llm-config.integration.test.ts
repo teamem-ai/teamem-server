@@ -45,14 +45,28 @@ describe.skipIf(!url)('LLM Config Routes — live Postgres', () => {
     await closeDatabase(pool);
   });
 
+  // Clean up in full FK dependency order — the postgres CI job runs all
+  // integration files against one shared database, so this must tolerate
+  // rows left by any other file's tests, not just this file's own. A
+  // partial list here (e.g. missing jobs/events) is exactly what causes an
+  // unrelated file's leftover row to break `DELETE FROM projects` with a
+  // foreign-key violation.
   beforeEach(async () => {
-    // Clean up in reverse FK order: web_sessions references users, so delete it first.
     await db.execute('DELETE FROM llm_config');
+    await db.execute('DELETE FROM job_events');
+    await db.execute('DELETE FROM concept_contributors');
+    await db.execute('DELETE FROM concept_evidence');
+    await db.execute('DELETE FROM concept_paths');
+    await db.execute('DELETE FROM jobs');
+    await db.execute('DELETE FROM concepts');
+    await db.execute('DELETE FROM events');
+    await db.execute('DELETE FROM api_keys');
     await db.execute('DELETE FROM web_sessions');
+    await db.execute('DELETE FROM invites');
     await db.execute('DELETE FROM memberships');
-    await db.execute('DELETE FROM projects');
     await db.execute('DELETE FROM principals');
     await db.execute('DELETE FROM users');
+    await db.execute('DELETE FROM projects');
     await db.execute('DELETE FROM teams');
   });
 

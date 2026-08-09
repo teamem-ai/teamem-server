@@ -78,7 +78,8 @@ describe.skipIf(!url)('POST /v1/jobs/:id/retry (live Postgres)', () => {
       `DELETE FROM job_events WHERE project_id IN (SELECT id FROM projects WHERE team_id = '${teamId}')`,
     );
     await db.execute(`DELETE FROM web_sessions`);
-    await db.execute(`DELETE FROM memberships WHERE team_id = '${teamId}'`);
+    // Blanket, not scoped to teamId — see the afterEach above for why.
+    await db.execute(`DELETE FROM memberships`);
     await db.execute(`DELETE FROM users`);
     await db.execute(`DELETE FROM projects WHERE team_id = '${teamId}'`);
     await db.execute(`DELETE FROM teams WHERE id = '${teamId}'`);
@@ -94,8 +95,15 @@ describe.skipIf(!url)('POST /v1/jobs/:id/retry (live Postgres)', () => {
   });
 
   afterEach(async () => {
+    // memberships must be blanket (not scoped to this file's own teamId) —
+    // it runs immediately before a blanket `DELETE FROM users`, and a
+    // membership left behind by another team (e.g. another integration
+    // file's createTestSession call) still references a user row, which
+    // then makes the users delete fail with a foreign-key violation. No
+    // test in this file depends on a membership surviving between tests —
+    // each test creates its own throwaway session via createTestSession.
     await db.execute(`DELETE FROM web_sessions`);
-    await db.execute(`DELETE FROM memberships WHERE team_id = '${teamId}'`);
+    await db.execute(`DELETE FROM memberships`);
     await db.execute(`DELETE FROM users`);
   });
 
