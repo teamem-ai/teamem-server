@@ -313,6 +313,37 @@ export const CONTRACT_ADDITIVE_CHANGES = [
         'No published npm release of @teamem/schema exists yet.',
     },
   },
+  {
+    change: 'DUA-251: scoped OKF export download endpoint (M3, audit action)',
+    summary:
+      'New GET /v1/export endpoint packages the rendered OKF bundle (index.md, ' +
+      'log.md, per-type concept pages; M3-EXPORT-01/02/03) into a deterministic ' +
+      '.tar.gz download. API keys need read + project scope; web sessions need ' +
+      'member+ (viewer denied, identical 403 envelope). Cross-team and missing ' +
+      'projects share one 404 (anti-enumeration). The audit action registry ' +
+      "gains 'export.download' (open registry — appending a known action is " +
+      'not a contract version change); success audit is fail-closed, denied ' +
+      'probes are best-effort, and audit rows carry whitelisted metadata only — ' +
+      'never bundle content, query text, or payloads.',
+    impact: {
+      database: 'None — the endpoint is a read-only projection of existing concepts.',
+      api:
+        'New GET /v1/export?projectId=... endpoint returning application/gzip. ' +
+        'Uses existing auth/scope middleware; no existing endpoint changed.',
+      cli: 'None yet — the standalone CLI can consume the archive for local export when built.',
+      mcp: 'None — MCP serves concept pages, it does not export bundles.',
+      ui: 'None yet — apps/web does not consume the download endpoint (future knowledge settings page).',
+      compiler: 'None — export is a read path; F1/F2 compilation is unaffected.',
+      export:
+        'This change IS the delivery surface of the M3 export story: the ' +
+        'HTTP transport for the OKF bundle format. The archive is deterministic ' +
+        'and round-trip importable (GNU/bsdtar-compatible longname entries).',
+      externalTsConsumers:
+        "Fully additive: 'export.download' appended to KNOWN_AUDIT_ACTIONS " +
+        '(open string registry — consumers must already tolerate unknown action ' +
+        'strings). No existing type changed or removed.',
+    },
+  },
 ] as const;
 
 export * from './common.js';

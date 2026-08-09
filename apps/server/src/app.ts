@@ -49,6 +49,7 @@ import { buildLlmConfigRoutes } from './http/routes/llm-config.js';
 import { buildConnectorStatusRoutes } from './http/routes/connectors.js';
 import { buildE2eSetupRoutes } from './http/routes/e2e-setup.js';
 import { buildAuditRoutes } from './http/routes/audit.js';
+import { buildExportRoutes } from './http/routes/export.js';
 import { buildMembersRoutes } from './http/routes/members.js';
 import { buildInvitesRoutes } from './http/routes/invites.js';
 import { inviteLookupHandler } from './http/routes/invite-lookup.js';
@@ -253,6 +254,13 @@ export function buildApp(deps: AppDeps = {}) {
     app.route(
       '/',
       buildContextRoutes({ db: deps.db }),
+    );
+
+    // OKF export download — GET /v1/export (DUA-251 M3-EXPORT-04).
+    // Scope/role-gated: API key read + project scope; web session member+.
+    app.route(
+      '/',
+      buildExportRoutes({ db: deps.db }),
     );
 
     // MCP streamable HTTP endpoint (M1-MCP-01 scaffold, extended DUA-210).

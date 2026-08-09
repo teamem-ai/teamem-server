@@ -36,6 +36,7 @@ export const KNOWN_AUDIT_ACTIONS = [
   'search.query',
   'context.read',
   'compilation.request',
+  'export.download', // M3-EXPORT-04: bulk OKF bundle download (fail-closed, N7)
   'audit.query', // fail closed as well (sensitive read)
   'project.purge', // audit survives purge — purge writes its own entry (N7)
   'key.create',
