@@ -277,8 +277,8 @@ variable instead of an inline header, so nothing secret lands in
 `~/.codex/config.toml`:
 
 ```sh
-export TEEMEM_TOKEN=<your-api-key>   # add to your shell profile too
-codex mcp add teamem --url http://localhost:8080/mcp --bearer-token-env-var TEEMEM_TOKEN
+export TEAMEM_TOKEN=<your-api-key>   # add to your shell profile too
+codex mcp add teamem --url http://localhost:8080/mcp --bearer-token-env-var TEAMEM_TOKEN
 ```
 
 Start a **new** agent session after registering. Your agent then has
@@ -288,7 +288,7 @@ expected outputs). To verify the endpoint yourself:
 
 ```sh
 curl -fsS -X POST http://127.0.0.1:8080/mcp \
-  -H "Authorization: Bearer $TEEMEM_TOKEN" -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TEAMEM_TOKEN" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
 ```
 
