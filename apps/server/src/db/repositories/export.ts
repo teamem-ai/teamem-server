@@ -30,21 +30,25 @@
  *   with its UUID and the validation reason, so the renderer knows the
  *   export is incomplete and the data-integrity gap is visible.
  * - __Cursor integrity and row completeness.__ A cursor is only accepted
- *   when its FULL boundary — the exact (created_at, uuid) pair — matches a
- *   real concept in the scoped project, and the next page is anchored to the
- *   row's exact stored `created_at` (full PostgreSQL precision). A forged
- *   cursor (wrong project, non-UUID id, nonexistent boundary, or a real
- *   boundary uuid carrying a different timestamp) fails as
+ *   when its FULL boundary — the exact (created_at, uuid) pair — equals a
+ *   real concept's stored values in the scoped project (createdAt itself is
+ *   validated against the frozen `isoDateTime` contract: UTC `Z`, fixed
+ *   millisecond precision; timestamp equality is exact, no tolerance). The
+ *   next page is anchored to the row's exact stored `created_at` (full
+ *   column precision via ::text). A forged cursor — wrong project, non-UUID
+ *   id, non-ISO timestamp, nonexistent boundary, or a real boundary uuid
+ *   carrying a timestamp offset by even 1ms — fails as
  *   {@link ExportCursorInvalidError} before any page is produced, and
- *   genuine microsecond-precision rows are never missed or duplicated.
+ *   genuine pagination never misses or duplicates a row.
  * - __Read-only.__ No writes, no side effects; only redacted, persisted data
  *   is read.
  */
-import { and, asc, eq, gt, gte, inArray, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
 import {
   CONCEPT_SCHEMA_VERSION,
   concept as conceptSchema,
   conceptUuid as conceptUuidSchema,
+  isoDateTime,
 } from '@teamem/schema';
 import type { Concept, PrincipalRef } from '@teamem/schema';
 import type { AppDb } from '../client.js';
@@ -140,15 +144,18 @@ function encodePageCursor(projectId: string, position: CursorPosition): string {
 
 /**
  * Decode + validate a page cursor. Returns null for structurally malformed
- * tokens (bad JSON, wrong resource/version, wrong project, non-ISO
- * `createdAt`, or a non-UUID boundary id) so the caller can reject them as
- * {@link ExportCursorInvalidError} BEFORE any SQL is issued — an invalid id
- * must never reach the database as a raw `22P02` type error.
+ * tokens (bad JSON, wrong resource/version, wrong project, a boundary id
+ * that is not a frozen-format UUID, or a `createdAt` that fails the frozen
+ * `isoDateTime` schema — UTC `Z`, exactly three fractional digits). Callers
+ * reject null as {@link ExportCursorInvalidError} BEFORE any SQL is issued:
+ * a tampered non-UUID or non-ISO timestamp must never reach the database as
+ * a raw `22P02` type error.
  *
- * Integrity beyond the bundle of fields is enforced separately in
- * `exportProject` via a scoped boundary probe: the named boundary concept
- * must actually exist in this project, so a parseable-but-forged cursor that
- * points at no real concept is rejected rather than silently accepted.
+ * Integrity beyond the bundle of fields is enforced in `exportProject` by
+ * an EXACT boundary probe: the (created_at, uuid) pair must equal a real
+ * concept's stored values, so a parseable-but-forged cursor (shortened
+ * fraction, offset timezone, or a real uuid carrying a different
+ * millisecond) is rejected rather than silently accepted.
  */
 function decodePageCursor(token: string, projectId: string): CursorPosition | null {
   let parsed: unknown;
@@ -170,7 +177,10 @@ function decodePageCursor(token: string, projectId: string): CursorPosition | nu
   // Bound the id to the frozen concept-uuid format so a tampered non-UUID is
   // rejected here instead of leaking as a Postgres 22P02 during the query.
   if (!conceptUuidSchema.safeParse(position['uuid']).success) return null;
-  if (Number.isNaN(Date.parse(position['createdAt']))) return null;
+  // Bound the timestamp to the frozen isoDateTime contract (UTC `Z`, fixed
+  // millisecond precision) — a shortened fraction (`.2Z`) or an offset
+  // timezone (`.200+02:00`) is rejected here, before any SQL.
+  if (!isoDateTime.safeParse(position['createdAt']).success) return null;
   return { createdAt: position['createdAt'], uuid: position['uuid'] };
 }
 
@@ -256,9 +266,9 @@ function assembleValidated(
  * scope's team — upstream must respond identically for both
  * (anti-enumeration: cross-team is indistinguishable from genuinely missing).
  * Throws {@link ExportCursorInvalidError} for a malformed / tampered /
- * cross-project cursor, for a forged cursor whose boundary row does not
- * exist, and for a cursor whose (created_at, uuid) pair does not match a
- * real concept (never leaks a DB error).
+ * cross-project cursor, for a cursor whose boundary row does not exist, and
+ * for a cursor whose (created_at, uuid) pair does not match a real concept
+ * exactly (never leaks a DB error).
  */
 export async function exportProject(
   db: AppDb,
@@ -315,17 +325,13 @@ export async function exportProject(
       );
     }
     // Integrity probe: the FULL boundary — the exact (created_at, uuid) pair —
-    // must correspond to a real concept within this scoped project. The
-    // timestamp match runs in PostgreSQL (microsecond-exact): the cursor's
-    // millisecond-precision created_at must fall within 2ms of the row's
-    // stored value (JS Date round-trip tolerance). A forged cursor that
-    // reuses a real boundary uuid with a different (e.g. future) timestamp
-    // names a pair that never existed and is rejected, never silently
-    // accepted as an empty page.
-    const cursorDate = new Date(cursor.createdAt);
-    const window = sql`interval '2 milliseconds'`;
-    const boundaryLower = sql`${cursorDate.toISOString()}::timestamptz - ${window}`;
-    const boundaryUpper = sql`${cursorDate.toISOString()}::timestamptz + ${window}`;
+    // must equal a real concept's stored values within this scoped project.
+    // created_at is timestamp(3) and the cursor's createdAt is already
+    // validated as fixed millisecond-precision UTC Z, so equality is exact:
+    // no tolerance. A forged cursor — a real boundary uuid carrying a
+    // timestamp offset by even 1ms, or a constructed pair that never
+    // existed — matches no row and is rejected, never silently accepted as
+    // an empty page.
     const boundaryRows = await db
       .select({
         uuid: schema.concepts.uuid,
@@ -337,8 +343,7 @@ export async function exportProject(
           eq(schema.concepts.teamId, teamId),
           eq(schema.concepts.projectId, projectId),
           eq(schema.concepts.uuid, cursor.uuid),
-          gte(schema.concepts.createdAt, boundaryLower),
-          lte(schema.concepts.createdAt, boundaryUpper),
+          eq(schema.concepts.createdAt, sql`${cursor.createdAt}::timestamptz`),
         ),
       )
       .limit(1);

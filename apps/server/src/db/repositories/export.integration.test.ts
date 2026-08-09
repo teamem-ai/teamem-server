@@ -15,11 +15,13 @@
  *     current page's concepts (SQL row-count instrumentation for the
  *     contributors query, which previously leaked as a project-wide read).
  *   - cursor integrity: forged but parseable cursors (non-UUID boundary,
- *     nonexistent boundary, cross-team boundary, and a REAL boundary uuid
- *     carrying a forged timestamp) are rejected as ExportCursorInvalidError
- *     — never silently accepted, never a DB error; re-encoding a genuine
- *     cursor still works, and pagination over the whole project never misses
- *     or duplicates a concept, including created_at ties (uuid tie-break).
+ *     nonexistent boundary, cross-team boundary, a REAL boundary uuid
+ *     carrying a forged timestamp — including +1ms — and createdAt formats
+ *     violating the frozen isoDateTime contract) are rejected as
+ *     ExportCursorInvalidError — never silently accepted, never a DB error;
+ *     re-encoding a genuine cursor still works, and pagination over the
+ *     whole project never misses or duplicates a concept, including
+ *     created_at ties (uuid tie-break).
  *
  * Runs only when TEST_DATABASE_URL is set; honestly skipped otherwise.
  */
@@ -619,8 +621,9 @@ describe.skipIf(!url)('Export repository (live Postgres)', () => {
     expect(p1!.nextCursor).not.toBeNull();
     const decoded = JSON.parse(
       Buffer.from(p1!.nextCursor!, 'base64url').toString('utf8'),
-    ) as { position: { uuid: string } };
+    ) as { position: { uuid: string; createdAt: string } };
     const realUuid = decoded.position.uuid;
+    const realCreatedAt = decoded.position.createdAt;
 
     await expect(
       exportProject(db, scopeProject, {
@@ -640,6 +643,47 @@ describe.skipIf(!url)('Export repository (live Postgres)', () => {
         }),
       }),
     ).rejects.toBeInstanceOf(ExportCursorInvalidError);
+
+    // EXACT-match gate: the real boundary uuid carrying the real timestamp
+    // plus exactly 1ms must fail — tolerance was removed.
+    const plusOneMs = new Date(Date.parse(realCreatedAt) + 1).toISOString();
+    expect(plusOneMs).not.toBe(realCreatedAt);
+    await expect(
+      exportProject(db, scopeProject, {
+        cursor: forgeCursor(projectId, {
+          createdAt: plusOneMs,
+          uuid: realUuid,
+        }),
+      }),
+    ).rejects.toBeInstanceOf(ExportCursorInvalidError);
+  });
+
+  it('rejects forged cursors whose createdAt violates the frozen isoDateTime format', async () => {
+    // A genuine cursor's createdAt is validated against @teamem/schema's
+    // isoDateTime (UTC `Z`, fixed three-digit milliseconds). Each of these
+    // formats must be rejected as ExportCursorInvalidError, never accepted
+    // and never leaking a DB error.
+    const p1 = await exportProject(db, scopeProject, { limit: 1 });
+    expect(p1!.nextCursor).not.toBeNull();
+    const decoded = JSON.parse(
+      Buffer.from(p1!.nextCursor!, 'base64url').toString('utf8'),
+    ) as { position: { uuid: string } };
+    const realUuid = decoded.position.uuid;
+
+    for (const badCreatedAt of [
+      '2026-04-01T03:05:00.2Z', // shortened fraction (1 digit) — not fixed 3-digit ms
+      '2026-04-01T03:05:00.200+02:00', // non-UTC offset instead of Z
+      '2026-04-01T03:05:00.200', // no timezone designator
+      '2026-04-01 03:05:00.200Z', // space separator instead of T
+      '2026-04-01T03:05:00.200123Z', // microsecond fraction
+      'not-a-timestamp',
+    ]) {
+      await expect(
+        exportProject(db, scopeProject, {
+          cursor: forgeCursor(projectId, { createdAt: badCreatedAt, uuid: realUuid }),
+        }),
+      ).rejects.toBeInstanceOf(ExportCursorInvalidError);
+    }
   });
 
   it('pages without missing or duplicating rows across the whole project, including created_at ties', async () => {
