@@ -33,7 +33,11 @@
  *   is read.
  */
 import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
-import { CONCEPT_SCHEMA_VERSION, concept as conceptSchema } from '@teamem/schema';
+import {
+  CONCEPT_SCHEMA_VERSION,
+  concept as conceptSchema,
+  conceptUuid as conceptUuidSchema,
+} from '@teamem/schema';
 import type { Concept, PrincipalRef } from '@teamem/schema';
 import type { AppDb } from '../client.js';
 import * as schema from '../schema.js';
@@ -127,9 +131,16 @@ function encodePageCursor(projectId: string, position: CursorPosition): string {
 }
 
 /**
- * Decode + validate a page cursor. Returns null for malformed / tampered
- * cursors and for cursors not issued for `projectId` (cross-project cursors
- * are rejected, never silently re-interpreted).
+ * Decode + validate a page cursor. Returns null for structurally malformed
+ * tokens (bad JSON, wrong resource/version, wrong project, non-ISO
+ * `createdAt`, or a non-UUID boundary id) so the caller can reject them as
+ * {@link ExportCursorInvalidError} BEFORE any SQL is issued — an invalid id
+ * must never reach the database as a raw `22P02` type error.
+ *
+ * Integrity beyond the bundle of fields is enforced separately in
+ * `exportProject` via a scoped boundary probe: the named boundary concept
+ * must actually exist in this project, so a parseable-but-forged cursor that
+ * points at no real concept is rejected rather than silently accepted.
  */
 function decodePageCursor(token: string, projectId: string): CursorPosition | null {
   let parsed: unknown;
@@ -148,6 +159,9 @@ function decodePageCursor(token: string, projectId: string): CursorPosition | nu
   if (typeof position['createdAt'] !== 'string' || typeof position['uuid'] !== 'string') {
     return null;
   }
+  // Bound the id to the frozen concept-uuid format so a tampered non-UUID is
+  // rejected here instead of leaking as a Postgres 22P02 during the query.
+  if (!conceptUuidSchema.safeParse(position['uuid']).success) return null;
   if (Number.isNaN(Date.parse(position['createdAt']))) return null;
   return { createdAt: position['createdAt'], uuid: position['uuid'] };
 }
@@ -234,7 +248,8 @@ function assembleValidated(
  * scope's team — upstream must respond identically for both
  * (anti-enumeration: cross-team is indistinguishable from genuinely missing).
  * Throws {@link ExportCursorInvalidError} for a malformed / tampered /
- * cross-project cursor.
+ * cross-project cursor, and for a parseable-but-forged cursor whose boundary
+ * concept does not exist in the scoped project (never leaks a DB error).
  */
 export async function exportProject(
   db: AppDb,
@@ -279,13 +294,33 @@ export async function exportProject(
     .where(and(eq(schema.concepts.teamId, teamId), eq(schema.concepts.projectId, projectId)));
   const totalConcepts = countRows[0]?.n ?? 0;
 
-  // 3. Decode the cursor (rejects tampered / cross-project tokens).
+  // 3. Decode the cursor (rejects malformed / tampered / cross-project tokens).
   let cursor: CursorPosition | null = null;
   if (options.cursor !== undefined) {
     cursor = decodePageCursor(options.cursor, projectId);
     if (cursor === null) {
       throw new ExportCursorInvalidError(
         'cursor is malformed, tampered, or belongs to another project',
+      );
+    }
+    // Integrity probe: the boundary concept must actually exist within this
+    // scoped project. A parseable-but-forged cursor that names no real
+    // concept is rejected rather than silently accepted (returns a valid
+    // page regardless), keeping the read deterministic and honest.
+    const boundaryRows = await db
+      .select({ uuid: schema.concepts.uuid })
+      .from(schema.concepts)
+      .where(
+        and(
+          eq(schema.concepts.teamId, teamId),
+          eq(schema.concepts.projectId, projectId),
+          eq(schema.concepts.uuid, cursor.uuid),
+        ),
+      )
+      .limit(1);
+    if (boundaryRows.length === 0) {
+      throw new ExportCursorInvalidError(
+        'cursor boundary does not exist in this project (tampered or expired)',
       );
     }
   }
@@ -464,6 +499,7 @@ async function fetchContributors(
       and(
         eq(schema.conceptContributors.teamId, teamId),
         eq(schema.conceptContributors.projectId, projectId),
+        inArray(schema.conceptContributors.conceptUuid, conceptUuids),
       ),
     )
     .orderBy(asc(schema.conceptContributors.conceptUuid), asc(schema.conceptContributors.principalId));

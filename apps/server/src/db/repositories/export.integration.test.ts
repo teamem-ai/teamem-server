@@ -11,10 +11,18 @@
  *   - renderer-consumability: every returned concept validates against the
  *     frozen `concept` schema; the no-current-path and invalid-evidence
  *     counterexamples surface in `skipped`, never as disguised Concepts.
+ *   - bounded reads: paths/evidence/contributors are fetched only for the
+ *     current page's concepts (SQL row-count instrumentation for the
+ *     contributors query, which previously leaked as a project-wide read).
+ *   - cursor integrity: forged but parseable cursors (non-UUID boundary,
+ *     nonexistent boundary, cross-team boundary) are rejected as
+ *     ExportCursorInvalidError — never silently accepted, never a DB error;
+ *     re-encoding a genuine cursor still works.
  *
  * Runs only when TEST_DATABASE_URL is set; honestly skipped otherwise.
  */
 import { randomUUID } from 'node:crypto';
+import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { asc, eq } from 'drizzle-orm';
 import { createDb, type AppDb } from '../client.js';
@@ -22,7 +30,6 @@ import * as schema from '../schema.js';
 import {
   connectDatabase,
   closeDatabase,
-  type Pool,
 } from '../../test/database.js';
 import { runBootstrap } from '../../commands/bootstrap.js';
 import { createConcept, type CreateConceptInput } from './concepts-write.js';
@@ -421,6 +428,93 @@ describe.skipIf(!url)('Export repository (live Postgres)', () => {
     }
   });
 
+  it('bounds the contributors query to the current page — never a project-wide contributor read', async () => {
+    // Regression pin (round-2 finding): fetchContributors used to filter only
+    // by team+project, so a page-sized concept read still loaded EVERY
+    // contributor row of the project. Output assertions cannot catch that
+    // (off-page rows are discarded at grouping time), so this test counts
+    // the rows returned by the actual concept_contributors SELECT.
+    const pSuffix = randomUUID().replace(/-/g, '').slice(0, 8);
+    const contributorProjectId = `prj_contrib${pSuffix}`;
+    const PAGE = 10;
+    const CONCEPTS = 40;
+    const CONTRIBUTORS_PER_CONCEPT = 2;
+    const totalContributorRows = CONCEPTS * CONTRIBUTORS_PER_CONCEPT;
+
+    const principalIds = [
+      `pri_cb1${randomUUID().replace(/-/g, '').slice(0, 16)}`,
+      `pri_cb2${randomUUID().replace(/-/g, '').slice(0, 16)}`,
+    ];
+
+    // Instrumented pool: accumulate rows returned by concept_contributors SELECTs.
+    const countingPool = new Pool({ connectionString: url! });
+    let contributorsRowsFetched = 0;
+    const origQuery = countingPool.query.bind(countingPool);
+    countingPool.query = ((input: string | { text?: string }, values?: unknown[]) => {
+      const text = typeof input === 'string' ? input : (input.text ?? '');
+      const result =
+        typeof input === 'string'
+          ? origQuery(input, values)
+          : origQuery(input as never, values);
+      if (/^\s*select/i.test(text) && /concept_contributors/i.test(text)) {
+        return Promise.resolve(result).then((r: { rows?: unknown[] }) => {
+          contributorsRowsFetched += Array.isArray(r?.rows) ? r.rows.length : 0;
+          return r;
+        });
+      }
+      return result;
+    }) as unknown as typeof countingPool.query;
+
+    try {
+      const countedDb = createDb(url!, { pool: countingPool });
+      await countedDb.execute(
+        `INSERT INTO projects (id, team_id, name) VALUES ('${contributorProjectId}', '${teamId}', 'Contributor Boundedness')`,
+      );
+      for (const pid of principalIds) {
+        await countedDb.execute(
+          `INSERT INTO principals (id, team_id, kind, provider, provider_kind, provider_user_id, display_login)
+           VALUES ('${pid}', '${teamId}', 'human', 'github', 'github', 'cbuser${randomUUID().replace(/-/g, '').slice(0, 8)}', 'cb_user')`,
+        );
+      }
+      for (let i = 0; i < CONCEPTS; i++) {
+        await createConcept(countedDb, conceptInput(teamId, contributorProjectId,
+          `contrib-bound/c-${i}-${randomUUID().replace(/-/g, '').slice(0, 6)}`,
+          {
+            contributors: principalIds.map((principalId) => ({
+              principalId,
+              provenance: 'credential_bound' as const,
+            })),
+          },
+        ));
+      }
+
+      contributorsRowsFetched = 0;
+      const page = await exportProject(
+        countedDb,
+        projectScope(teamId, contributorProjectId),
+        { limit: PAGE },
+      );
+
+      expect(page).not.toBeNull();
+      expect(page!.concepts).toHaveLength(PAGE);
+      const refsOnPage = page!.concepts.reduce((n, c) => n + c.contributors.length, 0);
+      expect(refsOnPage).toBe(PAGE * CONTRIBUTORS_PER_CONCEPT);
+      // The decisive assertion: the contributors query returned rows only for
+      // the page's concepts — bounded, far below the project total.
+      expect(contributorsRowsFetched).toBeLessThanOrEqual(PAGE * CONTRIBUTORS_PER_CONCEPT);
+      expect(contributorsRowsFetched).toBeLessThan(totalContributorRows);
+    } finally {
+      await db.execute(`DELETE FROM concept_contributors WHERE project_id = '${contributorProjectId}'`);
+      await db.execute(`DELETE FROM concept_evidence      WHERE project_id = '${contributorProjectId}'`);
+      await db.execute(`DELETE FROM concept_paths         WHERE project_id = '${contributorProjectId}'`);
+      await db.execute(`DELETE FROM concepts              WHERE project_id = '${contributorProjectId}'`);
+      await db.execute(`DELETE FROM api_keys              WHERE project_id = '${contributorProjectId}'`);
+      await db.execute(`DELETE FROM projects              WHERE id = '${contributorProjectId}'`);
+      await db.execute(`DELETE FROM principals            WHERE id = ANY(ARRAY['${principalIds.join("','")}'])`);
+      await countingPool.end();
+    }
+  });
+
   it('returns a single page with nextCursor=null when concepts do not exceed the limit', async () => {
     const page = await exportProject(db, scopeProject, { limit: 100 });
     expect(page).not.toBeNull();
@@ -457,6 +551,62 @@ describe.skipIf(!url)('Export repository (live Postgres)', () => {
         cursor: p1!.nextCursor!,
       }),
     ).rejects.toBeInstanceOf(ExportCursorInvalidError);
+  });
+
+  /** Build a structurally parseable cursor for `projectId`. */
+  function forgeCursor(projectId: string, position: { createdAt: string; uuid: string }): string {
+    return Buffer.from(
+      JSON.stringify({ resource: 'export-project', v: 1, projectId, position }),
+      'utf8',
+    ).toString('base64url');
+  }
+
+  it('rejects a parseable-but-forged cursor with a non-UUID boundary id — never a DB error (ExportCursorInvalidError)', async () => {
+    const forged = forgeCursor(projectId, {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      uuid: 'not-a-uuid',
+    });
+    // The UUID-format gate rejects before any SQL is issued: this must be
+    // ExportCursorInvalidError, never a Postgres 22P02 leaking as a Drizzle error.
+    await expect(exportProject(db, scopeProject, { cursor: forged }))
+      .rejects.toBeInstanceOf(ExportCursorInvalidError);
+  });
+
+  it('rejects a parseable-but-forged cursor whose boundary concept does not exist (integrity probe)', async () => {
+    // Real-format UUID that exists nowhere in the project: the scoped
+    // boundary probe rejects it instead of silently accepting an empty page.
+    const forged = forgeCursor(projectId, {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      uuid: randomUUID(),
+    });
+    await expect(exportProject(db, scopeProject, { cursor: forged }))
+      .rejects.toBeInstanceOf(ExportCursorInvalidError);
+  });
+
+  it('rejects a forged cursor naming a concept that exists only in another team (scoped probe)', async () => {
+    const { rows } = await db.execute(
+      `SELECT uuid FROM concepts WHERE team_id = '${otherTeamId}' LIMIT 1`,
+    );
+    const foreignUuid = (rows[0] as Record<string, unknown>)['uuid'] as string;
+    const forged = forgeCursor(projectId, {
+      createdAt: '2026-01-01T00:00:00.000Z',
+      uuid: foreignUuid,
+    });
+    await expect(exportProject(db, scopeProject, { cursor: forged }))
+      .rejects.toBeInstanceOf(ExportCursorInvalidError);
+  });
+
+  it('accepts a re-encoded genuine cursor (same real boundary) — only forged positions are rejected', async () => {
+    const p1 = await exportProject(db, scopeProject, { limit: 1 });
+    expect(p1!.nextCursor).not.toBeNull();
+    const decoded = JSON.parse(
+      Buffer.from(p1!.nextCursor!, 'base64url').toString('utf8'),
+    ) as Record<string, unknown>;
+    const reencoded = Buffer.from(JSON.stringify(decoded), 'utf8').toString('base64url');
+
+    const p2 = await exportProject(db, scopeProject, { limit: 1, cursor: reencoded });
+    expect(p2).not.toBeNull();
+    expect(p2!.concepts).toHaveLength(1);
   });
 
   // ═══════════════════════════════════════════════════════════════════════
