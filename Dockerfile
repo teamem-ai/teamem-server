@@ -44,6 +44,10 @@ RUN pnpm build \
     && for d in .pnpm/pg@*; do \
          ln -s "$d/node_modules/pg" pg; \
          break; \
+       done \
+    && for d in .pnpm/yaml@*; do \
+         ln -s "$d/node_modules/yaml" yaml; \
+         break; \
        done
 
 
