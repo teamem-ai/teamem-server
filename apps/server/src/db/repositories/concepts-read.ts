@@ -21,7 +21,7 @@ import type { AppDb } from '../client.js';
 type EvidenceRow = typeof schema.conceptEvidence.$inferSelect;
 
 /** Map a DB evidence row to the frozen Evidence discriminated union. */
-function toEvidenceDto(row: EvidenceRow): Evidence {
+export function toEvidenceDto(row: EvidenceRow): Evidence {
   const at = row.at.toISOString();
   switch (row.kind) {
     case 'commit':
@@ -50,8 +50,11 @@ function toEvidenceDto(row: EvidenceRow): Evidence {
  *  casting it to integer for a github_id join is unsafe. Instead we treat the
  *  principal's displayLogin as the GitHub login for github humans and derive
  *  the public avatar URL from it.
+ *
+ *  Exported so the export read repository (M3-EXPORT-02) reuses the same
+ *  frozen mapping when assembling whole-project snapshots.
  */
-function toPrincipalRef(
+export function toPrincipalRef(
   principalRow: {
     id: string;
     kind: 'human' | 'service';
