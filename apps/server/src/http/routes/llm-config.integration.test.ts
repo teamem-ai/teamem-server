@@ -221,23 +221,34 @@ describe.skipIf(!url)('LLM Config Routes — live Postgres', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('POST /v1/teams/:teamId/llm/test', () => {
-    it('returns not-ok for an invalid real key', async () => {
-      const userId = await createUser(nextGithubId(), 'llmadmin');
-      const teamId = await createTeam('LLM Test Team');
-      await createProject(teamId, 'LLM Project');
-      await addMembership(userId, teamId, 'admin');
-      const sessionToken = await createSession(userId);
+    // This test makes a REAL call to the provider endpoint with an invalid
+    // key and expects the endpoint to report ok:false. The endpoint itself
+    // allows the provider round-trip up to 10s (testProviderConnection's
+    // AbortController), but vitest's 5s default timeout killed the test
+    // mid-flight on slow CI networks (observed repeatedly on main). Give it
+    // headroom above the endpoint's own abort so the end-to-end check is
+    // reliable without mocking the provider.
+    it(
+      'returns not-ok for an invalid real key',
+      async () => {
+        const userId = await createUser(nextGithubId(), 'llmadmin');
+        const teamId = await createTeam('LLM Test Team');
+        await createProject(teamId, 'LLM Project');
+        await addMembership(userId, teamId, 'admin');
+        const sessionToken = await createSession(userId);
 
-      const res = await app.request(`/v1/teams/${teamId}/llm/test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
-        body: JSON.stringify({ provider: 'openai', apiKey: 'sk-invalid-test-key' }),
-      });
+        const res = await app.request(`/v1/teams/${teamId}/llm/test`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+          body: JSON.stringify({ provider: 'openai', apiKey: 'sk-invalid-test-key' }),
+        });
 
-      expect(res.status).toBe(200);
-      const json = await res.json();
-      expect(json.data.ok).toBe(false);
-    });
+        expect(res.status).toBe(200);
+        const json = await res.json();
+        expect(json.data.ok).toBe(false);
+      },
+      { timeout: 15_000 },
+    );
 
     it('rejects viewer from testing (403)', async () => {
       const userId = await createUser(nextGithubId(), 'llmviewer');
