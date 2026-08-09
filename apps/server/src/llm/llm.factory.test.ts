@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { f1Output } from '../compiler/f1/output.js';
+import { f2Decision } from '../compiler/f2/decision.js';
 import { llmProviderConfig } from '../config/llm.js';
 import { createLlmClient, DEFAULT_MODELS, SCHEMA_ENVELOPE_PROPERTY } from './factory.js';
 import { LlmError, MAX_OUTPUT_TOKENS, type FetchLike, type LlmProviderKind } from './types.js';
@@ -96,6 +97,28 @@ function okOpenAi(value: unknown, model = 'gpt-4o-2024-08-06', usage?: unknown):
 }
 
 const validValue = { answer: 'Postgres', count: 7 };
+
+/**
+ * Recursively asserts no `oneOf`/`anyOf`/`allOf` survives anywhere in the
+ * schema — not just at the root. Pins down the real production failure:
+ * OpenRouter routing an OpenAI-shaped `response_format` to an Anthropic-
+ * family backend (Bedrock/Azure/Anthropic all observed) rejects `oneOf`
+ * anywhere, not only at the root, contradicting the "nested combinators
+ * are fine everywhere" assumption a previous revision of this file relied
+ * on (see the {@link flattenOneOfBranches} doc in factory.ts).
+ */
+function expectNoCombinatorAnywhere(node: unknown): void {
+  if (Array.isArray(node)) {
+    for (const item of node) expectNoCombinatorAnywhere(item);
+    return;
+  }
+  if (typeof node !== 'object' || node === null) return;
+  const obj = node as Record<string, unknown>;
+  expect(obj['oneOf']).toBeUndefined();
+  expect(obj['anyOf']).toBeUndefined();
+  expect(obj['allOf']).toBeUndefined();
+  for (const value of Object.values(obj)) expectNoCombinatorAnywhere(value);
+}
 
 /* ── CLI acceptance: instantiate all four BYO configs ─────────────────────── */
 
@@ -967,28 +990,6 @@ describe('structured — normalizes a root union into a provider-legal object', 
     expect(schema['$schema']).toBeUndefined();
   }
 
-  /**
-   * Recursively asserts no `oneOf`/`anyOf`/`allOf` survives anywhere in the
-   * schema — not just at the root. Pins down the real production failure:
-   * OpenRouter routing an OpenAI-shaped `response_format` to an Anthropic-
-   * family backend (Bedrock/Azure/Anthropic all observed) rejects `oneOf`
-   * anywhere, not only at the root, contradicting the "nested combinators
-   * are fine everywhere" assumption a previous revision of this file relied
-   * on (see the {@link flattenOneOfBranches} doc in factory.ts).
-   */
-  function expectNoCombinatorAnywhere(node: unknown): void {
-    if (Array.isArray(node)) {
-      for (const item of node) expectNoCombinatorAnywhere(item);
-      return;
-    }
-    if (typeof node !== 'object' || node === null) return;
-    const obj = node as Record<string, unknown>;
-    expect(obj['oneOf']).toBeUndefined();
-    expect(obj['anyOf']).toBeUndefined();
-    expect(obj['allOf']).toBeUndefined();
-    for (const value of Object.values(obj)) expectNoCombinatorAnywhere(value);
-  }
-
   it('claude: flattens the F1 union into a bare object schema — no envelope needed', async () => {
     const calls: Captured[] = [];
     // A bare (unwrapped) payload — flattening means the provider is asked
@@ -1148,6 +1149,112 @@ describe('structured — normalizes a root union into a provider-legal object', 
       calls[0]!.body as { tools: [{ input_schema: Record<string, unknown> }] }
     ).tools[0].input_schema;
     expect(Object.keys(inputSchema['properties'] as object)).toEqual(['answer', 'count']);
+  });
+});
+
+/* ── F2 merge-decision schema: mixed-type properties stay provider-legal ──── */
+
+/**
+ * Regression tests for the dogfooding-discovered F2 schema defect (DUA-258).
+ *
+ * The real F2 schema merges `targetConceptId` (UUID string in three branches,
+ * `null` in the `unrelated` branch) and `resultStatus` (enum vs literal)
+ * across its discriminated-union branches. `mergePropertyVariants`
+ * previously merged those into a `{}` property node — no `type` key — which OpenAI-
+ * family `response_format` validation rejects with HTTP 400
+ * ("In context=('properties', 'targetConceptId'), schema must have a 'type'
+ * key"). Every F2 merge-decider call failed on OpenAI/OpenRouter with the
+ * real schema, while F1 (const-literal discriminant only) stayed green.
+ *
+ * These tests pin down that every property node in the wire schema has a
+ * `type` key and that no combinator node survives, for both provider
+ * families, and that a valid f2 payload still round-trips.
+ */
+describe('structured — F2 decision schema properties always carry a type', () => {
+  /** Assert every property-schema node declares a `type` (or `$ref`) — the
+   *  exact rule OpenAI/Azure broke with at runtime (property `{}` nodes have
+   *  neither). */
+  function expectTypedEverywhere(node: unknown): void {
+    if (Array.isArray(node)) {
+      for (const item of node) expectTypedEverywhere(item);
+      return;
+    }
+    if (typeof node !== 'object' || node === null) return;
+    const obj = node as Record<string, unknown>;
+    if (obj['properties'] !== undefined && typeof obj['properties'] === 'object' && obj['properties'] !== null) {
+      const props = obj['properties'] as Record<string, unknown>;
+      for (const [name, schema] of Object.entries(props)) {
+        const s = schema as Record<string, unknown>;
+        expect({
+          property: name,
+          keys: Object.keys(s),
+          hasType: s['type'] !== undefined || s['$ref'] !== undefined,
+        }).toMatchObject({ property: name, hasType: true });
+      }
+    }
+    for (const value of Object.values(obj)) expectTypedEverywhere(value);
+  }
+
+  const unrelatedValue = {
+    relationship: 'unrelated',
+    targetConceptId: null,
+    resultStatus: 'active',
+    mergedTitle: 'A new concept',
+    mergedBody: 'Body.',
+  };
+
+  it('openai: flattened F2 schema has no type-less property and round-trips an unrelated decision', async () => {
+    const calls: Captured[] = [];
+    const fetch = makeRecorder(() => okOpenAi(unrelatedValue), calls);
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const res = await client.structured({
+      schema: f2Decision,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-f2-openai',
+    });
+    expect(res.output).toEqual(unrelatedValue);
+
+    const envelope = (
+      calls[0]!.body as {
+        response_format: {
+          json_schema: { schema: Record<string, unknown>; strict?: boolean };
+        };
+      }
+    ).response_format.json_schema;
+    expect(envelope.schema['type']).toBe('object');
+    expectNoCombinatorAnywhere(envelope.schema);
+    expectTypedEverywhere(envelope.schema);
+    const properties = envelope.schema['properties'] as Record<string, unknown>;
+    // Must be a nullable type array, never `{}`.
+    expect(properties['targetConceptId']).toEqual({ type: ['string', 'null'] });
+    // enum + literal merge into one enum.
+    expect(properties['resultStatus']).toMatchObject({ type: 'string' });
+    expect((properties['resultStatus'] as { enum?: unknown }).enum).toContain('disputed');
+  });
+
+  it('claude: F2 input_schema properties carry a type (non-null merge keeps the branch)', async () => {
+    const calls: Captured[] = [];
+    const fetch = makeRecorder(() => okClaude(unrelatedValue), calls);
+    const client = createLlmClient(byoConfigs[0], { fetch });
+
+    const res = await client.structured({
+      schema: f2Decision,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-f2-claude',
+    });
+    expect(res.output).toEqual(unrelatedValue);
+
+    const inputSchema = (
+      calls[0]!.body as { tools: [{ input_schema: Record<string, unknown> }] }
+    ).tools[0].input_schema;
+    expectNoCombinatorAnywhere(inputSchema);
+    expectTypedEverywhere(inputSchema);
+    expect((inputSchema['properties'] as Record<string, unknown>)['targetConceptId']).toEqual(
+      { type: ['string', 'null'] },
+    );
   });
 });
 
