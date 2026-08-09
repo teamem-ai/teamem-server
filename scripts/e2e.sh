@@ -33,14 +33,19 @@
 #              key configured). A SKIP is NOT a green result: the check did
 #              not run and the exit fails the gate.
 #
-# Prerequisites: docker (+ compose plugin), curl, jq.
+# Prerequisites: docker (+ compose plugin), curl, jq, git.
 #
-# One-command usage:
-#   export POSTGRES_PASSWORD='<strong>'
-#   export TEAMEM_ANTHROPIC_API_KEY='<key>'   # or OPENAI / OPENROUTER /
-#                                             # OPENAI_COMPAT (any one)
+# One-command usage (secrets from .env — gitignored, see .env.example):
+#   cp .env.example .env     # then fill in ONE provider key
 #   ./scripts/e2e.sh
 #   # or: pnpm e2e
+#
+# POSTGRES_PASSWORD is OPTIONAL: when unset (and not in .env), the script
+# mints a strong ephemeral per-run password — no insecure default is ever
+# shipped or persisted. An LLM provider key (TEAMEM_ANTHROPIC_API_KEY /
+# TEAMEM_OPENAI_API_KEY / TEAMEM_OPENROUTER_API_KEY /
+# TEAMEM_OPENAI_COMPAT_API_KEY) is still REQUIRED: F1/F2 compilation is the
+# green gate and there is deliberately no fake/default key.
 #
 # Options / environment (all TEAMEM_-prefixed, AGENTS.md §4):
 #   --mode standard|all-in-one   topology (default: standard = 3 containers;
@@ -80,6 +85,35 @@ header() { printf '\n%s\n%s\n%s\n\n' "━━━━━━━━━━━━━━
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# ── .env discovery (opt-in, gitignored) ─────────────────────────────────────
+# If the operator keeps secrets in $REPO_ROOT/.env (gitignored), read the keys
+# this script understands from it. An explicitly exported variable always
+# wins; .env only fills unset values. Setup is then just:
+#   cp .env.example .env   # + fill POSTGRES_PASSWORD / TEAMEM_*_API_KEY
+#   ./scripts/e2e.sh
+load_repo_env() {
+  local env_file="${TEAMEM_E2E_DOTENV:-$REPO_ROOT/.env}"
+  [[ -f "$env_file" ]] || return 0
+  local key val
+  while IFS='=' read -r key val; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    key="${key// /}"
+    case "$key" in
+      POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|TEAMEM_PORT|TEAMEM_PG_PORT|TEAMEM_ALL_IN_ONE|TEAMEM_BASE_URL|TEAMEM_ANTHROPIC_API_KEY|TEAMEM_OPENAI_API_KEY|TEAMEM_OPENROUTER_API_KEY|TEAMEM_OPENAI_COMPAT_BASE_URL|TEAMEM_OPENAI_COMPAT_API_KEY|TEAMEM_LLM_DEBUG|TEAMEM_E2E_*)
+        if [[ -z "${!key:-}" ]]; then
+          val="${val%\"}" # strip trailing quote
+          val="${val%\'}"
+          val="${val#\"}"
+          val="${val#\'}"
+          printf -v "$key" '%s' "$val"
+          export "$key"
+        fi
+        ;;
+    esac
+  done < "$env_file"
+}
+load_repo_env
 
 MODE=""                       # set by parse_args: standard | all-in-one
 KEEP_STACK=false
@@ -162,6 +196,25 @@ parse_args() {
   [[ "${SKIP_COMPOSE_BUILD:-false}" == "true" ]] && SKIP_BUILD=true
 }
 
+# ── Helpers ─────────────────────────────────────────────────────────────────
+
+# Strong ephemeral secret for Postgres (hex only, 32 chars, no URL-hostile
+# characters, never predictable). Uses openssl when available.
+generate_strong_password() {
+  if command -v openssl >/dev/null 2>&1; then
+    local p
+    p="$(openssl rand -hex 16 2>/dev/null || true)"
+    [[ -n "$p" ]] && echo "$p" && return 0
+  fi
+  local p
+  p="$(LC_ALL=C head -c 24 /dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+  if [[ -n "$p" ]]; then
+    echo "$p"
+    return 0
+  fi
+  echo "E2e-$(date +%s)-$$-$RANDOM$RANDOM$RANDOM"   # last-resort (≥8 chars, hex/numeric)
+}
+
 # ── Compose helpers ─────────────────────────────────────────────────────────
 
 # Build the compose environment explicitly. Variable names MUST match the
@@ -221,8 +274,16 @@ check_prereqs() {
   fi
 
   if [[ -z "$PG_PASSWORD" ]]; then
-    fail "POSTGRES_PASSWORD is not set — compose refuses to start without one (no insecure default)"
-    missing=1
+    # The compose file deliberately has no default password; the script mints a
+    # strong, ephemeral, per-run secret instead (never persisted, never logged,
+    # not predictable). Operators can still pin one via POSTGRES_PASSWORD or
+    # .env for persistent debugging.
+    PG_PASSWORD="$(generate_strong_password)"
+    info "POSTGRES_PASSWORD not set — generated a strong ephemeral password for this run (override via POSTGRES_PASSWORD or .env)"
+    if [[ -z "$PG_PASSWORD" ]]; then
+      fail "Could not generate a strong POSTGRES_PASSWORD — set POSTGRES_PASSWORD explicitly"
+      missing=1
+    fi
   elif [[ "${#PG_PASSWORD}" -lt 8 || "$PG_PASSWORD" == "postgres" || "$PG_PASSWORD" == "password" || "$PG_PASSWORD" == "teamem" ]]; then
     fail "POSTGRES_PASSWORD is too weak (need ≥8 chars, not a common password)"
     missing=1
