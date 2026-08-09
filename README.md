@@ -143,6 +143,14 @@ events into concept pages):
 TEAMEM-prefixed on purpose — the ambient `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 from your host shell is never inherited by accident.
 
+> **Model choice affects compile reliability.** teamem requires provider-native
+> structured output and rejects anything that doesn't match the schema. The
+> native `claude` and `openai` providers enforce this robustly; routing a weak
+> model through OpenRouter (or another OpenAI-compatible endpoint) can produce
+> malformed JSON that fails compilation. See
+> [Troubleshooting → compilation failures](#compilation-failures) before picking
+> a model.
+
 See `.env.example` for all available variables and their defaults.
 
 ### 2. Start the stack
@@ -246,6 +254,58 @@ These behaviors are **intentional** — they are guardrails, not bugs:
 docker compose down           # stop containers, keep data volume
 docker compose down -v        # stop containers and delete the database volume
 ```
+
+## Troubleshooting
+
+### Compilation failures
+
+The worker turns events into concept pages by calling your configured LLM with
+provider-native structured output and validating the result against the frozen
+schema **before** persisting it — it never accepts "approximately correct"
+output. A per-event failure appears on the job detail page with a code. The job
+itself is marked **Failed** only when *every* event fails; a job with a mix of
+compiled/skipped/failed events is **Completed with errors** (amber pill). Its
+failed events can be re-run *without* redoing the successful ones via
+**Retry failed** (as opposed to **Retry all**).
+
+| Per-event code | Meaning | What to do |
+|---|---|---|
+| `f1_schema_validation_failed` | The model's output wasn't valid JSON, or didn't match the schema. | Usually a weak model over an OpenAI-compatible endpoint (see below). Retry; if it persists, switch to a stronger model or a native provider. |
+| `f1_output_truncated` | The model hit its output-token limit mid-response. | Retry; if it persists, the output genuinely exceeded the model's ceiling — use a model with a larger output budget. |
+| `f1_timeout` | The request ran past the 30-second deadline (often a large, slow F2 merge). | Retry; a native/faster provider produces the same output more quickly. |
+| `f1_provider_error` / `f1_http_error` | The provider rejected the request or returned an error status. | Enable `TEAMEM_LLM_DEBUG=1` (below) to see the real cause in the worker log. |
+| `no_llm_provider` | No provider is configured for the team. | Configure one in **Settings → LLM**, or set a `TEAMEM_*_API_KEY` and restart. |
+| `worker_interrupted` | The worker was restarted while the job was mid-flight. | The orphaned job is auto-reclaimed to **Failed** on worker startup — just **Retry failed**. |
+
+**Model choice matters for reliability.** teamem asks for strict structured
+output, but *how* that's enforced depends on the path:
+
+- **Native `claude` (Anthropic)** uses forced tool use — the provider returns
+  already-structured data, so malformed JSON is essentially impossible. This is
+  the most robust path.
+- **Native `openai`** uses a JSON-schema `response_format`; OpenAI's own models
+  honor it reliably.
+- **OpenRouter and other OpenAI-compatible endpoints** proxy many backing
+  models. For some of them `response_format` degrades to a *prompt* asking for
+  JSON, with no hard grammar constraint — so a weaker model (e.g. Claude 3 Haiku
+  via OpenRouter) can wrap the JSON in prose, leave inner quotes unescaped, or
+  under-escape backslashes, surfacing as `f1_schema_validation_failed`. teamem
+  recovers many of these automatically, but the most reliable fix is to point at
+  a native provider or a stronger model.
+
+### Debugging LLM failures
+
+Set `TEAMEM_LLM_DEBUG=1` (read by both server and worker; restart to apply) to
+log the underlying cause of any compile failure — the provider's `finish_reason`
+and a secret-scrubbed snippet of the response — to the worker log, so an
+otherwise-opaque `f1_*` error can be investigated:
+
+```sh
+docker compose logs -f worker | grep llm_debug
+```
+
+Keep it **off** (blank) in production; it is a diagnostics aid, not a
+steady-state setting.
 
 ## Tech stack (decided)
 
