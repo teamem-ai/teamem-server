@@ -29,10 +29,18 @@
  *   never emitted as a fake Concept; it is reported explicitly in `skipped`
  *   with its UUID and the validation reason, so the renderer knows the
  *   export is incomplete and the data-integrity gap is visible.
+ * - __Cursor integrity and row completeness.__ A cursor is only accepted
+ *   when its FULL boundary — the exact (created_at, uuid) pair — matches a
+ *   real concept in the scoped project, and the next page is anchored to the
+ *   row's exact stored `created_at` (full PostgreSQL precision). A forged
+ *   cursor (wrong project, non-UUID id, nonexistent boundary, or a real
+ *   boundary uuid carrying a different timestamp) fails as
+ *   {@link ExportCursorInvalidError} before any page is produced, and
+ *   genuine microsecond-precision rows are never missed or duplicated.
  * - __Read-only.__ No writes, no side effects; only redacted, persisted data
  *   is read.
  */
-import { and, asc, eq, gt, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, gte, inArray, lte, or, sql } from 'drizzle-orm';
 import {
   CONCEPT_SCHEMA_VERSION,
   concept as conceptSchema,
@@ -248,8 +256,9 @@ function assembleValidated(
  * scope's team — upstream must respond identically for both
  * (anti-enumeration: cross-team is indistinguishable from genuinely missing).
  * Throws {@link ExportCursorInvalidError} for a malformed / tampered /
- * cross-project cursor, and for a parseable-but-forged cursor whose boundary
- * concept does not exist in the scoped project (never leaks a DB error).
+ * cross-project cursor, for a forged cursor whose boundary row does not
+ * exist, and for a cursor whose (created_at, uuid) pair does not match a
+ * real concept (never leaks a DB error).
  */
 export async function exportProject(
   db: AppDb,
@@ -296,6 +305,8 @@ export async function exportProject(
 
   // 3. Decode the cursor (rejects malformed / tampered / cross-project tokens).
   let cursor: CursorPosition | null = null;
+  /** Exact stored `created_at` of the boundary row, PostgreSQL precision. */
+  let boundaryCreatedAt: string | null = null;
   if (options.cursor !== undefined) {
     cursor = decodePageCursor(options.cursor, projectId);
     if (cursor === null) {
@@ -303,26 +314,40 @@ export async function exportProject(
         'cursor is malformed, tampered, or belongs to another project',
       );
     }
-    // Integrity probe: the boundary concept must actually exist within this
-    // scoped project. A parseable-but-forged cursor that names no real
-    // concept is rejected rather than silently accepted (returns a valid
-    // page regardless), keeping the read deterministic and honest.
+    // Integrity probe: the FULL boundary — the exact (created_at, uuid) pair —
+    // must correspond to a real concept within this scoped project. The
+    // timestamp match runs in PostgreSQL (microsecond-exact): the cursor's
+    // millisecond-precision created_at must fall within 2ms of the row's
+    // stored value (JS Date round-trip tolerance). A forged cursor that
+    // reuses a real boundary uuid with a different (e.g. future) timestamp
+    // names a pair that never existed and is rejected, never silently
+    // accepted as an empty page.
+    const cursorDate = new Date(cursor.createdAt);
+    const window = sql`interval '2 milliseconds'`;
+    const boundaryLower = sql`${cursorDate.toISOString()}::timestamptz - ${window}`;
+    const boundaryUpper = sql`${cursorDate.toISOString()}::timestamptz + ${window}`;
     const boundaryRows = await db
-      .select({ uuid: schema.concepts.uuid })
+      .select({
+        uuid: schema.concepts.uuid,
+        createdAtText: sql<string>`${schema.concepts.createdAt}::text`,
+      })
       .from(schema.concepts)
       .where(
         and(
           eq(schema.concepts.teamId, teamId),
           eq(schema.concepts.projectId, projectId),
           eq(schema.concepts.uuid, cursor.uuid),
+          gte(schema.concepts.createdAt, boundaryLower),
+          lte(schema.concepts.createdAt, boundaryUpper),
         ),
       )
       .limit(1);
     if (boundaryRows.length === 0) {
       throw new ExportCursorInvalidError(
-        'cursor boundary does not exist in this project (tampered or expired)',
+        'cursor position does not match a real concept boundary (tampered or expired)',
       );
     }
+    boundaryCreatedAt = boundaryRows[0]!.createdAtText;
   }
 
   // 4. One bounded page: limit + 1 for hasMore detection.
@@ -331,12 +356,16 @@ export async function exportProject(
     eq(schema.concepts.projectId, projectId),
   ];
   if (cursor) {
-    const cursorDate = new Date(cursor.createdAt);
+    // Anchor the boundary to the row's EXACT stored created_at (full
+    // PostgreSQL microsecond precision, preserved via ::text) so the
+    // (created_at, uuid) ordering can never miss or duplicate the boundary
+    // row across pages — a millisecond-truncated JS Date would re-include it.
+    const boundary = sql`${boundaryCreatedAt}::timestamptz`;
     conditions.push(
       or(
-        gt(schema.concepts.createdAt, cursorDate),
+        gt(schema.concepts.createdAt, boundary),
         and(
-          eq(schema.concepts.createdAt, cursorDate),
+          eq(schema.concepts.createdAt, boundary),
           gt(schema.concepts.uuid, cursor.uuid),
         ),
       )!,

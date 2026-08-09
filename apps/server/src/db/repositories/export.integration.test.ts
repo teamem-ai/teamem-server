@@ -15,9 +15,11 @@
  *     current page's concepts (SQL row-count instrumentation for the
  *     contributors query, which previously leaked as a project-wide read).
  *   - cursor integrity: forged but parseable cursors (non-UUID boundary,
- *     nonexistent boundary, cross-team boundary) are rejected as
- *     ExportCursorInvalidError — never silently accepted, never a DB error;
- *     re-encoding a genuine cursor still works.
+ *     nonexistent boundary, cross-team boundary, and a REAL boundary uuid
+ *     carrying a forged timestamp) are rejected as ExportCursorInvalidError
+ *     — never silently accepted, never a DB error; re-encoding a genuine
+ *     cursor still works, and pagination over the whole project never misses
+ *     or duplicates a concept, including created_at ties (uuid tie-break).
  *
  * Runs only when TEST_DATABASE_URL is set; honestly skipped otherwise.
  */
@@ -607,6 +609,103 @@ describe.skipIf(!url)('Export repository (live Postgres)', () => {
     const p2 = await exportProject(db, scopeProject, { limit: 1, cursor: reencoded });
     expect(p2).not.toBeNull();
     expect(p2!.concepts).toHaveLength(1);
+  });
+
+  it('rejects a forged cursor reusing a REAL boundary uuid with a different timestamp (full-pair probe)', async () => {
+    // Round-3 finding: the probe used to validate only the uuid, so a real
+    // boundary uuid carrying a forged (future) timestamp was silently
+    // accepted and returned an empty page even when the project had rows.
+    const p1 = await exportProject(db, scopeProject, { limit: 1 });
+    expect(p1!.nextCursor).not.toBeNull();
+    const decoded = JSON.parse(
+      Buffer.from(p1!.nextCursor!, 'base64url').toString('utf8'),
+    ) as { position: { uuid: string } };
+    const realUuid = decoded.position.uuid;
+
+    await expect(
+      exportProject(db, scopeProject, {
+        cursor: forgeCursor(projectId, {
+          createdAt: '2099-01-01T00:00:00.000Z',
+          uuid: realUuid,
+        }),
+      }),
+    ).rejects.toBeInstanceOf(ExportCursorInvalidError);
+
+    // Symmetric: a past timestamp on the same real uuid never existed either.
+    await expect(
+      exportProject(db, scopeProject, {
+        cursor: forgeCursor(projectId, {
+          createdAt: '2020-01-01T00:00:00.000Z',
+          uuid: realUuid,
+        }),
+      }),
+    ).rejects.toBeInstanceOf(ExportCursorInvalidError);
+  });
+
+  it('pages without missing or duplicating rows across the whole project, including created_at ties', async () => {
+    // The boundary anchor uses the row's EXACT stored created_at (column is
+    // timestamp(3), ms precision) so the page predicate's `equal + uuid >`
+    // tie-break partitions shared-timestamp rows exactly once each — never
+    // missed, never duplicated, never an empty page while rows remain.
+    const pSuffix = randomUUID().replace(/-/g, '').slice(0, 8);
+    const preciseProjectId = `prj_precise${pSuffix}`;
+    await db.execute(
+      `INSERT INTO projects (id, team_id, name) VALUES ('${preciseProjectId}', '${teamId}', 'Boundary Anchor')`,
+    );
+
+    const uuids: string[] = [];
+    try {
+      for (let i = 0; i < 5; i++) {
+        const created = await createConcept(db, conceptInput(teamId, preciseProjectId,
+          `precise/c-${i}-${randomUUID().replace(/-/g, '').slice(0, 6)}`,
+          { title: `Precise ${i}` }));
+        uuids.push(created.uuid);
+      }
+      // Deliberate created_at TIES (same millisecond) so the uuid tie-break
+      // clause of the cursor predicate is exercised on every page boundary.
+      const stamps = [
+        '2026-04-01 03:04:00.100+00',
+        '2026-04-01 03:05:00.200+00',
+        '2026-04-01 03:05:00.200+00',
+        '2026-04-01 03:06:00.300+00',
+        '2026-04-01 03:06:00.300+00',
+      ];
+      for (let i = 0; i < uuids.length; i++) {
+        await db.execute(
+          `UPDATE concepts SET created_at = '${stamps[i]}' WHERE uuid = '${uuids[i]}'`,
+        );
+      }
+
+      const expectedRows = await db
+        .select({ uuid: schema.concepts.uuid })
+        .from(schema.concepts)
+        .where(eq(schema.concepts.projectId, preciseProjectId))
+        .orderBy(asc(schema.concepts.createdAt), asc(schema.concepts.uuid));
+      const expected = expectedRows.map((r) => r.uuid);
+
+      const scope = projectScope(teamId, preciseProjectId);
+      const pages: string[][] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await exportProject(db, scope, { limit: 2, cursor });
+        expect(page).not.toBeNull();
+        expect(page!.totalConcepts).toBe(5);
+        pages.push(page!.concepts.map((c) => c.uuid));
+        cursor = page!.nextCursor ?? undefined;
+      } while (cursor !== undefined);
+
+      const all = pages.flat();
+      expect(new Set(all).size).toBe(all.length); // no duplicates (incl. ties)
+      expect(all).toHaveLength(5); // nothing missed
+      expect(all).toEqual(expected); // exact (created_at, uuid) order
+      expect(pages.map((p) => p.length)).toEqual([2, 2, 1]);
+    } finally {
+      await db.execute(`DELETE FROM concept_contributors WHERE project_id = '${preciseProjectId}'`);
+      await db.execute(`DELETE FROM concept_evidence      WHERE project_id = '${preciseProjectId}'`);
+      await db.execute(`DELETE FROM concept_paths         WHERE project_id = '${preciseProjectId}'`);
+      await db.execute(`DELETE FROM concepts              WHERE project_id = '${preciseProjectId}'`);
+      await db.execute(`DELETE FROM projects              WHERE id = '${preciseProjectId}'`);
+    }
   });
 
   // ═══════════════════════════════════════════════════════════════════════
