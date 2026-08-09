@@ -17,6 +17,8 @@ GitHub webhook / teamem init / MCP memory_write
 
 The product's value is not “storing more observations.” It continuously compiles evidence-backed team signals into knowledge that can be merged, traced, and exported. Prioritize a real end-to-end loop, compilation quality, and the consumption experience. Do not sacrifice trustworthiness for feature count.
 
+**Ingestion criterion.** A source qualifies only when its signal anchors to a durable artifact and can be refined into settled knowledge: a landed decision, convention, or gotcha (direct), or the discussion and context that corroborate one — PR review, issue thread, commit message, existing-code scan (indirect). Ingest conclusions, not process. Undifferentiated activity streams — per-tool-call capture, chatter — are noise, not knowledge; no ingestion path may admit them (this is the principle behind the `cli_init`-only public endpoint in §6.2 and the excluded agent-capture hook suite in §9). Agent hooks belong on the distribution side (SessionStart / context injection), never on ingestion.
+
 ## 2. In-Repository Specifications and Precedence
 
 This file contains the product boundaries, Q1-Q11/N1-N8 decisions, M0-M3 milestones, and validation rules required for coding. The repository remains self-contained for implementation and validation; private planning context is supplementary. Interpret in-repository specifications in this order:
