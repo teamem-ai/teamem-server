@@ -6,6 +6,7 @@ issues), continuously compiles them with LLMs into a structured, interlinked
 knowledge base (open markdown format, fully exportable), and serves it to
 every team member's code agent over MCP with progressive disclosure.
 
+
 The core loop:
 
 ```text
@@ -58,6 +59,10 @@ curl -fsS http://127.0.0.1:8080/healthz && echo " OK"
 4. Ask, in a new agent session, for an answer **with citations** — your agent
    `search`es and `get_page`s concept pages and cites their evidence
    permalinks. That evidence-anchored answer is the product.
+
+> **Documentation.** A compiled-by-dogfooding
+> [architecture overview](./docs/architecture.md) and the
+> [contributing guide](./CONTRIBUTING.md) live in this repository.
 
 ## Monorepo layout & licensing
 

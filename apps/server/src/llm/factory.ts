@@ -831,7 +831,9 @@ interface ProviderSchema {
  * schema only has to steer the model, not gate correctness.
  */
 function toProviderSchema(schema: unknown): ProviderSchema {
-  const stripped = flattenOneOfBranches(stripSchemaAnchor(schema));
+  const stripped = collapsePrimitiveCombinators(
+    flattenOneOfBranches(stripSchemaAnchor(schema)),
+  );
   if (isObject(stripped) && stripped.type === 'object' && !hasRootCombinator(stripped)) {
     return { schema: stripped, wrapped: false };
   }
@@ -947,9 +949,23 @@ function isFlattenableBranch(
  * rejection this function exists to work around.
  *
  * Anything else (genuinely different types/shapes for the same key across
- * branches) falls back to an unconstrained `{}` — no current F1/F2 schema
- * produces this, and an unconstrained hint is still safe because the real
- * enforcement is the post-response Zod validation, not this schema.
+ * branches) previously fell back to an unconstrained `{}`. That produced a
+ * provider-side property schema without a `type` key — rejected by the
+ * OpenAI-family `response_format` validator ("schema must have a 'type'
+ * key") and by Anthropic's `input_schema` (type required on every property),
+ * which broke every F2 merge-decider call on the real F2 schema:
+ * `targetConceptId` is a UUID string in three branches and `null` in the
+ * `unrelated` branch, and `resultStatus` mixes an enum with a literal.
+ *
+ * The merged node is a steering hint only — the post-response Zod
+ * re-validation is the real contract (§5.2) — so the fallback now emits a
+ * legal, permissive node instead of an invalid one:
+ *   - all variants share one primitive type → `{ type, enum? }` merged from
+ *     the variants' `enum`/`const` values;
+ *   - mixed primitive types (string vs null) → a JSON-Schema type array
+ *     (`{ type: ['string','null'] }`), which OpenAI-family endpoints accept
+ *     and Anthropic translates without a combinator check;
+ *   - anything unmergeable → the first variant's shape, unchanged.
  */
 function mergePropertyVariants(variants: unknown[]): unknown {
   const first = variants[0];
@@ -976,7 +992,72 @@ function mergePropertyVariants(variants: unknown[]): unknown {
     return { type: (first as Record<string, unknown>).type, enum: literals };
   }
 
-  return {};
+  // Every variant is a primitive-typed node (string/null/number/…/enum):
+  // merge to a single legal `type` (or type array for nullable unions).
+  const typed = variants.filter(
+    (v): v is Record<string, unknown> => isObject(v) && typeof v.type === 'string',
+  );
+  if (typed.length === variants.length && typed.length > 0) {
+    const types = [...new Set(typed.map((v) => v.type as string))];
+    if (types.length === 1) {
+      const merged: Record<string, unknown> = { type: types[0] };
+      const allLiterals: unknown[] = [];
+      for (const variant of typed) {
+        if ('const' in variant) allLiterals.push(variant.const);
+        if (Array.isArray(variant.enum)) allLiterals.push(...variant.enum);
+      }
+      if (allLiterals.length > 0) {
+        merged.enum = [...new Set(allLiterals.map(String))];
+      }
+      return merged;
+    }
+    return { type: types };
+  }
+
+  return first;
+}
+
+/**
+ * Collapse nested `anyOf`/`oneOf` nodes whose branches are all typed
+ * primitives into a single JSON-Schema node. Zod renders `.nullable()`/
+ * `.null()` unions (and some older drafts of `.optional()`) as
+ * `{ anyOf: [{ type: T }, { type: 'null' }] }` at arbitrary depth; OpenAI-
+ * family `response_format` validation rejects a combinator without a
+ * sibling `type` key, and OpenRouter's Anthropic-family translation rejects
+ * combinators anywhere. A JSON-Schema type array is the legal, portable
+ * replacement — verified live: `{ type: ['string','null'] }` is accepted by
+ * OpenAI/Azure through OpenRouter's `response_format` while the equivalent
+ * `anyOf` is rejected with HTTP 400.
+ */
+function collapsePrimitiveCombinators(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    return node.map(collapsePrimitiveCombinators);
+  }
+  if (!isObject(node)) return node;
+
+  const recursed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) {
+    recursed[key] = collapsePrimitiveCombinators(value);
+  }
+
+  for (const key of ['anyOf', 'oneOf'] as const) {
+    const branches = recursed[key];
+    if (
+      Array.isArray(branches) &&
+      branches.length > 0 &&
+      branches.every(
+        (b) => isObject(b) && typeof (b as Record<string, unknown>).type === 'string',
+      )
+    ) {
+      const types = [
+        ...new Set(
+          branches.map((b) => (b as Record<string, unknown>).type as string),
+        ),
+      ];
+      return { type: types.length === 1 ? types[0] : types };
+    }
+  }
+  return recursed;
 }
 
 /**

@@ -1,0 +1,50 @@
+---
+okf_version: "0.1"
+---
+# Change log
+
+- 2026-08-09T12:32:49.000Z services/services/scoped-okf-bundle-download.md (9633e78b-ea48-4f8e-98d7-5ce3bb2e15f1) — Scoped OKF Bundle Download Endpoint
+- 2026-08-09T07:56:20.000Z runbooks/runbooks/e2e-script-execution.md (1800dd79-5519-4c1f-bda0-8a88546fa075) — End-to-End E2E Script Execution for M3 Check
+- 2026-08-09T06:12:28.000Z concepts/concepts/okf-bundle-format-contract.md (35776a09-cfe6-4f37-b16a-3db38264fdec) — OKF Bundle Markdown Renderer Service
+- 2026-08-09T05:14:29.000Z gotchas/gotchas/cold-start-postgres-migrations.md (07a8f2c7-d963-42d1-a829-735982e14088) — Cold Start Issues with Postgres Migrations
+- 2026-08-01T01:36:44.000Z runbooks/runbooks/run-governance-security-script.md (ac6f40db-7913-4582-9857-f59c5a7e6864) — How to run the M2 governance and security verification script
+- 2026-08-01T00:02:06.000Z services/services/m2-cold-deploy-acceptance-script.md (bb8da206-4d0e-4a5a-9252-1cee0f9f66e2) — M2 Cold Deploy Acceptance Script
+- 2026-07-31T02:53:11.000Z services/services/auth-entry-pages.md (b0140138-f497-45dd-862f-542968b7dca2) — Auth Entry Pages - Login and Invite Acceptance with GitHub OAuth
+- 2026-07-31T02:45:10.000Z decisions/decisions/onboarding-wizard-design.md (e210980c-8ac9-4e24-9f05-1e05fc20859a) — Design Decisions for Onboarding Wizard Implementation
+- 2026-07-30T23:38:45.000Z decisions/decisions/key-minting-governance-separation.md (12341b45-9e16-4c2a-9cc3-f963d6770f39) — Key Minting and Governance Separation Decisions
+- 2026-07-30T11:54:33.000Z services/services/web-session-role-auth.md (b9c04aea-11c5-4523-8037-bd3740166178) — Web Session Middleware and Role-Based Authorization Middleware with Append-Only Audit Writer for Sensitive Reads
+- 2026-07-30T09:59:54.000Z decisions/decisions/budget-strategy-context-injection.md (0e26700a-b3a9-4d34-bff8-71b04a0dcd18) — Budget Strategy for Context Injection Endpoint
+- 2026-07-28T12:13:05.000Z gotchas/gotchas/compilequeue-contract-violation.md (a601ad75-72b4-4978-876d-7cabefbb5e9b) — Producer/Consumer Contract Violation in CompileQueue
+- 2026-07-24T01:44:56.000Z decisions/decisions/document-trusted-publishing-workflow.md (2fc4d188-deb5-4eb3-909a-ced1f651e028) — Document Trusted Publishing Workflow
+- 2026-07-24T01:07:24.000Z decisions/decisions/publish-schema-package.md (395f13da-f678-476c-8408-61c82c73f70a) — Publishing and Release Steps for the @teamem/schema Package
+- 2026-07-23T05:39:18.000Z decisions/decisions/m1-quality-metrics-report.md (bf452a55-6a93-4812-8388-2804eccbc391) — Decisions regarding M1 Quality Metrics Report
+- 2026-07-23T05:06:24.000Z gotchas/gotchas/capability-detection-bug.md (ed8e0968-1101-4dd8-b0e8-2ae933dd6079) — Capability Detection Bug in QA Script
+- 2026-07-23T04:55:42.000Z services/services/f2-merge-quality-metric-script.md (c7603753-3f17-4ae4-9272-f1486894da16) — F2 Merge Quality Metric Script
+- 2026-07-23T04:53:40.000Z services/services/m1-why-moment-demo-script.md (4ddfd233-6eca-48f4-a902-da80975e47b4) — M1 why-moment end-to-end demo script
+- 2026-07-23T04:21:02.000Z services/services/merge-into-concept.md (821fcdf4-8dda-432c-9e47-99b5ac91fd8e) — mergeIntoConcept – F2 Persistence Layer for Concept Merges
+- 2026-07-23T03:31:19.000Z decisions/decisions/expose-v1-search-route.md (13a91f9e-eabf-46a6-b9d0-e3e0c515869e) — Expose POST /v1/search route with explicit limit validation
+- 2026-07-22T07:39:16.000Z services/services/f1-signal-to-noise-metric-script.md (4b7b0f8c-284a-4327-8195-99fb1497dcbd) — F1 Signal-to-Noise Metric Script
+- 2026-07-22T07:32:09.000Z services/services/mcp-search-tool.md (2a4f45b1-21e5-4d7b-8e12-d995ba1673f3) — MCP Search Tool Implementation & Recall Candidates Service
+- 2026-07-22T07:05:30.000Z services/services/memory-write-tool.md (9143e2f3-9096-458f-82e6-40584d5a64e0) — memory_write Tool
+- 2026-07-22T06:02:44.000Z decisions/decisions/timeline-tool-design.md (c8c468df-efb7-43e3-a140-368b90e40501) — Key design decisions for the MCP timeline tool
+- 2026-07-22T05:14:11.000Z gotchas/gotchas/meaningless-commit-messages.md (e7562365-a1e4-4276-926c-63b8f3fa820b) — Avoid Using Meaningless Commit Messages
+- 2026-07-22T05:13:37.000Z gotchas/gotchas/missing-read-scope-enforcement.md (b8f7da0f-534e-434b-9570-e7ffd50f884e) — Missing Read Scope Enforcement on `get_page` Tool and ScopeContext
+- 2026-07-21T23:32:11.000Z services/services/embedding-client.md (31ea0234-a5a8-479c-99c0-8c25051ced63) — EmbeddingClient Service for Text-to-Vector Generation
+- 2026-07-21T23:30:15.000Z concepts/concepts/f2-merge-decision-structured-output-contract.md (24c032ac-fc8f-40fb-96ef-6d9a26a69ddd) — F2 Merge-Decision Structured Output Contract
+- 2026-07-21T23:19:10.000Z services/services/mcp-streamable-http-endpoint.md (68daf22c-9122-41ed-9c87-5dcfc9036f9d) — MCP Streamable HTTP Endpoint
+- 2026-07-20T13:36:05.000Z runbooks/runbooks/run-m0-compose-smoke-script.md (0f1fc369-f863-4427-8d7b-4c72bc2c8149) — How to Run m0-compose-smoke.sh for Docker Compose Validation
+- 2026-07-20T03:56:19.000Z services/services/events-api.md (2c19b7e6-7ff5-4995-9628-1bf85b9a5192) — Events API
+- 2026-07-20T03:51:08.000Z decisions/decisions/get-concepts-endpoint.md (47a4c078-9c46-47ce-9f63-84c3f638b177) — Design Decisions for GET /v1/concepts Endpoint Implementation
+- 2026-07-20T02:56:08.000Z services/services/github-connector.md (5167d068-e8f6-4798-aad5-b5d820f90a59) — GitHub Connector with Smoke Test Integration and Pull Request Webhook Normalizer
+- 2026-07-19T13:03:35.000Z services/services/to-concept-mapper.md (5e8ce294-23a8-439c-b65f-6224f7794aae) — toConcept Mapper
+- 2026-07-19T12:35:25.000Z services/services/github-app-api-client.md (64575abb-838f-45db-a405-31730c0ae5d9) — GitHub App API Client
+- 2026-07-19T11:58:04.000Z services/services/job-repository.md (67285d1e-c31c-4b2b-b1c3-cbd8820d23b9) — Job Repository and enqueueCompilation Service
+- 2026-07-19T11:53:59.000Z services/services/concept-page-persistence-repository.md (c525c09b-fd8e-4d1c-8249-b34f9d59cd3d) — Concept Page Persistence Repository
+- 2026-07-19T11:48:25.000Z services/services/idempotent-event-repository.md (46d8ae59-06e1-414d-acfc-04bf272a70e2) — Idempotent Event Repository
+- 2026-07-19T06:18:40.000Z services/services/upsert-principal-repository.md (c0008db5-7cb3-4719-882e-c29747d222df) — Principal Upsert Repository
+- 2026-07-19T01:03:42.000Z decisions/decisions/minimal-f1-structured-output.md (489a9e09-71f2-4932-a109-c02ce0680264) — Wired Full F1 to F2 Compilation Pipeline and Minimal F1 Structured-Output Contract Decisions
+- 2026-07-18T14:03:27.000Z decisions/decisions/production-docker-image.md (03755c7f-aa57-421f-8128-e44a68987200) — Production Docker Image Build Decision
+- 2026-07-18T13:37:50.000Z services/services/server-worker-entry-points.md (fd3f6405-062d-430c-9b81-3c6272ef6143) — Server and Worker Process Entry Points and Hono HTTP Runtime Decision
+- 2026-07-18T13:18:26.000Z decisions/decisions/postgres-testing-helpers.md (da2044f0-774c-4867-a37c-6278af9ea66b) — Design Decisions for PostgreSQL Integration Testing
+- 2026-07-18T12:42:53.000Z decisions/decisions/validate-server-env-vars.md (db62771d-31bc-4207-9a5f-71a53a23e057) — Validation of Server Environment Variables
+- 2026-07-18T11:28:54.000Z decisions/decisions/close-generic-connector-persistence-seam.md (20f30c7a-455d-4561-8978-b39ab4ca38b2) — Close the Generic Connector Persistence Seam
