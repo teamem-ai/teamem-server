@@ -19,7 +19,7 @@
  * failure means the server violated the contract — it is surfaced as an
  * error, never silently swallowed.
  */
-import { inviteLookupResponse } from "@teamem/schema";
+import { inviteLookupResponse, OKF_FORMAT_VERSION } from "@teamem/schema";
 import type {
   ConceptSummary,
   Concept,
@@ -78,8 +78,10 @@ export class ApiError extends Error {
 }
 
 /**
- * Audit write failed → the server refuses to return the payload.
- * This is the fail-closed lock state on event detail pages.
+ * Audit write failed → the server refuses to return the payload (event
+ * detail) or the archive (OKF export). This is the fail-closed lock state
+ * on event detail pages and on GET /v1/export: a bulk knowledge read must
+ * not go unrecorded (N7 / AGENTS.md §6.3).
  */
 export class AuditWriteFailedError extends ApiError {
   constructor(
@@ -244,6 +246,100 @@ export async function searchConcepts(params: SearchParams): Promise<SearchRespon
 
 export async function fetchContext(projectId: string): Promise<ContextResponse> {
   return get("/context", { projectId });
+}
+
+// ── OKF export (M3-EXPORT-05 — consumes GET /v1/export) ────────────────────
+
+/**
+ * A successful OKF bundle download: the raw .tar.gz archive plus the
+ * filename sent by the server's Content-Disposition header.
+ */
+export interface ExportDownload {
+  /** e.g. "web-app-okf-0.1.tar.gz" — taken from the server, never guessed. */
+  filename: string;
+  /** The raw gzip archive bytes. */
+  blob: Blob;
+}
+
+/** Parse the `filename="..."` (or bare `filename=...`) part of a
+ *  Content-Disposition header. Returns null when absent. */
+function contentDispositionFilename(value: string | null): string | null {
+  if (!value) return null;
+  const quoted = /filename="([^"]+)"/i.exec(value);
+  if (quoted) return quoted[1] ?? null;
+  const bare = /filename=([^;]+)/i.exec(value);
+  return bare ? (bare[1] ?? "").trim() : null;
+}
+
+/**
+ * Download the scoped project's OKF bundle: GET /v1/export?projectId=...
+ *
+ * Uses the web session cookie (the server enforces member+ itself; the UI
+ * additionally hides the entry for viewer). Success returns the binary
+ * archive with the server-provided filename — never a client-side guess.
+ *
+ * Error handling is explicit, not silent:
+ *   - Non-2xx responses surface the standard error envelope as an
+ *     {@link ApiError} with the server's message; the fail-closed
+ *     export.download audit lock (500 + details.audit_failed) becomes an
+ *     {@link AuditWriteFailedError} so the UI can explain it.
+ *   - A 200 that is not a gzip archive is a contract violation and is
+ *     rejected rather than downloaded as a broken file.
+ */
+export async function downloadExportFile(projectId: string): Promise<ExportDownload> {
+  const url = new URL(`${BASE}/export`, window.location.origin);
+  url.searchParams.set("projectId", projectId);
+
+  const res = await fetch(url.toString(), { credentials: "same-origin" });
+  if (!res.ok) {
+    let body: ErrorEnvelope = {};
+    try {
+      body = (await res.json()) as ErrorEnvelope;
+    } catch {
+      // ignore parse failures — fall through to the generic ApiError
+    }
+
+    // Detect the fail-closed audit state (mirrors the JSON request() helper).
+    const isAuditFailed =
+      res.status === 500 &&
+      (body.error?.details?.audit_failed === true ||
+        body.error?.details?.audit_failed === "true");
+    if (isAuditFailed) {
+      throw new AuditWriteFailedError(
+        res.status,
+        body.error?.code ?? "internal",
+        body.error?.message ?? "Internal error",
+        body.error?.details,
+        body.requestId,
+      );
+    }
+
+    throw new ApiError(
+      res.status,
+      body.error?.code ?? "unknown",
+      body.error?.message ?? `HTTP ${res.status}`,
+      body.error?.details,
+      body.requestId,
+    );
+  }
+
+  // Honesty guard: the contract says application/gzip. A 200 with anything
+  // else would be silently downloaded as a broken file — reject it instead.
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType && !contentType.includes("gzip")) {
+    throw new ApiError(
+      res.status,
+      "unexpected_response",
+      "Export returned an unexpected response type",
+      undefined,
+      res.headers.get("x-request-id") ?? undefined,
+    );
+  }
+
+  const filename =
+    contentDispositionFilename(res.headers.get("content-disposition")) ??
+    `teamem-okf-${OKF_FORMAT_VERSION}.tar.gz`;
+  return { filename, blob: await res.blob() };
 }
 
 // ── Events (listResponse / itemResponse envelopes) ─────────────────────────

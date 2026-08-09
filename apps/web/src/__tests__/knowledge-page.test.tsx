@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   fetchProjects: vi.fn(),
   fetchConcepts: vi.fn(),
   searchConcepts: vi.fn(),
+  downloadExportFile: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -29,6 +30,7 @@ vi.mock("@/lib/api", () => ({
   fetchProjects: (...args: unknown[]) => mocks.fetchProjects(...args),
   fetchConcepts: (...args: unknown[]) => mocks.fetchConcepts(...args),
   searchConcepts: (...args: unknown[]) => mocks.searchConcepts(...args),
+  downloadExportFile: (...args: unknown[]) => mocks.downloadExportFile(...args),
   ApiError: class ApiError extends Error {
     status: number;
     code: string;
@@ -36,6 +38,18 @@ vi.mock("@/lib/api", () => ({
     constructor(status: number, code: string, message: string, details?: unknown) {
       super(message);
       this.name = "ApiError";
+      this.status = status;
+      this.code = code;
+      this.details = details;
+    }
+  },
+  AuditWriteFailedError: class AuditWriteFailedError extends Error {
+    status: number;
+    code: string;
+    details?: unknown;
+    constructor(status: number, code: string, message: string, details?: unknown) {
+      super(message);
+      this.name = "AuditWriteFailedError";
       this.status = status;
       this.code = code;
       this.details = details;
