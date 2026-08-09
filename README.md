@@ -223,8 +223,14 @@ After sign-in you land on the app landing page. From there you can:
 
 ### 6. Wire up GitHub webhook (for event ingestion)
 
+Copy your project ID (`prj_...`) from **Settings → Project** — the webhook route requires it in
+the URL so each delivery is routed to the right project.
+
 Go to your GitHub App settings → **Webhook** and set:
-- **Payload URL**: `http://<your-host>:8080/v1/webhooks/github`
+- **Payload URL**: `http://<your-host>:8080/v1/connectors/github/webhook?project=<your-project-id>`
+  (**the `?project=prj_...` query parameter is required** — without it every delivery is rejected
+  with a generic `400 Bad request`, even for events GitHub sends automatically regardless of your
+  subscriptions, like `installation`)
 - **Content type**: `application/json`
 - **Secret**: the same value as `TEAMEM_GITHUB_WEBHOOK_SECRET` in your `.env`
 
@@ -306,6 +312,19 @@ docker compose logs -f worker | grep llm_debug
 
 Keep it **off** (blank) in production; it is a diagnostics aid, not a
 steady-state setting.
+
+### GitHub events never show up in the portal
+
+If you created a PR/commit/issue and it never appears under **Events**, check GitHub App settings →
+**Advanced → Recent Deliveries** first — it tells you immediately whether GitHub ever attempted a
+delivery, and if so, what your server returned:
+
+| Recent Deliveries shows | Likely cause |
+|---|---|
+| **Nothing at all** (no rows, not even failed ones) | Either the event happened *before* the webhook was fully configured and saved (GitHub never retroactively delivers — trigger a fresh event, e.g. a new PR comment, and check again), or the App isn't actually installed on this repo, or the webhook's "Active" toggle is off. |
+| **A delivery with `400 Bad request`** | Almost always the Payload URL is missing the required `?project=<your-project-id>` query parameter (see step 6 above) — every delivery is rejected before teamem even looks at the event type. This also fires for GitHub's automatic meta-events (`installation`, `ping`) that arrive regardless of your event subscriptions. |
+| **A delivery with `401`** | `TEAMEM_GITHUB_WEBHOOK_SECRET` in `.env` doesn't match the Secret configured on the GitHub App — signature verification is rejecting it. |
+| **A delivery with `200`**, still nothing in the portal | Ingestion succeeded; the issue is downstream (compilation). Check **Jobs** for a failed job, or see "Compilation failures" above. |
 
 ## Tech stack (decided)
 
