@@ -523,7 +523,11 @@ function evidenceLabel(ev: Evidence): string {
     case "repo_file":
       return "Repo file ingested";
     case "pr":
-      return "PR merged";
+      // The frozen evidence.pr contract carries only {kind, ref, at} — no
+      // merged/state field — so this can never assert "merged" (or "closed",
+      // or "opened") without risking a false claim about a PR we don't
+      // actually know the outcome of. Match the rail's evidenceKindLabel.
+      return "Pull request";
     case "commit":
       return "Push · commit";
     case "mcp_write":

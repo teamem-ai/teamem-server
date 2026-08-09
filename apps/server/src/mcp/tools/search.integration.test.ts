@@ -617,7 +617,7 @@ describe.skipIf(!url)('MCP search tool (live Postgres)', () => {
       }
 
       // credentialId must not be a plaintext token
-      expect(row.credentialId!).not.toContain('tm_');
+      expect(row.credentialId!).not.toContain('tok_');
       expect(row.credentialId!).toMatch(/^key_/);
     });
   });

@@ -1,16 +1,13 @@
 /**
  * Step 2 — Connect an LLM provider.
  *
- * The server configures LLM providers via environment variables at deploy
- * time (TEAMEM_ANTHROPIC_API_KEY, TEAMEM_OPENAI_API_KEY, etc.) — there is
- * no web-writable LLM configuration endpoint.  This step is therefore
- * educational: it shows the four BYO provider options with their
- * embedding capabilities so the operator knows which env vars to set.
- *
- * The FTS degradation warning is explicit (R2) — providers without
- * embedding API (Anthropic) result in keyword-only search.
+ * The selected provider is saved to the team's LLM config (PUT /v1/teams/:id/llm,
+ * provider only) so it carries through to Settings → LLM and drives compilation.
+ * The API key is added later in Settings (or via env). The FTS degradation
+ * warning is explicit (R2) — providers without an embedding API (Anthropic)
+ * result in keyword-only search.
  */
-import { LLM_PROVIDERS, type LlmProviderMeta } from "./onboarding-api";
+import { LLM_PROVIDERS, saveLlmProvider, ApiRequestError, type LlmProviderMeta } from "./onboarding-api";
 import { AlertTriangle, Zap } from "lucide-react";
 import { useState } from "react";
 
@@ -21,6 +18,7 @@ export interface Step2Data {
 }
 
 export function Step2LlmProvider({
+  teamId,
   onComplete,
   onBack,
   onSkip,
@@ -31,14 +29,16 @@ export function Step2LlmProvider({
   onSkip: () => void;
 }) {
   const [selected, setSelected] = useState<LlmProviderMeta["kind"] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const selectedMeta = selected
     ? LLM_PROVIDERS.find((p) => p.kind === selected) ?? null
     : null;
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (!selectedMeta) {
-      // No provider selected yet — proceed with defaults
+      // No provider selected — proceed without recording a choice.
       onComplete({
         providerKind: "claude",
         hasSemanticSearch: false,
@@ -46,6 +46,23 @@ export function Step2LlmProvider({
       });
       return;
     }
+
+    // Persist the selection so Settings → LLM reflects it and compilation
+    // uses this provider (once a key is added).
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await saveLlmProvider(teamId, selectedMeta.kind);
+    } catch (err) {
+      setSaveError(
+        err instanceof ApiRequestError
+          ? err.message
+          : "Couldn't save your provider selection. You can set it in Settings → LLM.",
+      );
+      setSaving(false);
+      return;
+    }
+    setSaving(false);
     onComplete({
       providerKind: selectedMeta.kind,
       hasSemanticSearch: selectedMeta.hasEmbedding,
@@ -58,8 +75,8 @@ export function Step2LlmProvider({
       <h1>Connect an LLM provider</h1>
       <p className="wiz-sub">
         Compilation runs on your own LLM account — events are distilled into
-        concept pages by the model you choose. Your key is configured at deploy
-        time via environment variables and never leaves your infrastructure.
+        concept pages by the model you choose. Pick a provider now; add its API
+        key (and an optional model) afterwards in Settings → LLM.
       </p>
 
       <div className="card card-pad">
@@ -116,13 +133,19 @@ export function Step2LlmProvider({
         <div className="banner info" style={{ marginTop: 14 }}>
           <Zap className="ic" />
           <div>
-            <span className="b-title">LLM is configured at deploy time.</span>{" "}
-            Set <code className="mono">TEAMEM_ANTHROPIC_API_KEY</code>,{" "}
-            <code className="mono">TEAMEM_OPENAI_API_KEY</code>, or{" "}
-            <code className="mono">TEAMEM_OPENROUTER_API_KEY</code> in your
-            environment. See the deployment docs for details. Select a provider
-            above to see whether semantic search will be available.
+            <span className="b-title">Pick the provider you&apos;ll use.</span>{" "}
+            We&apos;ll remember your choice — add the API key next in{" "}
+            <strong>Settings → LLM</strong> (or set it via environment
+            variables). Select a provider above to see whether semantic search
+            will be available.
           </div>
+        </div>
+      )}
+
+      {saveError && (
+        <div className="banner error" style={{ marginTop: 14 }} role="alert">
+          <AlertTriangle className="ic" />
+          <div>{saveError}</div>
         </div>
       )}
 
@@ -142,10 +165,13 @@ export function Step2LlmProvider({
           type="button"
           className="btn btn-primary"
           onClick={handleContinue}
+          disabled={saving}
         >
-          {selectedMeta && !selectedMeta.hasEmbedding
-            ? "Continue anyway"
-            : "Continue"}
+          {saving
+            ? "Saving…"
+            : selectedMeta && !selectedMeta.hasEmbedding
+              ? "Continue anyway"
+              : "Continue"}
         </button>
       </div>
     </div>

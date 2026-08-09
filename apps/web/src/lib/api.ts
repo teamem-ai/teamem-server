@@ -319,6 +319,24 @@ export async function fetchJobDetail(
   );
 }
 
+/**
+ * Re-run a compile job's events. Admin+ only — the server enforces this too.
+ * `mode: 'failed'` (default) only re-runs events that failed, leaving
+ * already-compiled/skipped ones alone; `'all'` re-runs every event,
+ * mirroring GitHub Actions' "re-run failed jobs" vs "re-run all jobs".
+ */
+export async function retryJob(
+  jobId: string,
+  projectId: string,
+  mode: "failed" | "all" = "failed",
+): Promise<{ id: string; status: JobStatus; mode: "failed" | "all" }> {
+  const res = await post<{
+    requestId: string;
+    data: { id: string; status: JobStatus; mode: "failed" | "all" };
+  }>(`/jobs/${encodeURIComponent(jobId)}/retry`, { projectId, mode });
+  return res.data;
+}
+
 export type { Job, JobEventResult, JobStatus, JobInitiator };
 
 // ── Session (used by login/invite flows, distinct from fetchMe: returns
@@ -465,9 +483,18 @@ export async function fetchMembers(): Promise<MemberEntry[]> {
   return json.data;
 }
 
-/** List API keys for the current team (requires web session, admin+). */
+/** List API keys for the current team (requires web session, admin+).
+ *  Server returns the standard listResponse envelope ({requestId, data,
+ *  nextCursor}) — must unwrap .data, same as fetchProjects below. Using
+ *  rawRequest directly here (as this used to) silently assigns the whole
+ *  envelope object to a variable typed KeyEntry[], which compiles fine
+ *  (the cast is unchecked) but crashes at runtime the first time a caller
+ *  iterates it: "TypeError: ... is not iterable". */
 export async function fetchKeys(teamId: string): Promise<KeyEntry[]> {
-  return rawRequest<KeyEntry[]>(`/v1/teams/${encodeURIComponent(teamId)}/keys`);
+  const resp = await rawRequest<{ requestId: string; data: KeyEntry[] }>(
+    `/v1/teams/${encodeURIComponent(teamId)}/keys`,
+  );
+  return resp.data;
 }
 
 /** Change a member's role (owner only). */

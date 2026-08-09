@@ -13,13 +13,12 @@ import { loadRuntimeConfig } from './config/runtime.js';
 import { parseServerEnv } from './config/env.js';
 import { startRuntime, type Runtime, type RuntimeStartup } from './composition-root.js';
 import { createDbHandle } from './db/client.js';
+import { runMigrations } from './db/migrate.js';
 import { createCompileQueue } from './queue/boss.js';
-import {
-  createNoProviderHandler,
-  startEmbeddedWorker,
-} from './worker/embedded.js';
+import { startEmbeddedWorker } from './worker/embedded.js';
 import { createCompileJobHandler } from './queue/worker.js';
-import { createLlmClient } from './llm/factory.js';
+import { startStaleJobReclaimer } from './queue/stale-job-reclaimer.js';
+import { createTeamLlmResolver } from './llm/resolve-team-llm.js';
 import { createEmbeddingClient } from './llm/embedding/factory.js';
 import { startServer } from './server.js';
 import type { GitHubOAuthConfig } from './auth/oauth-github.js';
@@ -27,6 +26,8 @@ import { bootstrapMain } from './commands/bootstrap.js';
 import { installShutdownHandlers } from './lifecycle.js';
 import { GitHubConnector } from './connectors/github/connector.js';
 import { registerConnector } from './connectors/registry.js';
+import { createGitHubAppCredentialsProvider } from './connectors/github/app-credentials.js';
+import { createGitHubApiClient, type GitHubApiClient } from './connectors/github/app-api-client.js';
 
 /** Build the real startup factories over a validated runtime config. */
 export function createRuntimeStartup(config: {
@@ -36,19 +37,40 @@ export function createRuntimeStartup(config: {
   const dbHandle = createDbHandle(config.databaseUrl);
   const queue = createCompileQueue(config.databaseUrl);
 
-  // Resolve LLM config from the environment for the embedded worker.
+  // Resolve LLM config from the environment. This is the fallback for teams
+  // that have not saved a provider in Settings → LLM; per-team BYO config
+  // (resolved at job time) takes precedence. The embedding client here serves
+  // the HTTP read path (search / MCP); the compile worker resolves its own.
   const env = parseServerEnv();
   const llmProvider = env.llmProviders[0];
-  const llm =
-    llmProvider ? createLlmClient(llmProvider) : undefined;
   const embeddingClient =
     llmProvider ? createEmbeddingClient(llmProvider) : null;
+
+  // GitHub App REST API client (installation repo list for Settings →
+  // Ingestion). Needs the three credentials that let us mint an installation
+  // token; OAuth client id/secret are irrelevant to this call, so this is a
+  // narrower gate than githubAppConfigured.
+  let githubApiClient: GitHubApiClient | undefined;
+  if (env.github?.appId && env.github?.installationId && env.github?.privateKey) {
+    const credentialsProvider = createGitHubAppCredentialsProvider({
+      appId: env.github.appId,
+      installationId: env.github.installationId,
+      privateKey: env.github.privateKey,
+    });
+    githubApiClient = createGitHubApiClient(credentialsProvider);
+  }
 
   return {
     async startDatabase() {
       // Prove connectivity so a dead database fails startup fast rather than
       // surfacing later as a mysterious query error.
       await dbHandle.db.execute('select 1');
+      // Apply pending schema migrations before anything serves traffic. A
+      // fresh Postgres volume has no tables until this runs, and every
+      // sign-in / write would otherwise fail at the database layer. Runs
+      // only in the server process (the worker never migrates); idempotent
+      // and skippable via TEAMEM_AUTO_MIGRATE=false.
+      await runMigrations(dbHandle.db, (m) => console.log(`[runtime] ${m}`));
       return { stop: () => dbHandle.close() };
     },
     async startQueue() {
@@ -77,6 +99,9 @@ export function createRuntimeStartup(config: {
         queue,
         embeddingClient,
         githubOAuth,
+        githubAppConfigured: env.githubAppConfigured,
+        githubWebhookConfigured: env.github?.webhookSecret !== undefined,
+        githubApiClient,
       });
       // `serve()` from @hono/node-server starts listening asynchronously.
       // Wait for the server to be ready so an EADDRINUSE failure surfaces
@@ -97,21 +122,35 @@ export function createRuntimeStartup(config: {
       };
     },
     async startWorker() {
-      if (!llm) {
+      if (!llmProvider) {
         console.warn(
-          '[runtime] no LLM provider configured — embedded worker will start but ' +
-          'compilation will fail. Configure TEAMEM_ANTHROPIC_API_KEY, ' +
-          'TEAMEM_OPENAI_API_KEY, or equivalent.',
+          '[runtime] no env LLM provider configured — teams that have not saved ' +
+          'a provider in Settings → LLM will have their compile jobs fail with ' +
+          'no_llm_provider. Configure TEAMEM_ANTHROPIC_API_KEY, ' +
+          'TEAMEM_OPENAI_API_KEY, or equivalent, or set one in the portal.',
         );
       }
-      // Use the real handler when an LLM is configured. Without one, the
-      // no-provider handler still claims each job and moves it to a terminal
-      // `failed` state, so the row does not sit in `queued` forever with no
-      // consumer that will ever return to it.
-      const handler = llm
-        ? createCompileJobHandler({ db: dbHandle.db, llm, embeddingClient })
-        : createNoProviderHandler(dbHandle.db);
-      return startEmbeddedWorker(queue, handler);
+      // Resolve the LLM per job from the team's saved BYO config (provider,
+      // key, chosen model), falling back to the env provider. The handler
+      // fails a job with `no_llm_provider` when neither is available, so the
+      // row reaches a terminal state instead of sitting queued forever.
+      const resolveLlm = createTeamLlmResolver({
+        db: dbHandle.db,
+        fallback: llmProvider,
+      });
+      const handler = createCompileJobHandler({ db: dbHandle.db, resolveLlm });
+      const embeddedWorker = await startEmbeddedWorker(queue, handler);
+      // Recover jobs a previous process left stuck in `processing` when it
+      // was killed mid-job (see stale-job-reclaimer.ts) — otherwise those
+      // rows never reach a terminal state and `/retry` keeps rejecting them
+      // as "already running".
+      const staleJobReclaimer = startStaleJobReclaimer(dbHandle.db);
+      return {
+        async stop() {
+          staleJobReclaimer.stop();
+          await embeddedWorker.stop();
+        },
+      };
     },
   };
 }

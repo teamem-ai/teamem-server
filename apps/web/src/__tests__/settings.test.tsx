@@ -317,6 +317,89 @@ describe("SettingsSourcesPage", () => {
     });
   });
 
+  it("links to GitHub's installed-apps page (not the developer console) to select repos", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (url: string | URL | Request) => {
+        const urlStr =
+          typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+        if (urlStr.includes("/connectors")) {
+          return Promise.resolve(
+            mockFetchResponse({
+              github: {
+                connected: true,
+                appName: null,
+                installedOn: null,
+                repositories: [],
+                webhookSecretConfigured: true,
+                recentDeliveries: [],
+              },
+              cli: { lastInit: { at: null, repo: null, commitSha: null, eventsCount: 0, pagesCount: 0 }, activeKeysWithWrite: 0 },
+              mcp: { endpointHealthy: true, activeKeysWithWrite: 0 },
+            }) as Response,
+          );
+        }
+        return Promise.resolve(mockFetchResponse([]) as Response);
+      },
+    );
+
+    renderPage(SettingsSourcesPage);
+
+    await waitFor(() => {
+      expect(screen.getByText("Connected")).toBeInTheDocument();
+    });
+
+    // Empty repo state points at the button, not a dead end.
+    expect(
+      screen.getByText(/No repositories selected — choose which ones below/),
+    ).toBeInTheDocument();
+  });
+
+  it("does not show a dead 'Regenerate…' button for the webhook secret", async () => {
+    // Regression: this button previously had no onClick at all — clicking it
+    // did nothing, silently. The webhook secret is env-configured
+    // (TEAMEM_GITHUB_WEBHOOK_SECRET) with no in-app rotation mechanism, so
+    // it should say that honestly instead of offering a non-functional action.
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (url: string | URL | Request) => {
+        const urlStr =
+          typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+        if (urlStr.includes("/connectors")) {
+          return Promise.resolve(
+            mockFetchResponse({
+              github: {
+                connected: true,
+                appName: null,
+                installedOn: null,
+                repositories: [],
+                webhookSecretConfigured: true,
+                recentDeliveries: [],
+              },
+              cli: { lastInit: { at: null, repo: null, commitSha: null, eventsCount: 0, pagesCount: 0 }, activeKeysWithWrite: 0 },
+              mcp: { endpointHealthy: true, activeKeysWithWrite: 0 },
+            }) as Response,
+          );
+        }
+        return Promise.resolve(mockFetchResponse([]) as Response);
+      },
+    );
+
+    renderPage(SettingsSourcesPage);
+
+    await waitFor(() => {
+      expect(screen.getByText("Connected")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Regenerate…")).toBeNull();
+    expect(
+      screen.getByText(/there is no in-app rotation/),
+    ).toBeInTheDocument();
+
+    // https://github.com/settings/apps is the developer console (apps you
+    // authored) — not where an installed App's repo access is managed.
+    const link = screen.getByRole("link", { name: /Select repositories on GitHub/ });
+    expect(link).toHaveAttribute("href", "https://github.com/settings/installations");
+  });
+
   it("mints a write key and shows the actionable CLI/MCP command", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     fetchSpy.mockImplementation((url: string | URL | Request) => {
@@ -406,6 +489,93 @@ describe("SettingsLlmPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/Unavailable — keyword/)).toBeInTheDocument();
     });
+  });
+
+  it("reflects the saved model and loads provider models into the dropdown", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (url: string | URL | Request) => {
+        const urlStr =
+          typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+        if (urlStr.includes("/llm/models")) {
+          return Promise.resolve(
+            mockFetchResponse({ models: ["gpt-4o", "gpt-4o-mini"] }) as Response,
+          );
+        }
+        if (urlStr.includes("/llm")) {
+          return Promise.resolve(
+            mockFetchResponse({
+              provider: "openai",
+              model: "gpt-4o",
+              hasKey: true,
+              lastTest: null,
+              semanticRetrieval: { available: true, mode: "vector", reason: null },
+            }) as Response,
+          );
+        }
+        return Promise.resolve(mockFetchResponse([]) as Response);
+      },
+    );
+
+    renderPage(SettingsLlmPage);
+
+    // The saved model is shown in the combobox input.
+    await waitFor(() => {
+      const input = screen.getByLabelText("Model") as HTMLInputElement;
+      expect(input.value).toBe("gpt-4o");
+    });
+
+    // Focusing opens the typeahead; the auto-loaded models appear as options
+    // (the current exact match shows the full list so you can pick another).
+    fireEvent.focus(screen.getByLabelText("Model"));
+    await waitFor(() => {
+      expect(
+        screen.getByRole("option", { name: "gpt-4o-mini" }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  it("filters models as you type in the model combobox", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (url: string | URL | Request) => {
+        const urlStr =
+          typeof url === "string" ? url : url instanceof URL ? url.href : url.url;
+        if (urlStr.includes("/llm/models")) {
+          return Promise.resolve(
+            mockFetchResponse({
+              models: ["gpt-4o", "gpt-4o-mini", "o1-preview"],
+            }) as Response,
+          );
+        }
+        if (urlStr.includes("/llm")) {
+          return Promise.resolve(
+            mockFetchResponse({
+              provider: "openai",
+              model: null,
+              hasKey: true,
+              lastTest: null,
+              semanticRetrieval: { available: true, mode: "vector", reason: null },
+            }) as Response,
+          );
+        }
+        return Promise.resolve(mockFetchResponse([]) as Response);
+      },
+    );
+
+    renderPage(SettingsLlmPage);
+
+    const input = await screen.findByLabelText("Model");
+    // Wait for models to auto-load.
+    await waitFor(() => {
+      fireEvent.focus(input);
+      expect(screen.getByRole("option", { name: "o1-preview" })).toBeInTheDocument();
+    });
+
+    // Typing "mini" filters to just the matching model.
+    fireEvent.change(input, { target: { value: "mini" } });
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "gpt-4o-mini" })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("option", { name: "o1-preview" })).toBeNull();
   });
 
   it("hides provider management from viewer", async () => {
@@ -561,32 +731,39 @@ describe("SettingsTeamPage", () => {
     });
   });
 
-  it("shows New team button", async () => {
+  it("does NOT offer creating additional teams (single-team portal)", async () => {
     mockEmptyLists();
     renderPage(SettingsTeamPage);
+    // Wait for the team card to render, then assert no create affordance.
     await waitFor(() => {
-      expect(screen.getByText("New team")).toBeInTheDocument();
+      expect(screen.getByText("Danger zone")).toBeInTheDocument();
     });
+    expect(screen.queryByText("New team")).toBeNull();
+    expect(screen.queryByText("Create team")).toBeNull();
+    expect(screen.queryByText(/belong to multiple teams/)).toBeNull();
+    expect(screen.queryByText(/Switch teams from the top bar/)).toBeNull();
   });
 
-  it("shows multi-team hint text", async () => {
+  it("states the portal uses a single team", async () => {
     mockEmptyLists();
     renderPage(SettingsTeamPage);
     await waitFor(() => {
       expect(
-        screen.getByText(/You can belong to multiple teams/)
+        screen.getByText(/This portal uses a single team/)
       ).toBeInTheDocument();
     });
   });
 
-  it("shows empty state when no teams exist", async () => {
+  it("shows empty state (without a create-team action) when no team exists", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       mockFetchResponse([]) as Response
     );
     renderPage(SettingsTeamPage);
     await waitFor(() => {
-      expect(screen.getByText("No teams yet")).toBeInTheDocument();
+      expect(screen.getByText("No team yet")).toBeInTheDocument();
     });
+    expect(screen.queryByText("Create team")).toBeNull();
+    expect(screen.queryByText("New team")).toBeNull();
   });
 
   it("hides management from viewer", async () => {

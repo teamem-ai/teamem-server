@@ -9,13 +9,13 @@
  * the real headers, URL, and JSON body the production client would send, and
  * the fake responses are shaped exactly like the real provider envelopes.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { f1Output } from '../compiler/f1/output.js';
 import { llmProviderConfig } from '../config/llm.js';
 import { createLlmClient, DEFAULT_MODELS, SCHEMA_ENVELOPE_PROPERTY } from './factory.js';
-import { LlmError, type FetchLike, type LlmProviderKind } from './types.js';
+import { LlmError, MAX_OUTPUT_TOKENS, type FetchLike, type LlmProviderKind } from './types.js';
 
 /* ── Fixtures ──────────────────────────────────────────────────────────────── */
 
@@ -173,6 +173,12 @@ describe('structured — success path for each BYO provider', () => {
     expect(req.headers['authorization']).toBeUndefined();
     // Forced single-tool use, provider-native structured output.
     expect(req.body).toMatchObject({
+      // A cap that's too tight doesn't error — the provider silently
+      // truncates and returns 200, so the JSON comes back unterminated and
+      // fails schema validation with no hint it was ever a length problem.
+      // Pins down a real production failure (F2's mergedBody can run to
+      // 50,000 chars, far past the 1,024-token cap this used to send).
+      max_tokens: MAX_OUTPUT_TOKENS,
       tool_choice: { type: 'tool', name: 'record_structured_output' },
       tools: expect.arrayContaining([
         expect.objectContaining({
@@ -211,6 +217,11 @@ describe('structured — success path for each BYO provider', () => {
     expect(req.headers['authorization']).toBe(`Bearer ${API_KEYS.openai}`);
     expect(req.headers['x-api-key']).toBeUndefined();
     expect(req.body).toMatchObject({
+      // Same length-truncation concern as the Claude path above — the
+      // OpenAI-compatible request previously sent no max_tokens at all,
+      // leaving truncation entirely up to whatever default the routed
+      // backend happened to apply.
+      max_tokens: MAX_OUTPUT_TOKENS,
       response_format: {
         type: 'json_schema',
         json_schema: {
@@ -326,6 +337,142 @@ describe('structured — failure paths', () => {
     ).rejects.toMatchObject({ kind: 'schema_validation_failed', requestId: 'req-v' });
   });
 
+  it('output_truncated (not schema_validation_failed) when OpenAI-family content is cut off mid-JSON and finish_reason is "length"', async () => {
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [
+              {
+                finish_reason: 'length',
+                // Truncated mid-word — exactly what a max_tokens cutoff produces.
+                message: { content: '{"answer": "Post' },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-trunc-1',
+      }),
+    ).rejects.toMatchObject({ kind: 'output_truncated', requestId: 'req-trunc-1' });
+  });
+
+  it('output_truncated when OpenAI-family content parses as JSON but is missing a field because finish_reason is "length"', async () => {
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [
+              {
+                finish_reason: 'length',
+                message: { content: JSON.stringify({ answer: 'Postgres' }) }, // missing `count`
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-trunc-2',
+      }),
+    ).rejects.toMatchObject({ kind: 'output_truncated' });
+  });
+
+  it('does not report output_truncated when finish_reason is absent and the schema simply does not match', async () => {
+    // Regression guard: a genuine model mistake (no truncation involved)
+    // must still surface as schema_validation_failed, not output_truncated.
+    const fetch = makeRecorder(() => okOpenAi({ answer: 42 }), []);
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-notrunc',
+      }),
+    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+  });
+
+  it('output_truncated when Claude stop_reason is "max_tokens" and the partial tool_use input fails the schema', async () => {
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            stop_reason: 'max_tokens',
+            content: [
+              {
+                type: 'tool_use',
+                name: 'record_structured_output',
+                input: { answer: 'incomplete' }, // missing `count`
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[0], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-trunc-claude',
+      }),
+    ).rejects.toMatchObject({ kind: 'output_truncated', provider: 'claude' });
+  });
+
+  it('a Claude stop_reason of "max_tokens" does not fail the call when the tool_use input still validates', async () => {
+    // Edge case: generation was cut off, but the forced tool call itself had
+    // already completed validly before the cutoff — must not be misreported
+    // as a truncation failure.
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            stop_reason: 'max_tokens',
+            content: [
+              { type: 'tool_use', name: 'record_structured_output', input: validValue },
+            ],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[0], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-trunc-ok',
+    });
+
+    expect(result.output).toEqual(validValue);
+  });
+
   it('empty_output when chat completion has no choices', async () => {
     const fetch = makeRecorder(
       () => new Response(JSON.stringify({ model: 'gpt-4o', choices: [] }), { status: 200 }),
@@ -379,6 +526,271 @@ describe('structured — failure paths', () => {
   });
 });
 
+/* ── Lenient JSON repair: raw control chars inside string values ─────────────
+ *
+ * Real production cause (finish_reason: "stop" — NOT a truncation): a model
+ * asked for a long free-text field (F1 body, F2 mergedBody) writes a genuine
+ * paragraph break as a literal newline byte instead of the JSON-required
+ * `\n` escape. `response_format` constrains the shape but doesn't guarantee
+ * every backing model (openrouter proxies many) does fully grammar-
+ * constrained JSON encoding of its own string content. */
+
+describe('structured — repairs a raw control char inside a JSON string value', () => {
+  it('openai family: parses successfully when message.content has a literal newline inside a string, not just an escaped \\n', async () => {
+    // Built with a real JS-source `\n` so `brokenContent` contains an actual
+    // newline byte, exactly like a model that forgot to escape it. Passing
+    // this through the outer JSON.stringify (as a real API response would)
+    // correctly escapes it at the wire level — the bug only shows up one
+    // layer in, when application code JSON.parses `message.content` itself.
+    const brokenContent = '{"answer": "line one\nline two", "count": 3}';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: brokenContent } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-repair-openai',
+    });
+
+    expect(result.output).toEqual({ answer: 'line one\nline two', count: 3 });
+  });
+
+  it('claude: repairs a raw newline inside an envelope-wrapped string value too', async () => {
+    const brokenInner = '{"answer": "line one\nline two", "count": 3}';
+    const stringOrObject = z.union([z.string(), answerSchema]);
+    const fetch = makeRecorder(() => okClaude({ result: brokenInner }), []);
+    const client = createLlmClient(byoConfigs[0], { fetch });
+
+    const result = await client.structured({
+      schema: stringOrObject,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-repair-claude',
+    });
+
+    expect(result.output).toEqual({ answer: 'line one\nline two', count: 3 });
+  });
+
+  it('does not double-escape already-correct \\n sequences', async () => {
+    // A well-behaved model that escaped its newline correctly must still
+    // round-trip unchanged — the repair only touches raw control bytes,
+    // never a `\` that's already there.
+    const fetch = makeRecorder(() => okOpenAi({ answer: 'line one\nline two', count: 3 }), []);
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-no-double-escape',
+    });
+
+    expect(result.output).toEqual({ answer: 'line one\nline two', count: 3 });
+  });
+
+  it('repairs an under-escaped backslash inside a string (PHP-namespace case)', async () => {
+    // JS source `\\M` is a single backslash + M at runtime, so this content
+    // holds `App\Models\User` with single backslashes — an illegal JSON
+    // escape (`\M`, `\U`) exactly like Claude 3 Haiku emits for PHP FQCNs.
+    const brokenContent = '{"answer": "uses App\\Models\\User", "count": 4}';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: brokenContent } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-repair-backslash',
+    });
+
+    // The literal-backslash reading is the intended one for a namespace.
+    expect(result.output).toEqual({ answer: 'uses App\\Models\\User', count: 4 });
+  });
+
+  it('extracts JSON the model wrapped in a prose preamble (F2 "Based on the analysis…" case)', async () => {
+    const wrapped =
+      'Based on the analysis of the candidate concepts, the relationship is:\n\n' +
+      '{"answer": "Postgres", "count": 7}';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: wrapped } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-prose-pre',
+    });
+
+    expect(result.output).toEqual({ answer: 'Postgres', count: 7 });
+  });
+
+  it('extracts JSON with both a prose preamble and a trailing explanation', async () => {
+    const wrapped =
+      'After analyzing, I determined the following:\n\n' +
+      '{"answer": "Postgres", "count": 7}\n\n' +
+      'Rationale: it is the closest existing concept.';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: wrapped } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-prose-both',
+    });
+
+    expect(result.output).toEqual({ answer: 'Postgres', count: 7 });
+  });
+
+  it('strips a Markdown ```json code fence around the JSON', async () => {
+    const fenced = '```json\n{"answer": "Postgres", "count": 7}\n```';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: fenced } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-fence',
+    });
+
+    expect(result.output).toEqual({ answer: 'Postgres', count: 7 });
+  });
+
+  it('combines extraction with control-char repair (prose wrapper + literal newline inside the JSON)', async () => {
+    const wrapped =
+      'Here is the result:\n\n{"answer": "line one\nline two", "count": 3}';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: wrapped } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    const result = await client.structured({
+      schema: answerSchema,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-prose-plus-newline',
+    });
+
+    expect(result.output).toEqual({ answer: 'line one\nline two', count: 3 });
+  });
+
+  it('still throws schema_validation_failed when the content is unrepairable', async () => {
+    // Missing closing brace — a genuinely malformed payload, not just a raw
+    // control char. The repair/extraction passes must not mask this as a
+    // false success.
+    const brokenContent = '{"answer": "Postgres", "count": 3';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: brokenContent } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-unrepairable',
+      }),
+    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+  });
+
+  it('leaves an unescaped inner double-quote as an honest schema_validation_failed (not fabricated content)', async () => {
+    // `the "from" address` with the inner quotes unescaped: where the string
+    // value really ends is ambiguous, so this stays a genuine failure rather
+    // than risk inventing content by guessing.
+    const brokenContent = '{"answer": "the "from" address", "count": 3}';
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'stop', message: { content: brokenContent } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        requestId: 'req-unescaped-quote',
+      }),
+    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+  });
+});
+
 /* ── Timeout / abort boundary ─────────────────────────────────────────────── */
 
 describe('structured — timeout and abort', () => {
@@ -426,6 +838,43 @@ describe('structured — timeout and abort', () => {
         requestId: 'req-a',
       }),
     ).rejects.toMatchObject({ kind: 'aborted', requestId: 'req-a' });
+  });
+
+  it('timeout (not provider_error) when the abort fires while reading the response body', async () => {
+    // The fetch call itself resolves — headers come back fine — but reading
+    // the streamed body runs past the deadline, so the abort lands inside
+    // response.text() rather than the fetch() call. This is the real F2
+    // "slow, oversized mergedBody" case that used to be mislabeled
+    // provider_error.
+    const fetch: FetchLike = async (_input, init) => {
+      const signal = init?.signal;
+      const bodyReadThatNeverFinishes = () =>
+        new Promise<string>((_resolve, reject) => {
+          if (signal) {
+            signal.addEventListener('abort', () => {
+              const err = new Error('The operation was aborted');
+              err.name = 'AbortError';
+              reject(err);
+            });
+          }
+        });
+      return {
+        ok: true,
+        status: 200,
+        text: bodyReadThatNeverFinishes,
+      } as unknown as Response;
+    };
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({
+        schema: answerSchema,
+        systemPrompt: 'sys',
+        userPrompt: 'usr',
+        timeoutMs: 10,
+        requestId: 'req-body-timeout',
+      }),
+    ).rejects.toMatchObject({ kind: 'timeout', requestId: 'req-body-timeout' });
   });
 });
 
@@ -518,10 +967,35 @@ describe('structured — normalizes a root union into a provider-legal object', 
     expect(schema['$schema']).toBeUndefined();
   }
 
-  it('claude: wraps the F1 union in a required "result" property', async () => {
+  /**
+   * Recursively asserts no `oneOf`/`anyOf`/`allOf` survives anywhere in the
+   * schema — not just at the root. Pins down the real production failure:
+   * OpenRouter routing an OpenAI-shaped `response_format` to an Anthropic-
+   * family backend (Bedrock/Azure/Anthropic all observed) rejects `oneOf`
+   * anywhere, not only at the root, contradicting the "nested combinators
+   * are fine everywhere" assumption a previous revision of this file relied
+   * on (see the {@link flattenOneOfBranches} doc in factory.ts).
+   */
+  function expectNoCombinatorAnywhere(node: unknown): void {
+    if (Array.isArray(node)) {
+      for (const item of node) expectNoCombinatorAnywhere(item);
+      return;
+    }
+    if (typeof node !== 'object' || node === null) return;
+    const obj = node as Record<string, unknown>;
+    expect(obj['oneOf']).toBeUndefined();
+    expect(obj['anyOf']).toBeUndefined();
+    expect(obj['allOf']).toBeUndefined();
+    for (const value of Object.values(obj)) expectNoCombinatorAnywhere(value);
+  }
+
+  it('claude: flattens the F1 union into a bare object schema — no envelope needed', async () => {
     const calls: Captured[] = [];
+    // A bare (unwrapped) payload — flattening means the provider is asked
+    // for the branches' properties directly at the root, not inside a
+    // "result" envelope.
     const fetch = makeRecorder(
-      () => okClaude({ result: { action: 'skip', reason: 'no knowledge' } }),
+      () => okClaude({ action: 'skip', reason: 'no knowledge' }),
       calls,
     );
     const client = createLlmClient(byoConfigs[0], { fetch });
@@ -533,28 +1007,30 @@ describe('structured — normalizes a root union into a provider-legal object', 
       requestId: 'req-f1',
     });
 
-    // The caller still receives the union value, not the envelope.
     expect(res.output).toEqual({ action: 'skip', reason: 'no knowledge' });
 
     const inputSchema = (
       calls[0]!.body as { tools: [{ input_schema: Record<string, unknown> }] }
     ).tools[0].input_schema;
     expectRootObjectShape(inputSchema);
-    expect(inputSchema['required']).toEqual([SCHEMA_ENVELOPE_PROPERTY]);
-    // The union itself survives one level down — the branches are still
-    // provider-native structured output, not flattened into a loose object.
-    const inner = (inputSchema['properties'] as Record<string, { oneOf?: unknown[] }>)[
-      SCHEMA_ENVELOPE_PROPERTY
-    ]!;
-    expect(inner.oneOf).toHaveLength(2);
+    expectNoCombinatorAnywhere(inputSchema);
+    // Only the discriminant is common to every branch — everything else
+    // (title/body/path/tags/confidence from `extract`, `reason` from `skip`)
+    // stays optional in the merged schema; real enforcement is still the
+    // Zod re-validation below, not this hint to the model.
+    expect(inputSchema['required']).toEqual(['action']);
+    const properties = inputSchema['properties'] as Record<string, unknown>;
+    expect(Object.keys(properties)).toEqual(
+      expect.arrayContaining(['action', 'title', 'body', 'reason']),
+    );
+    // The discriminant's two literal values merge into one enum rather than
+    // one branch silently overwriting the other's `const`.
+    expect(properties['action']).toEqual({ type: 'string', enum: ['extract', 'skip'] });
   });
 
-  it('openai: wraps the F1 union and still omits strict (nested oneOf)', async () => {
+  it('openai: flattens the F1 union and omits strict (properties stay partially optional)', async () => {
     const calls: Captured[] = [];
-    const fetch = makeRecorder(
-      () => okOpenAi({ result: { action: 'skip', reason: 'nope' } }),
-      calls,
-    );
+    const fetch = makeRecorder(() => okOpenAi({ action: 'skip', reason: 'nope' }), calls);
     const client = createLlmClient(byoConfigs[1], { fetch });
 
     const res = await client.structured({
@@ -573,39 +1049,21 @@ describe('structured — normalizes a root union into a provider-legal object', 
       }
     ).response_format.json_schema;
     expectRootObjectShape(envelope.schema);
-    expect(envelope.schema['required']).toEqual([SCHEMA_ENVELOPE_PROPERTY]);
-    // Wrapping fixes the root, but the nested oneOf is still not strict-
-    // compatible, so strict must stay absent.
+    expectNoCombinatorAnywhere(envelope.schema);
+    expect(envelope.schema['required']).toEqual(['action']);
+    // No oneOf survives, but OpenAI strict mode also requires every property
+    // to be in `required` — most F1 properties stay optional post-merge, so
+    // strict must stay absent even though the combinator rule is satisfied.
     expect(envelope.strict).toBeUndefined();
   });
 
-  it('parses an envelope Anthropic filled with a serialized JSON string', async () => {
-    // Observed against the live API: the model may put the serialized object
-    // in the envelope property instead of the object itself.
+  it('rejects a bare payload that violates the union even though the provider-side schema is now more permissive', async () => {
+    // The flattened schema only requires `action` — `reason` is optional at
+    // the JSON-Schema level once merged with `extract`'s branch. Zod remains
+    // the authority regardless (§5.2): a `skip` payload missing `reason`
+    // must still fail.
     const calls: Captured[] = [];
-    const fetch = makeRecorder(
-      () => okClaude({ result: JSON.stringify({ action: 'skip', reason: 'stringified' }) }),
-      calls,
-    );
-    const client = createLlmClient(byoConfigs[0], { fetch });
-
-    const res = await client.structured({
-      schema: f1Output,
-      systemPrompt: 'sys',
-      userPrompt: 'usr',
-      requestId: 'req-f1-str',
-    });
-    expect(res.output).toEqual({ action: 'skip', reason: 'stringified' });
-  });
-
-  it('rejects an envelope whose payload does not satisfy the union', async () => {
-    // Unwrapping must not become a way to smuggle unvalidated output through:
-    // Zod remains the authority (§5.2).
-    const calls: Captured[] = [];
-    const fetch = makeRecorder(
-      () => okClaude({ result: { action: 'skip' } }), // `reason` missing
-      calls,
-    );
+    const fetch = makeRecorder(() => okClaude({ action: 'skip' }), calls); // `reason` missing
     const client = createLlmClient(byoConfigs[0], { fetch });
 
     await expect(
@@ -618,19 +1076,36 @@ describe('structured — normalizes a root union into a provider-legal object', 
     ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
   });
 
-  it('rejects a bare union payload sent without the envelope', async () => {
+  it('parses an envelope Anthropic filled with a serialized JSON string (non-flattenable union)', async () => {
+    // Observed against the live API: the model may put the serialized object
+    // in the envelope property instead of the object itself. Uses a union
+    // that flattenOneOfBranches deliberately leaves alone (a primitive
+    // branch, not all-object) so this still exercises the envelope-wrap +
+    // unwrap path that flattening bypasses for F1/F2.
+    const stringOrObject = z.union([z.string(), answerSchema]);
     const calls: Captured[] = [];
-    const fetch = makeRecorder(() => okClaude({ action: 'skip', reason: 'unwrapped' }), calls);
+    const fetch = makeRecorder(
+      () => okClaude({ result: JSON.stringify(validValue) }),
+      calls,
+    );
     const client = createLlmClient(byoConfigs[0], { fetch });
 
-    await expect(
-      client.structured({
-        schema: f1Output,
-        systemPrompt: 'sys',
-        userPrompt: 'usr',
-        requestId: 'req-f1-bare',
-      }),
-    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+    const res = await client.structured({
+      schema: stringOrObject,
+      systemPrompt: 'sys',
+      userPrompt: 'usr',
+      requestId: 'req-str-union',
+    });
+    // unwrapEnvelope JSON.parses the envelope's string value before Zod
+    // validation, so this matches the object branch of the union, not the
+    // string branch — proving the parse-then-validate path, not just that a
+    // string trivially satisfies `z.string()`.
+    expect(res.output).toEqual(validValue);
+
+    const inputSchema = (
+      calls[0]!.body as { tools: [{ input_schema: Record<string, unknown> }] }
+    ).tools[0].input_schema;
+    expect(inputSchema['required']).toEqual([SCHEMA_ENVELOPE_PROPERTY]);
   });
 
   it('leaves an object-root schema unwrapped and sends it with strict:true', async () => {
@@ -778,5 +1253,125 @@ describe('LlmError — redacted surface', () => {
     const err = new LlmError('timeout', 'claude', 'req-y');
     expect(err.httpStatus).toBeUndefined();
     expect(err.message).toContain('timeout');
+  });
+});
+// ── Opt-in diagnostic logging (TEAMEM_LLM_DEBUG) ─────────────────────────────
+
+describe('TEAMEM_LLM_DEBUG diagnostic logging', () => {
+  afterEach(() => {
+    delete process.env['TEAMEM_LLM_DEBUG'];
+    vi.restoreAllMocks();
+  });
+
+  it('logs the underlying cause of a provider_error when enabled', async () => {
+    process.env['TEAMEM_LLM_DEBUG'] = '1';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // 2xx with non-JSON body → extractStructured throws → provider_error.
+    const fetch = makeRecorder(() => new Response('not json', { status: 200 }), []);
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({ schema: answerSchema, systemPrompt: 's', userPrompt: 'u', requestId: 'req-dbg' }),
+    ).rejects.toMatchObject({ kind: 'provider_error' });
+
+    const line = warn.mock.calls.map((c) => String(c[0])).find((s) => s.includes('llm_debug'));
+    expect(line).toBeDefined();
+    const parsed = JSON.parse(line!);
+    expect(parsed.kind).toBe('provider_error');
+    expect(parsed.requestId).toBe('req-dbg');
+    expect(typeof parsed.detail).toBe('string');
+    expect(parsed.detail.length).toBeGreaterThan(0);
+  });
+
+  it('stays silent when TEAMEM_LLM_DEBUG is not set', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetch = makeRecorder(() => new Response('not json', { status: 200 }), []);
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({ schema: answerSchema, systemPrompt: 's', userPrompt: 'u', requestId: 'req-quiet' }),
+    ).rejects.toMatchObject({ kind: 'provider_error' });
+
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('llm_debug'))).toBe(false);
+  });
+
+  it('logs kind: output_truncated (not schema_validation_failed) and the raw finish_reason when content is cut off by the token limit', async () => {
+    process.env['TEAMEM_LLM_DEBUG'] = '1';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'gpt-4o-2024-08-06',
+            choices: [{ finish_reason: 'length', message: { content: '{"answer": "Post' } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({ schema: answerSchema, systemPrompt: 's', userPrompt: 'u', requestId: 'req-dbg-trunc' }),
+    ).rejects.toMatchObject({ kind: 'output_truncated' });
+
+    const line = warn.mock.calls.map((c) => String(c[0])).find((s) => s.includes('llm_debug'));
+    expect(line).toBeDefined();
+    const parsed = JSON.parse(line!);
+    expect(parsed.kind).toBe('output_truncated');
+    expect(parsed.detail).toContain('finish_reason: "length"');
+  });
+
+  it('logs the actual finish_reason value (not just a boolean) so a non-"length" truncation signal is still visible', async () => {
+    process.env['TEAMEM_LLM_DEBUG'] = '1';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({
+            model: 'some-model',
+            // A backing model proxied through OpenRouter that doesn't
+            // normalize to OpenAI's exact "length" vocabulary — the debug
+            // log must still surface what it actually said.
+            choices: [{ finish_reason: 'max_tokens', message: { content: '{"answer": "Post' } }],
+          }),
+          { status: 200 },
+        ),
+      [],
+    );
+    const client = createLlmClient({ kind: 'openrouter', apiKey: API_KEYS.openrouter }, { fetch });
+
+    await expect(
+      client.structured({ schema: answerSchema, systemPrompt: 's', userPrompt: 'u', requestId: 'req-dbg-other' }),
+    ).rejects.toMatchObject({ kind: 'schema_validation_failed' });
+
+    const line = warn.mock.calls.map((c) => String(c[0])).find((s) => s.includes('llm_debug'));
+    expect(line).toBeDefined();
+    const parsed = JSON.parse(line!);
+    expect(parsed.kind).toBe('schema_validation_failed');
+    expect(parsed.detail).toContain('finish_reason: "max_tokens"');
+  });
+
+  it('scrubs secrets from a logged http_error body', async () => {
+    process.env['TEAMEM_LLM_DEBUG'] = '1';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetch = makeRecorder(
+      () =>
+        new Response(
+          JSON.stringify({ error: { message: 'bad key sk-supersecret123456 and tok_abc' } }),
+          { status: 401 },
+        ),
+      [],
+    );
+    const client = createLlmClient(byoConfigs[1], { fetch });
+
+    await expect(
+      client.structured({ schema: answerSchema, systemPrompt: 's', userPrompt: 'u', requestId: 'req-http' }),
+    ).rejects.toMatchObject({ kind: 'http_error' });
+
+    const line = warn.mock.calls.map((c) => String(c[0])).find((s) => s.includes('llm_debug'));
+    expect(line).toBeDefined();
+    expect(line!).not.toContain('sk-supersecret123456');
+    expect(line!).toContain('HTTP 401');
   });
 });

@@ -143,6 +143,14 @@ events into concept pages):
 TEAMEM-prefixed on purpose — the ambient `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 from your host shell is never inherited by accident.
 
+> **Model choice affects compile reliability.** teamem requires provider-native
+> structured output and rejects anything that doesn't match the schema. The
+> native `claude` and `openai` providers enforce this robustly; routing a weak
+> model through OpenRouter (or another OpenAI-compatible endpoint) can produce
+> malformed JSON that fails compilation. See
+> [Troubleshooting → compilation failures](#compilation-failures) before picking
+> a model.
+
 See `.env.example` for all available variables and their defaults.
 
 ### 2. Start the stack
@@ -172,7 +180,29 @@ docker compose port postgres 5432
 # Expected: 127.0.0.1:5432 (not 0.0.0.0)
 ```
 
-### 4. Open the portal
+### 4. Run database migrations
+
+**This step is required and does not happen automatically.** No service in
+`docker-compose.yml` runs `drizzle-kit migrate` on boot — `/healthz` is a
+liveness probe, not a schema check, so a fresh Postgres volume comes up
+"healthy" with zero tables. Skipping this step means the first sign-in
+attempt fails at the database layer (`relation "users" does not exist`),
+surfaced to the browser only as a generic "Sign-in didn't complete." error.
+
+The runtime image has no `pnpm`/source (the `Dockerfile` only copies build
+output), so migrations run from the host against the loopback Postgres port:
+
+```sh
+pnpm install --frozen-lockfile
+set -a; . ./.env; set +a
+DATABASE_URL="postgres://${POSTGRES_USER:-teamem}:${POSTGRES_PASSWORD}@127.0.0.1:${TEAMEM_PG_PORT:-5432}/${POSTGRES_DB:-teamem}" \
+  pnpm --filter @teamem/server db:migrate
+```
+
+Expect `[✓] migrations applied successfully!` and 17 tables afterward
+(`docker compose exec postgres psql -U teamem -d teamem -c '\dt'`).
+
+### 5. Open the portal
 
 Navigate to [http://localhost:8080](http://localhost:8080) and click
 **Sign in with GitHub**.
@@ -191,10 +221,16 @@ After sign-in you land on the app landing page. From there you can:
 - Invite team members in **Members**.
 - Configure the webhook on your GitHub App to start ingesting events.
 
-### 5. Wire up GitHub webhook (for event ingestion)
+### 6. Wire up GitHub webhook (for event ingestion)
+
+Copy your project ID (`prj_...`) from **Settings → Project** — the webhook route requires it in
+the URL so each delivery is routed to the right project.
 
 Go to your GitHub App settings → **Webhook** and set:
-- **Payload URL**: `http://<your-host>:8080/v1/webhooks/github`
+- **Payload URL**: `http://<your-host>:8080/v1/connectors/github/webhook?project=<your-project-id>`
+  (**the `?project=prj_...` query parameter is required** — without it every delivery is rejected
+  with a generic `400 Bad request`, even for events GitHub sends automatically regardless of your
+  subscriptions, like `installation`)
 - **Content type**: `application/json`
 - **Secret**: the same value as `TEAMEM_GITHUB_WEBHOOK_SECRET` in your `.env`
 
@@ -224,6 +260,71 @@ These behaviors are **intentional** — they are guardrails, not bugs:
 docker compose down           # stop containers, keep data volume
 docker compose down -v        # stop containers and delete the database volume
 ```
+
+## Troubleshooting
+
+### Compilation failures
+
+The worker turns events into concept pages by calling your configured LLM with
+provider-native structured output and validating the result against the frozen
+schema **before** persisting it — it never accepts "approximately correct"
+output. A per-event failure appears on the job detail page with a code. The job
+itself is marked **Failed** only when *every* event fails; a job with a mix of
+compiled/skipped/failed events is **Completed with errors** (amber pill). Its
+failed events can be re-run *without* redoing the successful ones via
+**Retry failed** (as opposed to **Retry all**).
+
+| Per-event code | Meaning | What to do |
+|---|---|---|
+| `f1_schema_validation_failed` | The model's output wasn't valid JSON, or didn't match the schema. | Usually a weak model over an OpenAI-compatible endpoint (see below). Retry; if it persists, switch to a stronger model or a native provider. |
+| `f1_output_truncated` | The model hit its output-token limit mid-response. | Retry; if it persists, the output genuinely exceeded the model's ceiling — use a model with a larger output budget. |
+| `f1_timeout` | The request ran past the 30-second deadline (often a large, slow F2 merge). | Retry; a native/faster provider produces the same output more quickly. |
+| `f1_provider_error` / `f1_http_error` | The provider rejected the request or returned an error status. | Enable `TEAMEM_LLM_DEBUG=1` (below) to see the real cause in the worker log. |
+| `no_llm_provider` | No provider is configured for the team. | Configure one in **Settings → LLM**, or set a `TEAMEM_*_API_KEY` and restart. |
+| `worker_interrupted` | The worker was restarted while the job was mid-flight. | The orphaned job is auto-reclaimed to **Failed** on worker startup — just **Retry failed**. |
+
+**Model choice matters for reliability.** teamem asks for strict structured
+output, but *how* that's enforced depends on the path:
+
+- **Native `claude` (Anthropic)** uses forced tool use — the provider returns
+  already-structured data, so malformed JSON is essentially impossible. This is
+  the most robust path.
+- **Native `openai`** uses a JSON-schema `response_format`; OpenAI's own models
+  honor it reliably.
+- **OpenRouter and other OpenAI-compatible endpoints** proxy many backing
+  models. For some of them `response_format` degrades to a *prompt* asking for
+  JSON, with no hard grammar constraint — so a weaker model (e.g. Claude 3 Haiku
+  via OpenRouter) can wrap the JSON in prose, leave inner quotes unescaped, or
+  under-escape backslashes, surfacing as `f1_schema_validation_failed`. teamem
+  recovers many of these automatically, but the most reliable fix is to point at
+  a native provider or a stronger model.
+
+### Debugging LLM failures
+
+Set `TEAMEM_LLM_DEBUG=1` (read by both server and worker; restart to apply) to
+log the underlying cause of any compile failure — the provider's `finish_reason`
+and a secret-scrubbed snippet of the response — to the worker log, so an
+otherwise-opaque `f1_*` error can be investigated:
+
+```sh
+docker compose logs -f worker | grep llm_debug
+```
+
+Keep it **off** (blank) in production; it is a diagnostics aid, not a
+steady-state setting.
+
+### GitHub events never show up in the portal
+
+If you created a PR/commit/issue and it never appears under **Events**, check GitHub App settings →
+**Advanced → Recent Deliveries** first — it tells you immediately whether GitHub ever attempted a
+delivery, and if so, what your server returned:
+
+| Recent Deliveries shows | Likely cause |
+|---|---|
+| **Nothing at all** (no rows, not even failed ones) | Either the event happened *before* the webhook was fully configured and saved (GitHub never retroactively delivers — trigger a fresh event, e.g. a new PR comment, and check again), or the App isn't actually installed on this repo, or the webhook's "Active" toggle is off. |
+| **A delivery with `400 Bad request`** | Almost always the Payload URL is missing the required `?project=<your-project-id>` query parameter (see step 6 above) — every delivery is rejected before teamem even looks at the event type. This also fires for GitHub's automatic meta-events (`installation`, `ping`) that arrive regardless of your event subscriptions. |
+| **A delivery with `401`** | `TEAMEM_GITHUB_WEBHOOK_SECRET` in `.env` doesn't match the Secret configured on the GitHub App — signature verification is rejecting it. |
+| **A delivery with `200`**, still nothing in the portal | Ingestion succeeded; the issue is downstream (compilation). Check **Jobs** for a failed job, or see "Compilation failures" above. |
 
 ## Tech stack (decided)
 

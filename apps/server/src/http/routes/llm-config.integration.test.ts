@@ -45,14 +45,28 @@ describe.skipIf(!url)('LLM Config Routes — live Postgres', () => {
     await closeDatabase(pool);
   });
 
+  // Clean up in full FK dependency order — the postgres CI job runs all
+  // integration files against one shared database, so this must tolerate
+  // rows left by any other file's tests, not just this file's own. A
+  // partial list here (e.g. missing jobs/events) is exactly what causes an
+  // unrelated file's leftover row to break `DELETE FROM projects` with a
+  // foreign-key violation.
   beforeEach(async () => {
-    // Clean up in reverse FK order: web_sessions references users, so delete it first.
     await db.execute('DELETE FROM llm_config');
+    await db.execute('DELETE FROM job_events');
+    await db.execute('DELETE FROM concept_contributors');
+    await db.execute('DELETE FROM concept_evidence');
+    await db.execute('DELETE FROM concept_paths');
+    await db.execute('DELETE FROM jobs');
+    await db.execute('DELETE FROM concepts');
+    await db.execute('DELETE FROM events');
+    await db.execute('DELETE FROM api_keys');
     await db.execute('DELETE FROM web_sessions');
+    await db.execute('DELETE FROM invites');
     await db.execute('DELETE FROM memberships');
-    await db.execute('DELETE FROM projects');
     await db.execute('DELETE FROM principals');
     await db.execute('DELETE FROM users');
+    await db.execute('DELETE FROM projects');
     await db.execute('DELETE FROM teams');
   });
 
@@ -239,6 +253,172 @@ describe.skipIf(!url)('LLM Config Routes — live Postgres', () => {
       });
 
       expect(res.status).toBe(403);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Model selection
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('model selection', () => {
+    async function adminSession(name: string) {
+      const userId = await createUser(nextGithubId(), name);
+      const teamId = await createTeam(`${name} Team`);
+      await createProject(teamId, 'P');
+      await addMembership(userId, teamId, 'admin');
+      const sessionToken = await createSession(userId);
+      return { teamId, sessionToken };
+    }
+
+    it('stores the chosen model and returns it from GET', async () => {
+      const { teamId, sessionToken } = await adminSession('llmmodel');
+
+      const put = await app.request(`/v1/teams/${teamId}/llm`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({
+          provider: 'openai',
+          apiKey: 'sk-model',
+          model: 'gpt-4o-mini',
+        }),
+      });
+      expect(put.status).toBe(200);
+
+      const get = await app.request(`/v1/teams/${teamId}/llm`, {
+        headers: { Cookie: cookie(sessionToken) },
+      });
+      const json = await get.json();
+      expect(json.data.model).toBe('gpt-4o-mini');
+      expect(json.data.provider).toBe('openai');
+    });
+
+    it('defaults model to null when omitted', async () => {
+      const { teamId, sessionToken } = await adminSession('llmnomodel');
+
+      await app.request(`/v1/teams/${teamId}/llm`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openai', apiKey: 'sk-x' }),
+      });
+
+      const get = await app.request(`/v1/teams/${teamId}/llm`, {
+        headers: { Cookie: cookie(sessionToken) },
+      });
+      expect((await get.json()).data.model).toBeNull();
+    });
+
+    it('changes only the model via __STORED__, preserving the saved key', async () => {
+      const { teamId, sessionToken } = await adminSession('llmstored');
+
+      // Initial save with a real key + model.
+      await app.request(`/v1/teams/${teamId}/llm`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openai', apiKey: 'sk-keep-me', model: 'gpt-4o' }),
+      });
+      const before = await db.execute(
+        `SELECT api_key_encrypted FROM llm_config WHERE team_id = '${teamId}'`,
+      );
+      const keyBefore = (before.rows[0] as Record<string, unknown>)['api_key_encrypted'];
+
+      // Model-only change: keep the key via the sentinel.
+      const put = await app.request(`/v1/teams/${teamId}/llm`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openai', apiKey: '__STORED__', model: 'gpt-4o-mini' }),
+      });
+      expect(put.status).toBe(200);
+
+      const after = await db.execute(
+        `SELECT api_key_encrypted, model FROM llm_config WHERE team_id = '${teamId}'`,
+      );
+      const row = after.rows[0] as Record<string, unknown>;
+      expect(row['model']).toBe('gpt-4o-mini');
+      expect(row['api_key_encrypted']).toBe(keyBefore); // unchanged
+    });
+
+    it('rejects __STORED__ when there is no saved key', async () => {
+      const { teamId, sessionToken } = await adminSession('llmnostored');
+
+      const put = await app.request(`/v1/teams/${teamId}/llm`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openai', apiKey: '__STORED__' }),
+      });
+      expect(put.status).toBe(400);
+    });
+
+    it('rejects a viewer from listing models (403)', async () => {
+      const userId = await createUser(nextGithubId(), 'llmmodelsviewer');
+      const teamId = await createTeam('Models Viewer Team');
+      await createProject(teamId, 'P');
+      await addMembership(userId, teamId, 'viewer');
+      const sessionToken = await createSession(userId);
+
+      const res = await app.request(`/v1/teams/${teamId}/llm/models`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openai', apiKey: 'sk-x' }),
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Provider-only save (onboarding: record the choice before a key exists)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('provider-only save (apiKey omitted)', () => {
+    async function adminSession(name: string) {
+      const userId = await createUser(nextGithubId(), name);
+      const teamId = await createTeam(`${name} Team`);
+      await createProject(teamId, 'P');
+      await addMembership(userId, teamId, 'admin');
+      const sessionToken = await createSession(userId);
+      return { teamId, sessionToken };
+    }
+
+    it('stores the provider with no key when apiKey is omitted', async () => {
+      const { teamId, sessionToken } = await adminSession('llmprovonly');
+
+      const put = await app.request(`/v1/teams/${teamId}/llm`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openrouter' }),
+      });
+      expect(put.status).toBe(200);
+
+      const get = await app.request(`/v1/teams/${teamId}/llm`, {
+        headers: { Cookie: cookie(sessionToken) },
+      });
+      const json = await get.json();
+      expect(json.data.provider).toBe('openrouter');
+      expect(json.data.hasKey).toBe(false);
+    });
+
+    it('preserves an existing key when a later provider-only PUT arrives', async () => {
+      const { teamId, sessionToken } = await adminSession('llmprovkeep');
+
+      // First: full save with a key.
+      await app.request(`/v1/teams/${teamId}/llm`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openai', apiKey: 'sk-keep' }),
+      });
+      // Then: provider-only PUT (no key) switching provider.
+      const put = await app.request(`/v1/teams/${teamId}/llm`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
+        body: JSON.stringify({ provider: 'openrouter' }),
+      });
+      expect(put.status).toBe(200);
+
+      const get = await app.request(`/v1/teams/${teamId}/llm`, {
+        headers: { Cookie: cookie(sessionToken) },
+      });
+      const json = await get.json();
+      expect(json.data.provider).toBe('openrouter');
+      expect(json.data.hasKey).toBe(true); // key preserved
     });
   });
 });

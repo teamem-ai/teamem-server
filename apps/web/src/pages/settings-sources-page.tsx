@@ -75,9 +75,15 @@ export function SettingsSourcesPage() {
   const hasWriteKey = keys.length > 0;
   const selectedKey = keys.find((k) => k.id === selectedKeyId);
 
+  // Same-origin with the API (BASE = ""), so the browser's own address bar
+  // is always the right host — no hardcoded localhost that breaks the
+  // moment this is deployed behind a real domain.
+  const serverBaseUrl =
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
+
   const selectedToken = setupToken ?? (selectedKey ? "<paste-key>" : "<token>");
-  const cliCommand = `teamem init --url http://localhost:8080 --token ${selectedToken} --project ${effectiveProjectId}`;
-  const mcpCommand = mintedMcpCommand ?? `claude mcp add --transport http teamem http://localhost:8080/mcp --header "Authorization: Bearer ${selectedToken}"`;
+  const cliCommand = `teamem init --url ${serverBaseUrl} --token ${selectedToken} --project ${effectiveProjectId}`;
+  const mcpCommand = mintedMcpCommand ?? `claude mcp add --transport http teamem ${serverBaseUrl}/mcp --header "Authorization: Bearer ${selectedToken}"`;
 
   async function handleMintSetupKey() {
     if (!canManage || !teamId) return;
@@ -191,39 +197,42 @@ export function SettingsSourcesPage() {
                               {r}
                             </code>
                           ))
-                        : "No repositories selected"}
+                        : "No repositories selected — choose which ones below"}
                     </span>
                   </dd>
                   <dt>Webhook secret</dt>
                   <dd>
-                    <span className="flex items-center gap-2">
-                      {connectorStatus.github.webhookSecretConfigured ? (
-                        <span className="pill green">
-                          <Check className="w-3 h-3" />
-                          Configured
-                        </span>
-                      ) : (
-                        <span className="pill">Not configured</span>
-                      )}
+                    <span className="flex flex-col gap-1">
+                      <span className="flex items-center gap-2">
+                        {connectorStatus.github.webhookSecretConfigured ? (
+                          <span className="pill green">
+                            <Check className="w-3 h-3" />
+                            Configured
+                          </span>
+                        ) : (
+                          <span className="pill">Not configured</span>
+                        )}
+                      </span>
                       {canManage && (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          title="Regenerating invalidates the current secret — GitHub App settings must be updated too"
-                        >
-                          Regenerate…
-                        </button>
+                        <span className="text-[12px] text-text-3">
+                          Set via <code className="mono">TEAMEM_GITHUB_WEBHOOK_SECRET</code> at
+                          deploy time — there is no in-app rotation. To
+                          rotate it: generate a new value, update it in both
+                          your <code className="mono">.env</code> and the GitHub
+                          App&apos;s Webhook settings, then restart the server.
+                        </span>
                       )}
                     </span>
                   </dd>
                 </dl>
                 <a
                   className="btn btn-outline btn-sm mt-3.5"
-                  href="https://github.com/settings/apps"
+                  href="https://github.com/settings/installations"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  Manage repository access on GitHub
+                  Select repositories on GitHub
                 </a>
               </>
             ) : (

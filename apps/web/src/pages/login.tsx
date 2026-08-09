@@ -138,15 +138,18 @@ type LoginState =
   | "noconfig"
   | "noteam";
 
+// The banner already prefixes every message with a static "Sign-in didn't
+// complete." title (see the b-title span below) — these strings are just
+// the explanation/next-step clause, not a restatement of the title.
 const errorMessages: Record<string, string> = {
   github_denied: "GitHub authorization was cancelled or failed — please try again.",
   invalid_request: "The sign-in request was malformed. Please try again.",
   invalid_state: "Your sign-in session expired. Please try again.",
-  auth_failed: "Sign-in didn't complete. Please try again.",
+  auth_failed: "Please try again.",
 };
 
 function errorLabel(code: string): string {
-  return errorMessages[code] ?? "Sign-in didn't complete. Please try again.";
+  return errorMessages[code] ?? "Please try again.";
 }
 
 // ── Exported page component ────────────────────────────────────────────────

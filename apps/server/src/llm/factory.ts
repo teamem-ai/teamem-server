@@ -40,6 +40,7 @@ import { z } from 'zod';
 import type { LlmProviderConfig, ResolvedLlmConfig } from '../config/llm.js';
 import {
   LlmError,
+  MAX_OUTPUT_TOKENS,
   type FetchLike,
   type LlmClient,
   type LlmClientDeps,
@@ -140,6 +141,51 @@ export function createLlmClient(
 /* Core call path                                                            */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/**
+ * Redact secrets and bound the length of a string before it is logged. Strips
+ * Bearer tokens and `sk_`/`tok_`/`tm_`-style keys, and caps the length.
+ *
+ * The cap used to be 800 chars, which was tight enough that a genuinely
+ * truncated response and a merely long-but-complete one were visually
+ * indistinguishable in the log line — the debug log's own cap looked exactly
+ * like a max_tokens cutoff either way, defeating its purpose as a diagnostic.
+ * 4000 is still bounded (this path is opt-in via TEAMEM_LLM_DEBUG and never
+ * persisted — §5.3 only forbids retaining this in the database/audit trail),
+ * but large enough to show the actual end of most real F1/F2 outputs.
+ */
+function scrubForDebug(s: string): string {
+  return s
+    .replace(/Bearer\s+[^\s"']+/gi, 'Bearer [REDACTED]')
+    .replace(/\b(sk|tok|tm)[_-][A-Za-z0-9_-]+/g, '$1_[REDACTED]')
+    .slice(0, 4000);
+}
+
+/**
+ * Opt-in diagnostic log for LLM failures. OFF by default — the compiler stays
+ * quiet and leaks nothing (§5.3). When TEAMEM_LLM_DEBUG is set, the underlying
+ * cause of an otherwise-opaque provider_error / http_error is written to the
+ * worker log (secrets scrubbed, length-bounded) so a self-hoster can see WHY a
+ * compile failed. It never includes the ingested payload — only the provider's
+ * error message / response snippet.
+ */
+function logLlmDebug(
+  provider: string,
+  requestId: string,
+  kind: string,
+  detail: string,
+): void {
+  if (!process.env['TEAMEM_LLM_DEBUG']) return;
+  console.warn(
+    JSON.stringify({
+      event: 'llm_debug',
+      provider,
+      requestId,
+      kind,
+      detail: scrubForDebug(detail),
+    }),
+  );
+}
+
 async function runStructured<T>(
   provider: LlmProviderKind,
   config: ResolvedLlmConfig,
@@ -174,8 +220,24 @@ async function runStructured<T>(
     }
 
     if (!response.ok) {
-      // Drain the body so the socket is freed, but keep none of it.
-      await drain(response);
+      if (process.env['TEAMEM_LLM_DEBUG']) {
+        // Debug only: capture the provider's error body (bounded, scrubbed).
+        let body = '';
+        try {
+          body = await response.text();
+        } catch {
+          /* ignore */
+        }
+        logLlmDebug(
+          provider,
+          request.requestId,
+          'http_error',
+          `HTTP ${response.status} (model=${model}): ${body}`,
+        );
+      } else {
+        // Drain the body so the socket is freed, but keep none of it.
+        await drain(response);
+      }
       throw new LlmError('http_error', provider, request.requestId, {
         httpStatus: response.status,
       });
@@ -189,7 +251,16 @@ async function runStructured<T>(
     if (!validation.success) {
       // Suppress the ZodError: it details the provider's raw payload and must
       // not escape via Error.cause (§5.3). The kind + requestId are enough.
-      throw new LlmError('schema_validation_failed', provider, request.requestId);
+      //
+      // When the provider's own signal says it stopped because it hit the
+      // output token limit, report that distinctly rather than letting a
+      // length problem masquerade as a model correctness problem — see
+      // LlmErrorKind.output_truncated.
+      throw new LlmError(
+        extracted.truncated ? 'output_truncated' : 'schema_validation_failed',
+        provider,
+        request.requestId,
+      );
     }
 
     const result: import('./types.js').LlmResponse<T> = {
@@ -203,8 +274,33 @@ async function runStructured<T>(
     return extracted.usage ? { ...result, usage: extracted.usage } : result;
   } catch (err) {
     if (err instanceof LlmError) throw err;
+    // Our AbortController is tripped by exactly one thing — the timeout timer
+    // below — so a set `aborted` flag here means the deadline elapsed. The
+    // fetch-call path (above) already classifies its own abort as `timeout`;
+    // this covers the abort landing LATER, while streaming the response body
+    // (`response.text()`), which otherwise fell through to `provider_error`.
+    // Real-world trigger: a slow, oversized F2 mergedBody that generates past
+    // the deadline mid-stream. Reporting it as `timeout` (not an opaque
+    // provider error) is what makes that diagnosable.
+    if (controller.signal.aborted) {
+      logLlmDebug(
+        provider,
+        request.requestId,
+        'timeout',
+        `request exceeded ${timeout}ms and was aborted mid-stream`,
+      );
+      throw new LlmError('timeout', provider, request.requestId);
+    }
     // Unexpected failure — wrap as a provider_error without attaching the
     // raw error as cause (§5.3: logs/inspect must not leak provider internals).
+    // Opt-in debug logging records the cause (e.g. a JSON parse error when the
+    // model didn't return valid structured output) so it can be investigated.
+    logLlmDebug(
+      provider,
+      request.requestId,
+      'provider_error',
+      err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+    );
     throw new LlmError('provider_error', provider, request.requestId);
   } finally {
     clearTimeout(timer);
@@ -219,13 +315,15 @@ async function runStructured<T>(
  * Build the `json_schema` member of an OpenAI-family `response_format`.
  *
  * OpenAI Structured Outputs `strict: true` forbids `anyOf`/`oneOf`/`$ref`
- * anywhere in the schema. The real F1/F2 schemas are discriminated unions, so
- * after {@link toProviderSchema} wraps them they still carry a nested `oneOf`
- * and remain strict-incompatible. Forcing `strict: true` on them would 400 the
- * `openai`, `openrouter`, and OpenAI-compatible `custom` providers, so strict
- * is requested only when the schema can honor it and omitted otherwise —
- * a valid provider-native structured-output request either way (strict
- * defaults to false).
+ * anywhere in the schema and requires every object's `properties` to be
+ * fully listed in `required`. {@link toProviderSchema} now eliminates `oneOf`
+ * everywhere (see {@link flattenOneOfBranches}), but the flattened schema
+ * only requires each branch's *common* keys (e.g. just `action` for F1) —
+ * still strict-incompatible, since most properties stay optional. Forcing
+ * `strict: true` on it would 400 the `openai`, `openrouter`, and OpenAI-
+ * compatible `custom` providers, so strict is requested only when the schema
+ * can actually honor it and omitted otherwise — a valid provider-native
+ * structured-output request either way (strict defaults to false).
  *
  * Note what omitting `strict` does NOT buy: the root-must-be-an-object rule is
  * enforced by OpenAI regardless of `strict`, which is why the root-union
@@ -252,9 +350,15 @@ function openAiJsonSchema(schema: unknown): {
 
 /**
  * Whether `schema` meets OpenAI Structured Outputs strict-mode constraints:
- * the ROOT must be an object, and no `anyOf`/`oneOf`/`allOf`/`$ref` keyword
- * may appear anywhere (including nested objects, array items, and `$defs`).
- * Primitive node types are allowed at non-root positions.
+ * the ROOT must be an object, no `anyOf`/`oneOf`/`allOf`/`$ref` keyword may
+ * appear anywhere (including nested objects, array items, and `$defs`), and
+ * every object node's `properties` must all be listed in that node's
+ * `required` (OpenAI's actual strict-mode rule — optional fields have to be
+ * modeled as nullable-but-required, which no schema here does, so this
+ * correctly falls back to non-strict rather than mis-certifying a schema
+ * like the flattened F1/F2 output — where most keys stay genuinely optional
+ * after the `oneOf` merge — as strict-compatible). Primitive node types are
+ * allowed at non-root positions.
  */
 function isOpenAiStrictCompatible(schema: unknown): boolean {
   if (!isObject(schema) || schema.type !== 'object') return false;
@@ -270,6 +374,10 @@ function strictCompatibleSubtree(node: unknown): boolean {
   }
   const properties = node.properties;
   if (isObject(properties)) {
+    const required = Array.isArray(node.required) ? node.required : [];
+    for (const key of Object.keys(properties)) {
+      if (!required.includes(key)) return false;
+    }
     for (const value of Object.values(properties)) {
       if (!strictCompatibleSubtree(value)) return false;
     }
@@ -353,6 +461,7 @@ function buildRequest(
       headers,
       body: JSON.stringify({
         model,
+        max_tokens: MAX_OUTPUT_TOKENS,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -370,10 +479,192 @@ function buildRequest(
 /* Response parsing                                                          */
 /* ────────────────────────────────────────────────────────────────────────── */
 
+/** The characters JSON permits immediately after a backslash inside a string. */
+const VALID_JSON_ESCAPE_CHARS = new Set([
+  '"',
+  '\\',
+  '/',
+  'b',
+  'f',
+  'n',
+  'r',
+  't',
+  'u',
+]);
+
+/**
+ * Repair two classes of JSON-spec violation a weak model commits *inside* a
+ * string literal, leaving well-formed content untouched:
+ *
+ *  1. Raw control characters — a genuine paragraph break written as a literal
+ *     newline byte instead of the two-character `\n` escape the spec requires.
+ *  2. Invalid escape sequences — a lone backslash the model meant literally
+ *     but did not double, e.g. a PHP namespace `App\Models\User` written with
+ *     single backslashes, so `\M` is an illegal JSON escape. We assume the
+ *     literal-backslash reading (the only one that ever produced these) and
+ *     double it to `\\M`.
+ *
+ * Real-world cause: `finish_reason: "stop"` (generation completed normally),
+ * yet `JSON.parse` still throws. A model routed through an OpenAI-compatible
+ * `response_format` endpoint that isn't running fully grammar-constrained
+ * decoding constrains the output *shape* but can still mis-encode the *bytes*
+ * of a long free-text field (F1 `body`, F2 `mergedBody`).
+ *
+ * This is wire-format leniency, not "free text + regex parsing" (§5.2's red
+ * line): the provider-native structured-output mechanism is unchanged and the
+ * Zod schema remains the sole authority on every field after this runs — this
+ * only widens what counts as valid JSON *syntax* before that check. It does
+ * NOT attempt to repair an unescaped inner double-quote (e.g. a body that
+ * writes `the "from" address` without escaping): where a string literal
+ * actually ends is then genuinely ambiguous, and guessing would risk
+ * fabricating content — that failure mode stays an honest
+ * `schema_validation_failed`.
+ */
+function repairJsonStringLiterals(raw: string): string {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of raw) {
+    if (escaped) {
+      escaped = false;
+      // `ch` follows a backslash inside a string. If it isn't a valid escape,
+      // the model meant a literal backslash — we already emitted one `\`, so
+      // add a second to form `\\` before this char.
+      if (!VALID_JSON_ESCAPE_CHARS.has(ch)) {
+        result += '\\';
+      }
+      result += ch;
+      continue;
+    }
+    if (inString && ch === '\\') {
+      result += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      result += ch;
+      continue;
+    }
+    if (inString) {
+      if (ch === '\n') {
+        result += '\\n';
+        continue;
+      }
+      if (ch === '\r') {
+        result += '\\r';
+        continue;
+      }
+      if (ch === '\t') {
+        result += '\\t';
+        continue;
+      }
+    }
+    result += ch;
+  }
+  return result;
+}
+
+/**
+ * Extract the outermost JSON value ({...} or [...]) from a response the model
+ * wrapped in surrounding text, returning `null` when no such value is found.
+ *
+ * A weak model told (via `response_format`) to answer with JSON often still
+ * adds a prose preamble ("Based on the analysis, the relationship is:"), a
+ * trailing explanation, or a Markdown ```json code fence — none of which the
+ * spec allows, so `JSON.parse` of the whole response throws. Recovering the
+ * structured payload the model *did* produce from that wrapper is the same
+ * wire-format leniency as {@link repairJsonStringLiterals} and
+ * {@link unwrapEnvelope}: the extracted value is still handed to the Zod
+ * schema, which stays the sole authority on whether it's acceptable.
+ *
+ * Scans with brace/bracket depth while respecting string literals and escapes,
+ * so a `{` or `}` inside a string value never mis-terminates the scan.
+ */
+function extractJsonValue(raw: string): string | null {
+  let s = raw.trim();
+  // Strip a Markdown code fence (```json … ``` or ``` … ```) if present.
+  const fence = s.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
+  if (fence?.[1] !== undefined) {
+    s = fence[1].trim();
+  }
+
+  const start = s.search(/[{[]/);
+  if (start === -1) return null;
+  const open = s[start];
+  const close = open === '{' ? '}' : ']';
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === open) {
+      depth++;
+    } else if (ch === close) {
+      depth--;
+      if (depth === 0) {
+        return s.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse a provider's JSON string, escalating through progressively more
+ * tolerant recovery steps and throwing the ORIGINAL parse error if none
+ * succeed — so diagnostics still show the raw failure the model actually
+ * produced. Each step only widens accepted JSON *syntax*; the Zod schema
+ * downstream remains the authority on content (§5.2).
+ *
+ * Order matters: try the raw text first (the common, well-formed case), then
+ * string-literal repair, then extraction from a prose/fence wrapper, then
+ * both together (a wrapped payload whose inner JSON also has raw control
+ * chars or under-escaped backslashes — both seen together in real F2 output).
+ */
+function parseJsonLeniently(raw: string): unknown {
+  const candidates = [raw, repairJsonStringLiterals(raw)];
+  const extracted = extractJsonValue(raw);
+  if (extracted !== null && extracted !== raw) {
+    candidates.push(extracted, repairJsonStringLiterals(extracted));
+  }
+
+  let firstErr: unknown;
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch (err) {
+      if (firstErr === undefined) firstErr = err;
+    }
+  }
+  throw firstErr;
+}
+
 interface Extracted {
   value: unknown;
   providerModel: string;
   usage?: import('./types.js').LlmUsage;
+  /**
+   * True when the provider's own `finish_reason: "length"` says generation
+   * was cut off by {@link import('./types.js').MAX_OUTPUT_TOKENS} — lets
+   * `runStructured` tell a truncation failure apart from a genuine model
+   * mistake (`output_truncated` vs `schema_validation_failed`).
+   */
+  truncated: boolean;
 }
 
 function extractStructured(
@@ -398,9 +689,11 @@ function parseOpenAiFamily(
   try {
     envelope = JSON.parse(raw);
   } catch {
+    logLlmDebug(provider, requestId, 'provider_error', `response body was not valid JSON: ${raw}`);
     throw new LlmError('provider_error', provider, requestId);
   }
   if (!isObject(envelope)) {
+    logLlmDebug(provider, requestId, 'provider_error', `response was not a JSON object: ${raw}`);
     throw new LlmError('provider_error', provider, requestId);
   }
   const providerModel =
@@ -414,17 +707,34 @@ function parseOpenAiFamily(
   if (!isObject(first) || !isObject(first.message)) {
     throw new LlmError('empty_output', provider, requestId);
   }
+  const truncated = first.finish_reason === 'length';
   const content = first.message.content;
   if (typeof content !== 'string' || content.trim() === '') {
     throw new LlmError('empty_output', provider, requestId);
   }
   let value: unknown;
   try {
-    value = JSON.parse(content);
+    value = parseJsonLeniently(content);
   } catch {
-    throw new LlmError('schema_validation_failed', provider, requestId);
+    // Report the actual finish_reason value (not just whether it matched
+    // "length") — OpenRouter proxies arbitrary backing models, and a model
+    // that doesn't normalize to OpenAI's exact vocabulary would otherwise
+    // silently fail the `truncated` check with no trace of why.
+    logLlmDebug(
+      provider,
+      requestId,
+      truncated ? 'output_truncated' : 'schema_validation_failed',
+      `model content was not valid JSON (finish_reason: ${JSON.stringify(first.finish_reason)}): ${content}`,
+    );
+    throw new LlmError(
+      truncated ? 'output_truncated' : 'schema_validation_failed',
+      provider,
+      requestId,
+    );
   }
-  return usage ? { value, providerModel, usage } : { value, providerModel };
+  return usage
+    ? { value, providerModel, usage, truncated }
+    : { value, providerModel, truncated };
 }
 
 /**
@@ -503,13 +813,25 @@ interface ProviderSchema {
  * NOT sufficient for a root union — an earlier revision assumed it was, which
  * is why every real F1/F2 call failed on every provider.
  *
- * Wrapping keeps the union visible to the model (nested combinators are fine
- * everywhere) instead of flattening the branches into one permissive object,
- * so the provider-native mechanism still carries the real contract (§5.2).
- * Schemas that are already root objects are passed through untouched.
+ * An earlier revision of this function wrapped the union in a root envelope
+ * but left `oneOf` nested one level down inside it, on the assumption that
+ * nested combinators are accepted everywhere. That held for direct Anthropic
+ * tool-use and direct OpenAI calls, but not for every path a provider config
+ * can reach: OpenRouter's OpenAI-compatible `response_format`, when routed to
+ * an Anthropic-family backend (Bedrock/Azure/Anthropic all observed), gets
+ * translated into Anthropic's native structured-output request and rejects
+ * `oneOf` anywhere in the schema — `output_config.format.schema: Schema type
+ * 'oneOf' is not supported` — not just at the root. So `oneOf` is now
+ * eliminated everywhere via {@link flattenOneOfBranches}, not merely moved:
+ * every branch's properties are merged into one permissive object, which is
+ * necessarily less strict than the original union at the JSON-Schema level.
+ * That's an accepted trade-off, not a weakening of the real contract — the
+ * Zod discriminated union re-validates every response after the fact (§5.2),
+ * so a model that exploits the widened schema still fails validation; this
+ * schema only has to steer the model, not gate correctness.
  */
 function toProviderSchema(schema: unknown): ProviderSchema {
-  const stripped = stripSchemaAnchor(schema);
+  const stripped = flattenOneOfBranches(stripSchemaAnchor(schema));
   if (isObject(stripped) && stripped.type === 'object' && !hasRootCombinator(stripped)) {
     return { schema: stripped, wrapped: false };
   }
@@ -534,6 +856,130 @@ function hasRootCombinator(node: Record<string, unknown>): boolean {
 }
 
 /**
+ * Recursively flatten every `oneOf` of object-schema branches into a single
+ * merged object schema: `properties` is the union of every branch's
+ * properties, and `required` is the intersection (only keys required in
+ * every branch — for a discriminated union that's exactly the discriminant).
+ *
+ * A property key present in more than one branch is merged by
+ * {@link mergePropertyVariants} rather than overwritten, so a discriminant
+ * like `action: { const: 'extract' }` vs `action: { const: 'skip' }` becomes
+ * `action: { enum: ['extract', 'skip'] }` instead of silently losing one
+ * branch's value.
+ *
+ * `oneOf` nodes that aren't a plain list of object-type branches (e.g. a
+ * union of primitives) are left untouched — this only targets the shape
+ * `z.discriminatedUnion`/`z.union` of `z.object` produces, which is the only
+ * pattern any current F1/F2 schema uses.
+ */
+function flattenOneOfBranches(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    return node.map(flattenOneOfBranches);
+  }
+  if (!isObject(node)) return node;
+
+  const recursed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) {
+    recursed[key] = flattenOneOfBranches(value);
+  }
+
+  const branches = recursed['oneOf'];
+  if (
+    !Array.isArray(branches) ||
+    branches.length === 0 ||
+    !branches.every(isFlattenableBranch)
+  ) {
+    return recursed;
+  }
+
+  const properties: Record<string, unknown> = {};
+  const variantsByKey = new Map<string, unknown[]>();
+  for (const branch of branches) {
+    for (const [key, valueSchema] of Object.entries(branch.properties)) {
+      const variants = variantsByKey.get(key) ?? [];
+      variants.push(valueSchema);
+      variantsByKey.set(key, variants);
+    }
+  }
+  for (const [key, variants] of variantsByKey) {
+    properties[key] = mergePropertyVariants(variants);
+  }
+
+  let required: string[] | null = null;
+  for (const branch of branches) {
+    const branchRequired = Array.isArray(branch.required)
+      ? (branch.required as string[])
+      : [];
+    required =
+      required === null
+        ? branchRequired
+        : required.filter((k) => branchRequired.includes(k));
+  }
+
+  const { oneOf: _oneOf, ...rest } = recursed;
+  void _oneOf;
+  return {
+    ...rest,
+    type: 'object',
+    properties,
+    required: required ?? [],
+    additionalProperties: false,
+  };
+}
+
+function isFlattenableBranch(
+  branch: unknown,
+): branch is { type: 'object'; properties: Record<string, unknown>; required?: unknown } {
+  return (
+    isObject(branch) &&
+    branch.type === 'object' &&
+    isObject(branch.properties)
+  );
+}
+
+/**
+ * Merge the schemas a property was given across different `oneOf` branches
+ * into one. Identical schemas collapse to one copy. Schemas that differ only
+ * by a `const` (the shape a discriminated union's literal tag produces —
+ * `{ type: 'string', const: 'extract' }` vs `{ type: 'string', const: 'skip' }`)
+ * merge into a single `enum` of the distinct literal values, which is a plain
+ * constraint keyword, not a combinator, so it's unaffected by the `oneOf`
+ * rejection this function exists to work around.
+ *
+ * Anything else (genuinely different types/shapes for the same key across
+ * branches) falls back to an unconstrained `{}` — no current F1/F2 schema
+ * produces this, and an unconstrained hint is still safe because the real
+ * enforcement is the post-response Zod validation, not this schema.
+ */
+function mergePropertyVariants(variants: unknown[]): unknown {
+  const first = variants[0];
+  if (variants.every((v) => JSON.stringify(v) === JSON.stringify(first))) {
+    return first;
+  }
+
+  const literals: unknown[] = [];
+  let allConstLiterals = true;
+  for (const variant of variants) {
+    if (
+      isObject(variant) &&
+      Object.keys(variant).length === 2 &&
+      typeof variant.type === 'string' &&
+      'const' in variant
+    ) {
+      literals.push(variant.const);
+    } else {
+      allConstLiterals = false;
+      break;
+    }
+  }
+  if (allConstLiterals) {
+    return { type: (first as Record<string, unknown>).type, enum: literals };
+  }
+
+  return {};
+}
+
+/**
  * Undo {@link toProviderSchema}'s envelope before Zod re-validation.
  *
  * A non-object payload, or a missing envelope property, is passed through
@@ -552,7 +998,7 @@ function unwrapEnvelope(value: unknown, wrapped: boolean): unknown {
   const inner = value[SCHEMA_ENVELOPE_PROPERTY];
   if (typeof inner === 'string') {
     try {
-      return JSON.parse(inner);
+      return parseJsonLeniently(inner);
     } catch {
       return inner;
     }

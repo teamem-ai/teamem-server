@@ -30,6 +30,28 @@ import type { z } from 'zod';
 export type LlmProviderKind = 'claude' | 'openai' | 'openrouter' | 'custom';
 
 /**
+ * Output token ceiling sent on every structured-output request, for every
+ * provider family. Sized against the largest field either F1 or F2 output
+ * can legally produce — F2's `mergedBody` alone is capped at 50,000
+ * characters (compiler/f2/decision.ts), and F1's `body` (compiler/f1/output.ts)
+ * has no cap at all. At a conservative ~3.5 characters/token for
+ * markdown-with-escaping output, even the previous 8,192-token cap covered
+ * only ~28,700 characters — short of the F2 ceiling alone, before accounting
+ * for an unbounded F1 body. 16,000 keeps every provider's request comfortably
+ * under GPT-4o's 16,384-token hard ceiling (the tightest mainstream limit)
+ * while covering F2's documented worst case with room to spare.
+ *
+ * This is a mitigation, not a guarantee — a BYO custom/local model can still
+ * have a lower ceiling, and F1's body is genuinely unbounded. That's why
+ * truncation is also detected directly from the provider's own signal
+ * (Claude `stop_reason: "max_tokens"`, OpenAI family `finish_reason:
+ * "length"`) and reported as the distinct `output_truncated` error kind
+ * rather than left to masquerade as `schema_validation_failed` — see
+ * {@link LlmErrorKind}.
+ */
+export const MAX_OUTPUT_TOKENS = 16_000;
+
+/**
  * Provider-neutral description of the model that produced a response.
  *
  * `model` is the provider-reported model identifier (e.g. `gpt-4o-2024-08-06`
@@ -133,8 +155,15 @@ export interface LlmClientDeps {
  * - `provider_error` — a 2xx response that the provider marked as an error,
  *   or that did not contain an expected structured payload.
  * - `empty_output` — the provider returned no parseable content.
- * - `schema_validation_failed` — output was received but failed the Zod
- *   schema; §5.2 treats this as an explicit compilation failure.
+ * - `output_truncated` — the provider's own signal (Claude `stop_reason:
+ *   "max_tokens"`, OpenAI family `finish_reason: "length"`) says it stopped
+ *   generating because it hit {@link MAX_OUTPUT_TOKENS}, and the resulting
+ *   output failed to parse/validate as a result. Distinct from
+ *   `schema_validation_failed` so a length problem doesn't masquerade as a
+ *   model correctness problem — the two need different fixes (a bigger
+ *   output budget vs. a genuinely wrong extraction).
+ * - `schema_validation_failed` — output was received in full but failed the
+ *   Zod schema; §5.2 treats this as an explicit compilation failure.
  */
 export type LlmErrorKind =
   | 'config_rejected'
@@ -143,6 +172,7 @@ export type LlmErrorKind =
   | 'http_error'
   | 'provider_error'
   | 'empty_output'
+  | 'output_truncated'
   | 'schema_validation_failed';
 
 /**
@@ -188,6 +218,9 @@ function redactedMessage(kind: LlmErrorKind, provider: LlmProviderKind, httpStat
   }
   if (kind === 'schema_validation_failed') {
     return `${prefix}: provider output did not satisfy the requested Zod schema`;
+  }
+  if (kind === 'output_truncated') {
+    return `${prefix}: provider stopped generating after hitting the output token limit`;
   }
   if (kind === 'config_rejected') {
     return `${prefix}: provider configuration is not usable in this build`;

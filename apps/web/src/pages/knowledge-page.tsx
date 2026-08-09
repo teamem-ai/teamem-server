@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { BookOpen, Search, AlertTriangle } from "lucide-react";
+import { BookOpen, FolderPlus, Search, AlertTriangle } from "lucide-react";
 import { TypeBadge, type ConceptType } from "@/components/ui/type-badge";
 import { StatusBadge, type ConceptStatus } from "@/components/ui/status-badge";
 import { ConfidenceMeter } from "@/components/ui/confidence-meter";
@@ -217,6 +217,28 @@ export function KnowledgePage() {
             Retry
           </button>
         </div>
+      </div>
+    );
+  }
+
+  // scope is "ready" (team resolved) but there is no project yet — without
+  // this branch the data-fetch effect above never fires (it requires a
+  // projectId) and `loading` would stay stuck at its initial `true` forever,
+  // showing a skeleton table that never resolves. Surface the real reason
+  // instead of a fake loading state.
+  if (!projectId) {
+    return (
+      <div className="card">
+        <EmptyState
+          icon={FolderPlus}
+          title="No project yet"
+          description="Your team doesn't have a project yet — create one to start compiling knowledge."
+          actions={
+            <a className="btn btn-primary" href="/onboarding">
+              Create a project
+            </a>
+          }
+        />
       </div>
     );
   }

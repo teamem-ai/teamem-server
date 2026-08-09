@@ -1,16 +1,8 @@
 import { useState, useEffect } from "react";
-import {
-  Plus,
-  Trash2,
-  AlertTriangle,
-  Check,
-  X,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Trash2, AlertTriangle, Users } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DangerConfirmDialog } from "@/components/ui/danger-confirm-dialog";
 import { PermissionDenied, ViewerInfoBanner } from "@/components/ui/permission-denied";
-import { Users } from "lucide-react";
 import type { MyTeam } from "@teamem/schema";
 import { useSession } from "@/lib/session";
 
@@ -40,7 +32,6 @@ export function SettingsTeamPage() {
   const isOwner = role === "owner";
   const isViewer: boolean = role === "viewer";
 
-  const [teams, setTeams] = useState<MyTeam[]>([]);
   const [currentTeam, setCurrentTeam] = useState<MyTeam | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -48,36 +39,35 @@ export function SettingsTeamPage() {
   const [teamName, setTeamName] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // New team state
-  const [showNewTeam, setShowNewTeam] = useState(false);
-  const [newTeamName, setNewTeamName] = useState("");
-  const [creating, setCreating] = useState(false);
-
   // Delete state
   const [showDelete, setShowDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Fetch teams
-  const refreshTeams = async () => {
+  // Fetch the session's team. This portal is single-team: creating additional
+  // teams is deliberately NOT offered here. Team switching is not implemented
+  // (the session always resolves to one team), so exposing "new team" would
+  // silently strand the user in a team they can't reach — the exact trap that
+  // broke Knowledge/Context loading. See tasks/M2 CLOSEOUT §11.
+  const refreshTeam = async () => {
     setLoading(true);
     try {
       const data = await fetchJson<MyTeam[]>(`/v1/teams/mine`);
-      setTeams(data);
-      // Current team — use the first one for now (placeholder for real scope)
       const first = data[0];
       if (first) {
         setCurrentTeam(first);
         setTeamName(first.name);
+      } else {
+        setCurrentTeam(null);
       }
     } catch {
-      setTeams([]);
+      setCurrentTeam(null);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    void refreshTeams();
+    void refreshTeam();
   }, []);
 
   // Rename team
@@ -97,25 +87,6 @@ export function SettingsTeamPage() {
     }
   };
 
-  // Create team
-  const handleCreate = async () => {
-    if (!newTeamName.trim()) return;
-    setCreating(true);
-    try {
-      await fetchJson(`/v1/teams`, {
-        method: "POST",
-        body: JSON.stringify({ name: newTeamName.trim() }),
-      });
-      setShowNewTeam(false);
-      setNewTeamName("");
-      await refreshTeams();
-    } catch {
-      // Silently handle
-    } finally {
-      setCreating(false);
-    }
-  };
-
   // Delete team
   const handleDelete = async () => {
     if (!currentTeam) return;
@@ -125,7 +96,7 @@ export function SettingsTeamPage() {
         method: "POST",
       });
       setShowDelete(false);
-      await refreshTeams();
+      await refreshTeam();
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : "Delete failed");
     }
@@ -176,7 +147,7 @@ export function SettingsTeamPage() {
                 <h3>Team</h3>
               </div>
               <div className="card-body">
-                <div className="field">
+                <div className="field mb-0">
                   <label className="label" htmlFor="tname">
                     Team name
                   </label>
@@ -200,39 +171,9 @@ export function SettingsTeamPage() {
                       </button>
                     )}
                   </div>
-                </div>
-                <div className="field mb-0">
-                  <label className="label">Teams on this portal</label>
-                  <div className="flex flex-wrap gap-2 items-center">
-                    {teams.map((t) => (
-                      <span
-                        key={t.id}
-                        className={cn(
-                          "pill",
-                          t.id === currentTeam.id &&
-                            "pill violet"
-                        )}
-                      >
-                        {t.id === currentTeam.id && (
-                          <Check className="w-3 h-3" />
-                        )}
-                        {t.name}
-                      </span>
-                    ))}
-                    <button
-                      className="btn btn-outline btn-sm"
-                      onClick={() => {
-                        setShowNewTeam(true);
-                        setNewTeamName("");
-                      }}
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      New team
-                    </button>
-                  </div>
                   <p className="hint">
-                    You can belong to multiple teams — data is fully isolated
-                    between them. Switch teams from the top bar.
+                    This portal uses a single team. All projects, members and
+                    knowledge live inside it.
                   </p>
                 </div>
               </div>
@@ -294,84 +235,16 @@ export function SettingsTeamPage() {
             <div className="card">
               <EmptyState
                 icon={Users}
-                title="No teams yet"
-                description="Create your first team to get started."
+                title="No team yet"
+                description="You're not in a team yet. Finish setup to create yours."
                 actions={
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => {
-                      setShowNewTeam(true);
-                      setNewTeamName("");
-                    }}
-                  >
-                    <Plus className="w-4 h-4" />
-                    Create team
-                  </button>
+                  <a className="btn btn-primary" href="/onboarding">
+                    Go to setup
+                  </a>
                 }
               />
             </div>
           )}
-        </div>
-      )}
-
-      {/* ── New team modal ───────────────────────────────────────────── */}
-      {showNewTeam && (
-        <div
-          className="modal-veil"
-          onClick={() => setShowNewTeam(false)}
-        >
-          <div
-            className="modal"
-            role="dialog"
-            aria-modal="true"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="modal-head">
-              <div>
-                <h3>New team</h3>
-                <p className="text-[13px] text-text-2 mt-1">
-                  Create a new team — you&apos;ll be the owner.
-                </p>
-              </div>
-              <button
-                className="modal-x"
-                onClick={() => setShowNewTeam(false)}
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="field mb-0">
-                <label className="label" htmlFor="ntname">
-                  Team name
-                </label>
-                <input
-                  id="ntname"
-                  className="input"
-                  placeholder="e.g. Acme Corp"
-                  value={newTeamName}
-                  onChange={(e) => setNewTeamName(e.target.value)}
-                  autoFocus
-                />
-              </div>
-            </div>
-            <div className="modal-foot">
-              <button
-                className="btn btn-ghost"
-                onClick={() => setShowNewTeam(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={handleCreate}
-                disabled={creating || !newTeamName.trim()}
-              >
-                {creating ? "Creating…" : "Create team"}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

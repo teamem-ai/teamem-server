@@ -102,8 +102,16 @@ export function createSpaMiddleware() {
           const mime = MIME[ext] ?? 'application/octet-stream';
 
           c.header('Content-Type', mime);
+          // HTML must be no-store, not just no-cache: no-cache still lets
+          // the browser back/forward cache (bfcache) restore the full
+          // in-memory page — DOM, JS heap, everything — on a back/forward
+          // navigation with zero network request, which would show
+          // protected content after logout even though the server-side
+          // session is genuinely gone. no-store is one of the documented
+          // conditions that makes a page bfcache-ineligible. Hashed JS/CSS
+          // assets are unaffected — those keep aggressive immutable caching.
           c.header('Cache-Control', ext === '.html'
-            ? 'no-cache'
+            ? 'no-store'
             : 'public, max-age=604800, immutable');
 
           // Read into a buffer — avoids streaming-related async cleanup
@@ -123,7 +131,10 @@ export function createSpaMiddleware() {
         const s = await stat(indexPath);
         if (s.isFile()) {
           c.header('Content-Type', 'text/html; charset=utf-8');
-          c.header('Cache-Control', 'no-cache');
+          // See the comment on the static-file branch above — no-store,
+          // not no-cache, so protected pages are never restorable from
+          // bfcache after logout.
+          c.header('Cache-Control', 'no-store');
           const body = await readFile(indexPath);
           return c.body(body as never);
         }

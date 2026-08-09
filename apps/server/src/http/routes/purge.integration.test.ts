@@ -695,7 +695,7 @@ describe.skipIf(!url)('Project Purge Route (live Postgres)', () => {
 
       // No payloads, keys, or internal identifiers
       expect(body).not.toContain('payload');
-      expect(body).not.toContain('tm_');
+      expect(body).not.toContain('tok_');
       expect(body).not.toContain('token_hash');
       expect(body).not.toContain('secret');
       expect(body).not.toContain('<private>');

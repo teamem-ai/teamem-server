@@ -22,9 +22,9 @@ import {
 // ── Token generation ────────────────────────────────────────────────────────
 
 describe('generateApiKeyToken', () => {
-  it('returns a string with the tm_ prefix', () => {
+  it('returns a string with the tok_ prefix', () => {
     const token = generateApiKeyToken();
-    expect(token).toMatch(/^tm_/);
+    expect(token).toMatch(/^tok_/);
   });
 
   it('generates unique tokens across calls', () => {
@@ -37,13 +37,13 @@ describe('generateApiKeyToken', () => {
 
   it('token body is valid base64url', () => {
     const token = generateApiKeyToken();
-    const body = token.slice(3); // remove 'tm_' prefix
+    const body = token.slice('tok_'.length); // remove 'tok_' prefix
     expect(body).toMatch(/^[A-Za-z0-9_-]+$/);
   });
 
   it('token has sufficient entropy (≥256 bits)', () => {
     const token = generateApiKeyToken();
-    const body = token.slice(3);
+    const body = token.slice('tok_'.length);
     // base64url: 43 chars ≈ 256 bits, 44 chars ≈ 264 bits
     expect(body.length).toBeGreaterThanOrEqual(43);
   });
@@ -150,16 +150,23 @@ describe('parseBearerToken', () => {
     expect(parseBearerToken(`Token ${token}`)).toBeNull();
   });
 
-  it('returns null for tokens without tm_ prefix', () => {
+  it('returns null for tokens without a valid prefix', () => {
     expect(parseBearerToken('Bearer abcdefghijklmnop')).toBeNull();
   });
 
   it('returns null for tokens with invalid base64url characters', () => {
-    expect(parseBearerToken('Bearer tm_abc!@#$%^&*()')).toBeNull();
+    expect(parseBearerToken('Bearer tok_abc!@#$%^&*()')).toBeNull();
   });
 
   it('returns null for tokens too short (< 40 body chars)', () => {
-    expect(parseBearerToken('Bearer tm_abc')).toBeNull();
+    expect(parseBearerToken('Bearer tok_abc')).toBeNull();
+  });
+
+  it('accepts a legacy tm_ token (backward compatibility)', () => {
+    // Keys minted before the tok_ rename keep working — only the hash is
+    // stored, so the plaintext prefix must still parse.
+    const legacy = 'tm_' + 'a'.repeat(43);
+    expect(parseBearerToken(`Bearer ${legacy}`)).toBe(legacy);
   });
 
   it('handles whitespace around header value', () => {
@@ -249,7 +256,7 @@ describe('end-to-end API key lifecycle', () => {
     const hash = hashToken(token);
 
     // Generate a token that starts with same prefix but different body
-    const wrongToken = 'tm_' + token.slice(3).split('').reverse().join('');
+    const wrongToken = 'tok_' + token.slice('tok_'.length).split('').reverse().join('');
     expect(verifyToken(wrongToken, hash)).toBe(false);
   });
 });

@@ -27,6 +27,7 @@ function fakeApiClient(opts: {
   return {
     getPullRequestsForCommit: async () => opts.prs,
     getPullRequest: async (_owner, _repo, number) => details.get(number) ?? null,
+    listInstallationRepositories: async () => [],
   };
 }
 
@@ -238,6 +239,7 @@ describe('resolveCommit', () => {
         getPullRequest: async () => {
           throw new Error('GitHub API error');
         },
+        listInstallationRepositories: async () => [],
       };
       const resolver = createAnchorResolver(failingClient);
 
@@ -311,6 +313,7 @@ describe('resolveCommit', () => {
           throw new Error('GitHub API auth failure');
         },
         getPullRequest: async () => null,
+        listInstallationRepositories: async () => [],
       };
       const resolver = createAnchorResolver(failingClient);
 

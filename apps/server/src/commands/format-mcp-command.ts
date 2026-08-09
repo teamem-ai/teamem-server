@@ -11,24 +11,28 @@
  */
 
 export interface McpCommandConfig {
-  /** Server bind host (e.g. "0.0.0.0" or "example.com"). */
-  readonly host: string;
-  /** Server port (e.g. 8080). */
-  readonly port: number;
+  /**
+   * The public URL this instance is reached at — TEAMEM_BASE_URL, or the
+   * http://localhost:<port> default when unset. Deliberately the SAME value
+   * GitHub OAuth's redirect_uri is built from (config/env.ts `baseUrl`), so
+   * this command and the sign-in flow can never disagree about what
+   * "this server" is reachable at.
+   */
+  readonly baseUrl: string;
 }
 
 /**
  * Build the `claude mcp add` command string.
  *
- * - `0.0.0.0` is displayed as `localhost` for copy-paste friendliness.
- * - The URL uses `http` by default (self-hosted deployment).  Operators who
- *   terminate TLS at a reverse proxy should configure `TEAMEM_HOST` to their
- *   public domain name.
+ * Resolves `/mcp` against `config.baseUrl` with the platform `URL` type
+ * rather than string-concatenating protocol/host/port by hand, so it
+ * correctly carries whatever scheme, host, and port (or lack of a port, for
+ * a reverse proxy on 443/80) the operator configured.
  */
 export function formatMcpAddCommand(
   config: McpCommandConfig,
   token: string,
 ): string {
-  const displayHost = config.host === '0.0.0.0' ? 'localhost' : config.host;
-  return `claude mcp add --transport http teamem http://${displayHost}:${config.port}/mcp --header "Authorization: Bearer ${token}"`;
+  const mcpUrl = new URL('/mcp', config.baseUrl).toString();
+  return `claude mcp add --transport http teamem ${mcpUrl} --header "Authorization: Bearer ${token}"`;
 }

@@ -253,7 +253,7 @@ export function Step5Complete({
             </div>
             <a
               className="krow"
-              href={`/concepts/${encodeURIComponent(latestPage.uuid)}`}
+              href={`/concept/${encodeURIComponent(latestPage.uuid)}`}
               style={{ textDecoration: "none", color: "inherit" }}
             >
               <div className="k-main">
@@ -284,7 +284,7 @@ export function Step5Complete({
               type="button"
               className="btn btn-outline"
               onClick={() => {
-                window.location.href = `/concepts/${encodeURIComponent(latestPage.uuid)}`;
+                window.location.href = `/concept/${encodeURIComponent(latestPage.uuid)}`;
               }}
             >
               View your first team knowledge

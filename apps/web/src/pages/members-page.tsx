@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   Users,
   Plus,
@@ -288,17 +289,51 @@ function RoleDropdown({
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
+  // Close on outside click (the menu is portaled to document.body, so it's
+  // checked separately from the trigger's own ref).
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        ref.current &&
+        !ref.current.contains(target) &&
+        !(menuRef.current && menuRef.current.contains(target))
+      ) {
         setOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  // The menu is positioned in the viewport (fixed), so a stale position must
+  // not survive a scroll/resize — close instead of drifting off the trigger.
+  useEffect(() => {
+    if (!open) return;
+    function handleScrollOrResize() {
+      setOpen(false);
+    }
+    window.addEventListener("scroll", handleScrollOrResize, true);
+    window.addEventListener("resize", handleScrollOrResize);
+    return () => {
+      window.removeEventListener("scroll", handleScrollOrResize, true);
+      window.removeEventListener("resize", handleScrollOrResize);
+    };
+  }, [open]);
+
+  const toggleOpen = useCallback(() => {
+    setOpen((wasOpen) => {
+      const willOpen = !wasOpen;
+      if (willOpen && ref.current) {
+        const rect = ref.current.getBoundingClientRect();
+        setMenuPos({ top: rect.bottom + 4, left: rect.left });
+      }
+      return willOpen;
+    });
   }, []);
 
   const handleSelect = useCallback(
@@ -318,7 +353,7 @@ function RoleDropdown({
     <div className="relative" ref={ref}>
       <button
         className="role-dropdown-chip"
-        onClick={() => setOpen(!open)}
+        onClick={toggleOpen}
         type="button"
         disabled={loading}
       >
@@ -326,8 +361,12 @@ function RoleDropdown({
         <ChevronDown className="w-[13px] h-[13px] text-text-3" />
       </button>
 
-      {open && (
-        <div className="absolute left-0 top-full mt-1 w-60 bg-surface border border-border rounded-lg shadow-lg z-20 py-1">
+      {open && menuPos && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed w-60 bg-surface border border-border rounded-lg shadow-lg z-20 py-1"
+          style={{ top: menuPos.top, left: menuPos.left }}
+        >
           {ROLES.map((role) => {
             const isDisabled =
               isLastOwner && isSelf && role !== "owner";
@@ -372,7 +411,8 @@ function RoleDropdown({
               </button>
             );
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

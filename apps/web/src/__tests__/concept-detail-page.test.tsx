@@ -246,7 +246,10 @@ describe("ConceptDetailPage", () => {
     renderConcept(threeEvidenceConcept.uuid);
 
     expect(await screen.findByText("Evidence · 3")).toBeInTheDocument();
-    expect(screen.getByText("Pull request")).toBeInTheDocument();
+    // "Pull request" appears twice: the evidence rail's kind label and the
+    // timeline title now use the same honest, state-free wording (evidence.pr
+    // carries no merged/state field, so neither can claim an outcome).
+    expect(screen.getAllByText("Pull request").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Commit")).toBeInTheDocument();
     expect(screen.getByText("Repo file")).toBeInTheDocument();
     // repo_file shows commit-pinned reference
@@ -254,6 +257,19 @@ describe("ConceptDetailPage", () => {
     expect(
       screen.getByText(/a1b2c3d · docs\/decisions\/001-use-postgres-pgvector.md/),
     ).toBeInTheDocument();
+  });
+
+  it("does not claim a PR was merged in the timeline — the evidence contract carries no state", async () => {
+    // Regression: evidence.pr is {kind, ref, at} only — no merged/closed/open
+    // field — so the timeline must never assert an outcome it can't verify.
+    // A PR that was closed unmerged (or never actioned) must not read "merged".
+    setupScope();
+    mocks.fetchConcept.mockResolvedValue(threeEvidenceConcept);
+    renderConcept(threeEvidenceConcept.uuid);
+
+    await screen.findByText("Timeline");
+    expect(screen.queryByText(/PR merged/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/merged/i)).not.toBeInTheDocument();
   });
 
   it("renders contributors with the three forms: bound human, service, and unbound human", async () => {

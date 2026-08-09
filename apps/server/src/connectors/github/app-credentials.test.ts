@@ -106,6 +106,82 @@ describe('generateAppJwt', () => {
   });
 });
 
+// ── Private key loading (real-world .env encodings) ──────────────────────────
+//
+// Regression coverage: a self-hosted deployment had TEAMEM_GITHUB_PRIVATE_KEY
+// set as bare base64 DER with the PEM armor stripped entirely — a real key
+// that failed with Node's decoder error ("unsupported") because the loader
+// only ever tried createPrivateKey() on the raw string. loadPrivateKey()
+// must accept every form an operator plausibly ends up with in a .env file.
+
+describe('loadPrivateKey', () => {
+  // A second real PKCS#1 keypair (GitHub's own download format) alongside
+  // the PKCS#8 one used elsewhere in this file, since PKCS#1 is what this
+  // suite specifically needs to prove works.
+  const pkcs1Pair = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
+  });
+
+  it('loads a standard PEM key with real newlines (the common case)', () => {
+    const key = __test.loadPrivateKey(testKeyPair.privateKey);
+    expect(key.asymmetricKeyType).toBe('rsa');
+  });
+
+  it('loads PKCS#1 PEM (GitHub App download format)', () => {
+    const key = __test.loadPrivateKey(pkcs1Pair.privateKey);
+    expect(key.asymmetricKeyType).toBe('rsa');
+  });
+
+  it('loads a PEM key whose newlines were escaped as literal \\n (single-line .env value)', () => {
+    const escaped = testKeyPair.privateKey.replace(/\n/g, '\\n');
+    expect(escaped).not.toContain('\n');
+    expect(escaped).toContain('\\n');
+
+    const key = __test.loadPrivateKey(escaped);
+    expect(key.asymmetricKeyType).toBe('rsa');
+  });
+
+  it('loads bare base64 DER with the PEM armor stripped entirely (PKCS#8)', () => {
+    // Strip "-----BEGIN...-----"/"-----END...-----" and newlines — exactly
+    // what a self-hoster ends up with pasting only the base64 body.
+    const bare = testKeyPair.privateKey
+      .replace(/-----BEGIN [^-]+-----/, '')
+      .replace(/-----END [^-]+-----/, '')
+      .replace(/\s+/g, '');
+
+    const key = __test.loadPrivateKey(bare);
+    expect(key.asymmetricKeyType).toBe('rsa');
+  });
+
+  it('loads bare base64 DER with the PEM armor stripped entirely (PKCS#1 — the real-world regression case)', () => {
+    const bare = pkcs1Pair.privateKey
+      .replace(/-----BEGIN [^-]+-----/, '')
+      .replace(/-----END [^-]+-----/, '')
+      .replace(/\s+/g, '');
+
+    const key = __test.loadPrivateKey(bare);
+    expect(key.asymmetricKeyType).toBe('rsa');
+  });
+
+  it('a key loaded from any of the above forms produces a working signature', () => {
+    // End-to-end: the whole point is that generateAppJwt succeeds using the
+    // stripped-armor form, not just that loadPrivateKey doesn't throw.
+    const bare = pkcs1Pair.privateKey
+      .replace(/-----BEGIN [^-]+-----/, '')
+      .replace(/-----END [^-]+-----/, '')
+      .replace(/\s+/g, '');
+
+    const jwt = __test.generateAppJwt('42', bare);
+    expect(jwt.split('.')).toHaveLength(3);
+  });
+
+  it('throws (Node decoder error, not a hang or silent success) on genuinely invalid input', () => {
+    expect(() => __test.loadPrivateKey('not-a-key-at-all')).toThrow();
+  });
+});
+
 // ── Token provider ───────────────────────────────────────────────────────────
 
 describe('createGitHubAppCredentialsProvider', () => {

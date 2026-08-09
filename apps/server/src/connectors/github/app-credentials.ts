@@ -57,6 +57,41 @@ function base64url(buffer: Buffer): string {
 }
 
 /**
+ * Load an RSA private key supplied via an environment variable, tolerating
+ * the handful of forms operators actually end up with in a `.env` file:
+ *
+ *   1. Real PEM, real newlines — the direct file contents.
+ *   2. Real PEM, but newlines were escaped as literal `\n` when the value was
+ *      forced onto one line (very common when hand-pasting into `.env`).
+ *   3. The PEM armor (`-----BEGIN...-----`/`-----END...-----`) was stripped
+ *      entirely, leaving bare base64 DER — e.g. when a key manager or a
+ *      previous copy/paste dropped the header/footer lines. GitHub's own
+ *      downloaded key is PKCS#1 (`RSA PRIVATE KEY`); PKCS#8 is tried as a
+ *      fallback for keys that were re-encoded.
+ *
+ * Throws Node's own decoder error (never the key material) when none of
+ * these interpretations parse.
+ */
+function loadPrivateKey(raw: string) {
+  const trimmed = raw.trim();
+
+  if (trimmed.includes('-----BEGIN')) {
+    // Case 1 or 2: already has PEM armor. If there are no real newlines but
+    // there are literal backslash-n sequences, this is case 2 — unescape them.
+    const pem = trimmed.includes('\n') ? trimmed : trimmed.replace(/\\n/g, '\n');
+    return createPrivateKey(pem);
+  }
+
+  // Case 3: no armor at all — treat as bare base64-encoded DER.
+  const der = Buffer.from(trimmed.replace(/\s+/g, ''), 'base64');
+  try {
+    return createPrivateKey({ key: der, format: 'der', type: 'pkcs1' });
+  } catch {
+    return createPrivateKey({ key: der, format: 'der', type: 'pkcs8' });
+  }
+}
+
+/**
  * Generate a GitHub App JWT signed with the App's RSA private key.
  *
  * The JWT is valid for 10 minutes (GitHub's maximum) with a 60-second clock
@@ -77,7 +112,7 @@ function generateAppJwt(appId: string, privateKeyPem: string): string {
   const payloadB64 = base64url(Buffer.from(JSON.stringify(payload), 'utf-8'));
   const signingInput = `${headerB64}.${payloadB64}`;
 
-  const privateKey = createPrivateKey(privateKeyPem);
+  const privateKey = loadPrivateKey(privateKeyPem);
   const sign = createSign('RSA-SHA256');
   sign.update(signingInput);
   sign.end();
@@ -226,5 +261,6 @@ export const __test = {
   generateAppJwt,
   exchangeJwtForToken,
   base64url,
+  loadPrivateKey,
   TOKEN_EXPIRY_MARGIN_MS,
 };

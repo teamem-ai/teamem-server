@@ -36,6 +36,13 @@
       "when": 1785499715624,
       "tag": "0004_free_mockingbird",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785802053539,
+      "tag": "0005_add_llm_model",
+      "breakpoints": true
     }
   ]
 }
