@@ -9,7 +9,9 @@
 #                    [+ worker in standard mode]) on an isolated compose
 #                    project, then wait for liveness and readiness.
 #   2. ingest      — bootstrap an isolated team/project/API key and submit a
-#                    real cli_init event (compile=true) via POST /v1/events.
+#                    real cli_init event (compile=true) whose repo_file evidence
+#                    is anchored to a real durable artifact in THIS repository
+#                    (docs/adr/001-…md) at a real immutable commit SHA.
 #   3. compile     — wait for the pg-boss compile job; a concept page must be
 #                    produced (job state completed + ≥1 concept).
 #   4. MCP search  — call the /mcp search tool; the compiled concept must be
@@ -454,53 +456,59 @@ phase_bootstrap() {
 phase_ingest() {
   header "3. INGEST — Submit a real cli_init event (compile=true)"
 
-  local content='## Decision: PostgreSQL + pgvector as the single datastore
+  # Real, durable artifact anchor (AGENTS.md §1/§5.1/§6.1): the frozen
+  # decision ADR committed to THIS repository. repo + immutable commit SHA +
+  # path + content are all resolved from the git object database (never
+  # fabricated, never from the working tree), so the repo_file evidence is
+  # genuinely durable and re-resolvable.
+  local artifact_repo="teamem-ai/teamem-server"
+  local artifact_path="${TEAMEM_E2E_ARTIFACT_PATH:-docs/adr/001-http-runtime-and-dev-scripts.md}"
+  local artifact_commit="${TEAMEM_E2E_ARTIFACT_COMMIT:-141c05b0dd01ce5ddf944f919b37134db1c2a21a}"
 
-We decided to keep PostgreSQL with the pgvector extension as the single
-datastore for teamem: relational events, full-text search, vector similarity,
-and the pg-boss compile queue all live in one system. No Redis, no separate
-vector database.
+  # The artifact must resolve at that exact commit; otherwise we refuse to
+  # ingest a fictional anchor (the original defect this replaces).
+  if ! ( cd "$REPO_ROOT" && git cat-file -e "${artifact_commit}:${artifact_path}" >/dev/null 2>&1 ); then
+    fail "Durable artifact not resolvable at ${artifact_commit}:${artifact_path} — refusing a fabricated anchor"
+    inc_fail
+    echo ""
+    return 1
+  fi
+  if ! ( cd "$REPO_ROOT" && git cat-file -e "${artifact_commit}^{commit}" >/dev/null 2>&1 ); then
+    fail "Commit ${artifact_commit} is not a real commit — refusing a fabricated anchor"
+    inc_fail
+    echo ""
+    return 1
+  fi
 
-### Rationale
-
-- pgvector gives us cosine-similarity candidate recall for hybrid concept search.
-- pg-boss provides job-queue semantics directly inside Postgres (SKIP LOCKED).
-- Cross-domain transactions keep ingest, idempotency checks, and enqueue
-  consistent in one database.
-- One stateful service means a much simpler self-hosted deployment.
-
-### Alternatives considered
-
-- Redis/Valkey plus a separate vector store (Qdrant/Milvus): two extra
-  stateful services and no cross-domain transactions — rejected.
-- PostgreSQL without vector search (FTS only): an acceptable fallback, but
-  the team wanted hybrid retrieval — rejected for the primary path.
-- SQLite + pgvector: not suitable for a multi-process server workload.
-
-### Consequences
-
-- The default stack is postgres + server (+ worker), never five services.
-- Semantic search honestly degrades to FTS when embedding is unavailable.'
+  local artifact_content artifact_url
+  artifact_content="$(cd "$REPO_ROOT" && git show "${artifact_commit}:${artifact_path}")"
+  artifact_url="https://github.com/${artifact_repo}/blob/${artifact_commit}/${artifact_path}"
+  pass "Durable artifact anchored: ${artifact_path} @ ${artifact_commit} (immutable, tracked)"
+  inc_pass
 
   local payload
   payload="$(jq -n \
     --arg projectId "$PROJECT_ID" \
     --arg ts "$TIMESTAMP" \
-    --arg content "$content" \
+    --arg repo "$artifact_repo" \
+    --arg sha "$artifact_commit" \
+    --arg path "$artifact_path" \
+    --arg url "$artifact_url" \
+    --arg content "$artifact_content" \
     '{
       projectId: $projectId,
       source: {
         kind: "cli_init",
-        externalId: "teamem-ai/teamem-server",
-        url: "https://github.com/teamem-ai/teamem-server/blob/main/docs/decisions/001-single-datastore-pgvector.md"
+        externalId: ($repo + "/" + $path),
+        url: $url
       },
       idempotencyKey: ("m3-e2e-" + $ts),
       options: { compile: true, wait: false },
       payload: {
         schemaVersion: 1,
-        repo: "teamem-ai/teamem-server",
-        commitSha: "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
-        path: "docs/decisions/001-single-datastore-pgvector.md",
+        repo: $repo,
+        commitSha: $sha,
+        path: $path,
         content: $content
       }
     }')"
@@ -673,7 +681,9 @@ phase_mcp_search() {
   fi
 
   # 5c. tools/call search — the compiled concept MUST be retrievable.
-  local search_args query="pgvector"
+  # The concept F1 extracts from the ADR is about Hono/Node.js — search for a
+  # distinctive term the compiled page body will contain (FTS 'simple' config).
+  local search_args query="hono"
   search_args="$(jq -nc --arg projectId "$PROJECT_ID" --arg query "$query" \
     '{projectId: $projectId, query: $query}')"
   local req
