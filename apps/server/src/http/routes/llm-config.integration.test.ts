@@ -265,14 +265,22 @@ describe.skipIf(!url)('LLM Config Routes — live Postgres', () => {
     it(
       'returns not-ok for an invalid real key',
       async () => {
+        // This test intentionally uses the real transport (no fetchImpl) even
+        // though the suite's shared app is hermetic — it is the live
+        // provider round-trip check.
+        const live = new Hono();
+        live.use('*', requestContext);
+        live.onError(globalErrorHandler);
+        live.notFound(notFoundHandler);
+        live.route('/', buildLlmConfigRoutes({ db })); // global fetch
+
         const userId = await createUser(nextGithubId(), 'llmadmin');
         const teamId = await createTeam('LLM Test Team');
         await createProject(teamId, 'LLM Project');
         await addMembership(userId, teamId, 'admin');
         const sessionToken = await createSession(userId);
 
-
-        const res = await app.request(`/v1/teams/${teamId}/llm/test`, {
+        const res = await live.request(`/v1/teams/${teamId}/llm/test`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
           body: JSON.stringify({ provider: 'openai', apiKey: 'sk-invalid-test-key' }),
@@ -328,36 +336,6 @@ describe.skipIf(!url)('LLM Config Routes — live Postgres', () => {
       expect(json.data.ok).toBe(false);
       expect(json.data.latencyMs).toBeNull();
     });
-
-    // Optional live check against a real provider. Opt in with
-    // TEAMEM_LLM_LIVE_TEST=1; honestly skipped otherwise so the DB-backed CI
-    // job never depends on outbound provider reachability.
-    it.skipIf(process.env['TEAMEM_LLM_LIVE_TEST'] !== '1')(
-      'returns not-ok against the real provider (live, opt-in)',
-      async () => {
-        const live = new Hono();
-        live.use('*', requestContext);
-        live.onError(globalErrorHandler);
-        live.notFound(notFoundHandler);
-        live.route('/', buildLlmConfigRoutes({ db })); // global fetch
-
-        const userId = await createUser(nextGithubId(), 'llmadmin');
-        const teamId = await createTeam('LLM Live Team');
-        await createProject(teamId, 'LLM Project');
-        await addMembership(userId, teamId, 'admin');
-        const sessionToken = await createSession(userId);
-
-        const res = await live.request(`/v1/teams/${teamId}/llm/test`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Cookie: cookie(sessionToken) },
-          body: JSON.stringify({ provider: 'openai', apiKey: 'sk-invalid-test-key' }),
-        });
-
-        expect(res.status).toBe(200);
-        const json = await res.json();
-        expect(json.data.ok).toBe(false);
-      },
-    );
 
     it('rejects viewer from testing (403)', async () => {
       const userId = await createUser(nextGithubId(), 'llmviewer');
