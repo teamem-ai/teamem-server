@@ -22,3 +22,6 @@ coverage/
 .pi/extensions/emdash-hook.ts
 .playwright-mcp/
 *.png
+
+# M3-QA-01 acceptance runtime artifacts
+scripts/m3-okf-roundtrip-results/
