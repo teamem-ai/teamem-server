@@ -13,7 +13,12 @@ import { useState, useCallback, useEffect } from "react";
 import { mintApiKey, ApiRequestError } from "./onboarding-api";
 import type { MintKeyResponse } from "./onboarding-types";
 import { CommandBlock } from "@/components/ui";
-import { Key, AlertTriangle, Sparkles, Terminal, Zap } from "lucide-react";
+import {
+  codexMcpAddCommand,
+  codexConfigTomlSnippet,
+  codexTokenExportCommand,
+} from "@/lib/codex-mcp";
+import { Key, AlertTriangle, Sparkles, Terminal, Zap, Bot } from "lucide-react";
 
 export interface Step4Data {
   keyId: string;
@@ -176,7 +181,7 @@ export function Step4MintKey({
         </p>
       </div>
 
-      {/* Three commands */}
+      {/* Connect commands */}
       <div style={{ marginTop: 20, display: "flex", flexDirection: "column", gap: 16 }}>
         <CommandBlock
           command={minted.mcpCommand}
@@ -188,6 +193,34 @@ export function Step4MintKey({
             </div>
           }
         />
+
+        {/* Codex — first-class MCP consumer (same /mcp endpoint, zero server
+            changes). The command + config.toml reference TEAMEM_MCP_TOKEN;
+            the token itself is wired in via the one-time export line. */}
+        <CommandBlock
+          command={codexMcpAddCommand(serverBaseUrl)}
+          description={
+            <div className="cmd-label">
+              <Bot className="ic" />
+              1b · Also plug the same knowledge into Codex — search every page
+              from a Codex session
+            </div>
+          }
+        />
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <p className="hint" style={{ margin: 0 }}>
+            Codex reads the token from the{" "}
+            <code className="mono">TEAMEM_MCP_TOKEN</code> env var. Save your
+            key so Codex can read it (add this to{" "}
+            <code className="mono">~/.zshrc</code> / your shell profile):
+          </p>
+          <CommandBlock command={codexTokenExportCommand(minted.token)} />
+          <p className="hint" style={{ margin: 0 }}>
+            …or paste this block into <code className="mono">~/.codex/config.toml</code>{" "}
+            instead of running the command:
+          </p>
+          <CommandBlock command={codexConfigTomlSnippet(serverBaseUrl)} />
+        </div>
 
         <CommandBlock
           command={initCommand}

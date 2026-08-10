@@ -309,6 +309,24 @@ describe("SettingsSourcesPage", () => {
     });
   });
 
+  it("shows the Codex connect config alongside Claude Code (DUA-255)", async () => {
+    mockEmptyLists();
+    renderPage(SettingsSourcesPage);
+    await waitFor(() => {
+      expect(screen.getByText(/CLI.*teamem init/)).toBeInTheDocument();
+    });
+    // Verified `codex mcp add` form with --url + --bearer-token-env-var.
+    expect(
+      screen.getByText(
+        /codex mcp add teamem --url http:\/\/localhost:3000\/mcp --bearer-token-env-var TEAMEM_MCP_TOKEN/,
+      ),
+    ).toBeInTheDocument();
+    // config.toml snippet is offered too.
+    expect(
+      screen.getByText(/\[mcp_servers\.teamem\]/),
+    ).toBeInTheDocument();
+  });
+
   it("shows endpoint healthy status", async () => {
     mockEmptyLists();
     renderPage(SettingsSourcesPage);
