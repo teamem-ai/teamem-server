@@ -383,6 +383,27 @@ describe("Onboarding wizard — network-boundary integration (MSW)", () => {
     expect(screen.getByText(/claude mcp add/)).toBeInTheDocument();
     expect(screen.getByText(/teamem init/)).toBeInTheDocument();
     expect(screen.getByText(/teamem cli install-hook/)).toBeInTheDocument();
+
+    // Codex connect config (DUA-255): the verified `codex mcp add` form with
+    // --url + --bearer-token-env-var, host correctly filled from the session.
+    expect(
+      screen.getByText(
+        /codex mcp add teamem --url http:\/\/localhost:3000\/mcp --bearer-token-env-var TEAMEM_MCP_TOKEN/,
+      ),
+    ).toBeInTheDocument();
+    // The config.toml snippet referencing the env var is also offered.
+    expect(
+      screen.getByText(/\[mcp_servers\.teamem\]/),
+    ).toBeInTheDocument();
+    // Security: the Codex *command* must not embed the plaintext token (it is
+    // referenced via the env var); the token appears only in the export wiring.
+    const codexCommand = screen.getByText(
+      /codex mcp add teamem --url http:\/\/localhost:3000\/mcp --bearer-token-env-var TEAMEM_MCP_TOKEN/,
+    );
+    expect(codexCommand.textContent).not.toContain(TEST_TOKEN);
+    expect(
+      screen.getByText(`export TEAMEM_MCP_TOKEN="${TEST_TOKEN}"`),
+    ).toBeInTheDocument();
   });
 
   it("Step 5: polls with Bearer auth and shows stats + latest page", async () => {

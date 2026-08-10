@@ -248,6 +248,28 @@ codex mcp add teamem --url http://localhost:8080/mcp --bearer-token-env-var TEAM
 - Verify: `codex mcp list` shows `teamem` with `Bearer token` auth, and
   `codex mcp get teamem` shows `transport: streamable_http`.
 
+Connectivity smoke (reproducible, no demo data — `scripts/m3-codex-mcp-smoke.sh`,
+run via `pnpm smoke:codex-mcp`):
+
+```sh
+# Path A — existing key/project:
+TEAMEM_BASE_URL=http://localhost:8080 \
+TEAMEM_MCP_API_KEY=$TEAMEM_TOKEN \
+TEAMEM_MCP_PROJECT_ID=<prj_...> \
+./scripts/m3-codex-mcp-smoke.sh
+
+# Path B — bootstrap an isolated team/project/key from the DB:
+TEAMEM_BASE_URL=http://localhost:8080 \
+TEAMEM_DATABASE_URL=postgres://... \
+./scripts/m3-codex-mcp-smoke.sh
+```
+
+It performs a real Streamable HTTP + Bearer round-trip (the same transport
+Codex uses): `initialize` → `tools/list` → `search` → `memory_write` →
+`get_page`. An empty knowledge base is an honest PASS (empty search results),
+and `get_page` is verified via the real "Concept not found" boundary when no
+concept is compiled yet.
+
 </details>
 
 What your agent can now do (the tools it will see):

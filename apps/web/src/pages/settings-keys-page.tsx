@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { useSession } from "@/lib/session";
 import { EmptyState } from "@/components/ui/empty-state";
 import { KeyReveal, CommandBlock } from "@/components/ui/command-block";
+import { codexMcpAddCommand, codexTokenExportCommand } from "@/lib/codex-mcp";
 import { DangerConfirmDialog } from "@/components/ui/danger-confirm-dialog";
 import { PermissionDenied, ViewerInfoBanner } from "@/components/ui/permission-denied";
 import type {
@@ -563,6 +564,18 @@ export function SettingsKeysPage() {
                   description="Plug team knowledge into Claude Code with this key:"
                 />
               )}
+              {minted.token && typeof window !== "undefined" && (
+                <>
+                  <CommandBlock
+                    command={codexMcpAddCommand(window.location.origin)}
+                    description="Or plug the same key into Codex (same /mcp endpoint):"
+                  />
+                  <CommandBlock
+                    command={codexTokenExportCommand(minted.token)}
+                    description="Then save your key so Codex can read it — add this to ~/.zshrc / your shell profile:"
+                  />
+                </>
+              )}
             </div>
             <div className="modal-foot">
               <button className="btn btn-primary" onClick={resetMint}>
@@ -601,6 +614,18 @@ export function SettingsKeysPage() {
                   command={rotated.mcpCommand}
                   description="Update your Claude Code connection:"
                 />
+              )}
+              {rotated.token && typeof window !== "undefined" && (
+                <>
+                  <CommandBlock
+                    command={codexMcpAddCommand(window.location.origin)}
+                    description="Update your Codex connection (same /mcp endpoint):"
+                  />
+                  <CommandBlock
+                    command={codexTokenExportCommand(rotated.token)}
+                    description="Then save the rotated key so Codex can read it — add this to ~/.zshrc / your shell profile:"
+                  />
+                </>
               )}
             </div>
             <div className="modal-foot">
