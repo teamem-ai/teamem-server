@@ -24,6 +24,7 @@ file**. One dated row per collection run, appended, never rewritten.
 | **Cadence** | Weekly (any cadence works — the value is never lost) |
 | **Records** | `stars`, `forks` |
 | **Token scope** | Public read; no special scope |
+| **Owner** | Release workstream |
 
 Stars are a vanity-adjacent number and are collected because the milestone
 checklist names them, not because they demonstrate use. They are read
@@ -37,8 +38,9 @@ alongside clones, never on their own.
 | **Commands** | `gh api repos/teamem-ai/teamem-server/traffic/clones`<br>`gh api repos/teamem-ai/teamem-server/traffic/views` |
 | **Retention** | **14 days only.** GitHub returns exactly 14 daily buckets and discards older ones permanently |
 | **Cadence** | **At most every 14 days**, or history is irrecoverably lost. Weekly is the working cadence, so one missed run does not lose data |
-| **Records** | `clones.count`, `clones.uniques`, `views.count`, `views.uniques`, plus the raw daily buckets |
+| **Records** | `clones.count`, `clones.uniques`, `views.count`, `views.uniques`, plus the raw daily buckets **of both series** |
 | **Token scope** | **Requires push/admin access** — the traffic API is not public |
+| **Owner** | Release workstream (the only role that reliably holds the push access this API requires) |
 
 Two collection rules that decide whether these numbers mean anything:
 
@@ -75,6 +77,7 @@ is not holding, whatever the star count says. No threshold is set here.
 | **Retention** | Indefinite for Issues/Discussions; Discord depends on the server's own history |
 | **Cadence** | Weekly, classified at collection time |
 | **Records** | Count per bucket A–E, and the C+E share |
+| **Owner** | Founder / community workstream — classification is a judgment call and cannot be delegated to a script |
 
 **Landing points are not all live yet** (see the status table below). Only the
 Issues channel is collectable today; that is a finding for the release
@@ -98,6 +101,12 @@ Until Discussions is enabled and a Discord landing point exists, question
 quality is collectable **from Issues only**, and the metric must be reported
 that way rather than as a full-coverage number.
 
+**Owners are assigned at role level, not to a named person.** That is enough
+for collection to be unambiguous — every metric has exactly one accountable
+workstream — but before the W9–W10 window opens a named individual should be
+recorded for each, since "the release workstream" cannot be paged when a
+fortnightly traffic snapshot is missed and the 14-day window closes.
+
 ---
 
 ## Snapshot log
@@ -110,7 +119,9 @@ judgments.
 | 2026-08-10 | 0 | 0 | 3562 / 338 | 114 / 2 | 0/0/0/0/0 | M3-QA-03 acceptance | First snapshot; wiring verification. Repo public since 2026-07-17, not yet announced — no release tag, no launch post, so these are pre-announcement baselines. Clone `count` is dominated by CI checkouts; `uniques` is the meaningful figure. Zero issues opened to date, Discussions disabled, no Discord |
 
 Daily traffic buckets for the first snapshot (2026-07-26 → 2026-08-08),
-retained here because GitHub will discard them after 14 days:
+retained here because GitHub will discard them after 14 days. **Both** series
+are archived per day — a totals-only record cannot be reconstructed once the
+window slides.
 
 ```json
 {"clones":{"count":3562,"uniques":338,"daily":[
@@ -121,7 +132,14 @@ retained here because GitHub will discard them after 14 days:
   {"2026-08-03":{"count":5,"uniques":5}},{"2026-08-04":{"count":4,"uniques":4}},
   {"2026-08-05":{"count":2,"uniques":2}},{"2026-08-06":{"count":34,"uniques":6}},
   {"2026-08-07":{"count":52,"uniques":6}},{"2026-08-08":{"count":70,"uniques":10}}]},
- "views":{"count":114,"uniques":2}}
+ "views":{"count":114,"uniques":2,"daily":[
+  {"2026-07-26":{"count":0,"uniques":0}},{"2026-07-27":{"count":0,"uniques":0}},
+  {"2026-07-28":{"count":2,"uniques":1}},{"2026-07-29":{"count":0,"uniques":0}},
+  {"2026-07-30":{"count":45,"uniques":2}},{"2026-07-31":{"count":48,"uniques":1}},
+  {"2026-08-01":{"count":6,"uniques":1}},{"2026-08-02":{"count":0,"uniques":0}},
+  {"2026-08-03":{"count":4,"uniques":1}},{"2026-08-04":{"count":0,"uniques":0}},
+  {"2026-08-05":{"count":0,"uniques":0}},{"2026-08-06":{"count":7,"uniques":1}},
+  {"2026-08-07":{"count":2,"uniques":1}},{"2026-08-08":{"count":0,"uniques":0}}]}}
 ```
 
 ---

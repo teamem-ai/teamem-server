@@ -34,8 +34,12 @@ provider key in this environment (so the one-command E2E cannot run green),
 the `teamem` CLI is not yet published to npm, and the release media
 (demo GIF, launch post) are founder-owned and not yet produced.
 
-**All engineering red lines pass.** Nothing in §3 blocks the release on
-correctness, licensing, redaction, tenancy, or honesty grounds.
+**All product red lines pass** — nothing in §3 blocks the release on
+correctness, licensing, redaction, or tenancy grounds. Two further issues
+surfaced during review of this report and are recorded rather than smoothed
+over: the **integration suite is order-dependent and not stable** (§2.10.1,
+Finding F9), and this report's own first revision overstated it as green from
+a single run.
 
 | # | Exit checklist item | Verdict |
 |---|---|---|
@@ -48,7 +52,7 @@ correctness, licensing, redaction, tenancy, or honesty grounds.
 | 7 | Documentation quartet complete | **PASS** |
 | 8 | GitHub public release ready (license / CI / GIF / launch post) | **CONDITIONAL PASS** — no demo GIF, no launch post |
 | 9 | Adoption-metrics collection wired | **CONDITIONAL PASS** — question-quality landing points missing |
-| 10 | lint / typecheck / test / integration / E2E / Compose smoke green; honest skips; license boundary correct | **CONDITIONAL PASS** — everything green except the E2E of item 2 |
+| 10 | lint / typecheck / test / integration / E2E / Compose smoke green; honest skips; license boundary correct | **CONDITIONAL PASS** — E2E unverified (item 2) **and the integration suite is not stable** (F9) |
 
 ---
 
@@ -325,15 +329,84 @@ All commands below were run at HEAD in this environment.
 
 | Check | Command | Result |
 |---|---|---|
+Commands are recorded with the **full** invocation, including every
+environment variable required to reproduce them. Each of these scripts exits
+non-zero with a prerequisite message if run bare (`POSTGRES_PASSWORD is
+required`; `TEAMEM_MCP_API_KEY`+`TEAMEM_MCP_PROJECT_ID` or
+`TEAMEM_DATABASE_URL` unset), so a bare command line is not a reproducible
+record.
+
+| Check | Command as actually run | Result |
+|---|---|---|
 | Lint | `pnpm lint` | **PASS** — exit 0, zero findings |
 | Typecheck | `pnpm typecheck` | **PASS** — server, web, schema, scripts; zero errors |
 | License boundary | `pnpm license:check` | **PASS** — 8/8: root/server/web AGPL-3.0-only, `packages/schema` MIT, deps `yaml` (ISC) and `zod` (MIT) permissive, no bleed |
 | Unit | `pnpm test` | **PASS** — **75 files passed, 1 skipped; 1676 tests passed, 16 skipped** |
-| Integration (real Postgres/pgvector) | `TEST_DATABASE_URL=… pnpm test:integration` | **PASS** — **58 files, 1017 passed, 7 skipped**, exit 0 |
-| Compose smoke, standard (3 containers) | `scripts/m0-compose-smoke.sh --mode standard` | **PASS — 18/18** |
-| Compose smoke, all-in-one (2 containers) | `scripts/m0-compose-smoke.sh --mode all-in-one` | **PASS — 17/17** |
-| Codex MCP connectivity smoke (live server) | `scripts/m3-codex-mcp-smoke.sh` | **PASS — 8/8, 0 skipped** (item 5) |
+| Integration (real Postgres/pgvector) | `TEST_DATABASE_URL='postgres://teamem:test123@127.0.0.1:5432/teamem' pnpm test:integration` | **NOT STABLE** — green on a clean run, but reproducibly red on re-run. See §2.10.1 |
+| Compose smoke, standard (3 containers) | `POSTGRES_PASSWORD=<generated> TEAMEM_PORT=18081 TEAMEM_PG_PORT=15433 COMPOSE_PROJECT=teamem-smoke-qa03 bash scripts/m0-compose-smoke.sh --mode standard` | **PASS — 18/18** |
+| Compose smoke, all-in-one (2 containers) | same environment, `bash scripts/m0-compose-smoke.sh --mode all-in-one` | **PASS — 17/17** |
+| Codex MCP connectivity smoke (live server) | server booted separately (`DATABASE_URL=… TEAMEM_PORT=18799 TEAMEM_ALL_IN_ONE=false npx tsx src/index.ts`), then `TEAMEM_DATABASE_URL='postgres://teamem:test123@127.0.0.1:5432/teamem' TEAMEM_BASE_URL=http://127.0.0.1:18799 bash scripts/m3-codex-mcp-smoke.sh` | **PASS — 8/8, 0 skipped** (item 5) |
 | One-command E2E | `bash scripts/e2e.sh` | **NOT VERIFIED** — SKIP, no provider key (item 2) |
+
+The ports above (18081/15433/18799) are deliberate non-defaults: a Postgres
+container was already bound to 5432 in this environment, and the compose smoke
+runs on an isolated compose project so it never touches a running dev stack.
+
+#### 2.10.1 The integration suite is NOT stable — order-dependent failures
+
+**Correction.** An earlier revision of this report recorded the integration
+suite as flatly green on the strength of a single passing run. That was an
+overstatement. Re-running the identical command reproduces failures.
+
+Two consecutive runs of the same command, nothing else changed:
+
+```text
+##### RUN 1 #####   Test Files  58 passed (58)
+                    Tests  1017 passed | 7 skipped (1024)
+##### RUN 2 #####   Test Files  6 failed | 52 passed (58)
+                    Tests  32 failed | 985 passed | 7 skipped (1024)
+Caused by: error: insert or update on table "events"
+           violates foreign key constraint "events_team_id_teams_id_fk"
+```
+
+The mechanism is a **cross-file blanket delete racing parallel suites**. It is
+reproducible on demand by running the two implicated files together — 3 of 5
+attempts failed:
+
+```text
+$ TEST_DATABASE_URL=… npx vitest run --config vitest.integration.config.ts \
+    src/http/routes/job-retry.integration.test.ts \
+    src/http/routes/invites.integration.test.ts
+attempt 1 → Test Files  2 failed (2)            Tests  14 failed | 20 passed
+attempt 2 → Test Files  2 passed (2)            Tests  34 passed
+attempt 3 → Test Files  2 failed (2)            Tests  14 failed | 20 passed
+attempt 4 → Test Files  2 passed (2)            Tests  34 passed
+attempt 5 → Test Files  1 failed | 1 passed     Tests  13 failed | 21 passed
+
+Caused by: error: update or delete on table "users" violates foreign key
+constraint "invites_invited_by_user_id_users_id_fk" on table "invites"
+  code: '23503',
+  detail: 'Key (id)=(usr_5d221b9171034406) is still referenced from table "invites".'
+```
+
+Root cause, confirmed in source: the `afterEach` at
+`apps/server/src/http/routes/job-retry.integration.test.ts:97` issues blanket,
+**unscoped** deletes — `DELETE FROM web_sessions`, `DELETE FROM memberships`,
+`DELETE FROM users` — that are not restricted to that file's own `teamId`. Its
+own comment shows the author already hit this class of bug and handled it for
+`memberships`, but `invites.invited_by_user_id` is a second FK onto `users`
+(`invites_invited_by_user_id_users_id_fk`, `ON DELETE no action`, migration
+`0003_boring_khan.sql:43`) and is not cleared. When `invites.integration.test.ts`
+holds an invite row concurrently, the blanket `DELETE FROM users` violates it.
+Run 2's broader cascade (`events_team_id_teams_id_fk`) is the same class of
+defect reaching a different table.
+
+**Honest verdict:** the integration suite passes on a clean run and its
+*content* is not in question — no failure here indicates a product defect, and
+`main`'s CI is green because CI starts from a fresh database each time. But
+"the DB-backed integration suite is green" cannot be asserted as a stable
+property of this codebase, and `docs/release-checklist.md` §2 makes exactly
+that assertion a pre-release gate. → **Finding F9**.
 
 **Honest skip accounting** (a skip is never a pass):
 
@@ -377,9 +450,12 @@ Each red line was probed with a counter-example, not merely read.
 | **Structured LLM output** | **PASS** | Anthropic path uses forced tool use (`tool_choice: { type: 'tool', name: … }`, `claude-adapter.ts:89`); OpenAI-family paths use `response_format: { type: 'json_schema', … }` derived from Zod (`factory.ts:469`). No free-text/regex parsing path |
 | **Redaction before persistence** | **PASS** | `ingest-one.ts` executes validate → `stripPrivateTags` (line 133) → `payloadHash` **over the redacted payload** (139) → `insertEvent` (154) → `createJob` (216) → enqueue. No pre-redaction write, and the idempotency hash is computed post-redaction as the contract requires |
 | **Tenant-scope isolation** | **PASS** | Export's only entry point takes a `ScopeContext` and derives `teamId` from it exclusively; a cross-team or missing project both return `null`, rendered as an identical 404 (QA-01 negative case 2, anti-enumeration) |
-| **Overstated verification** | **PASS (this report)** | Item 2 is reported as unverified rather than substituted with an equivalent; items 5 and 6 carry their specific blockers; item 4 is called FAIL rather than "pending" |
+| **Overstated verification** | **VIOLATED then CORRECTED (by this report)** | Item 2 is reported as unverified rather than substituted with an equivalent; items 5 and 6 carry their specific blockers; item 4 is called FAIL rather than "pending". **But this report's own first revision violated the red line**: it recorded the integration suite as green from one passing run, when re-running it reproduces failures (§2.10.1), and it listed script invocations stripped of the environment they need to run at all. Both are corrected here, and the original claims are left visible rather than silently rewritten |
 
-No red line is violated. Nothing in this section blocks the release.
+No **product** red line is violated. The one violation was in this report's
+own evidence discipline, and it is corrected above rather than removed —
+a single passing run is not evidence of a green suite, and a command recorded
+without its environment is not a reproducible record.
 
 ---
 
@@ -397,6 +473,7 @@ Recorded, not fixed (this is a read-only acceptance).
 | **F6** | `apps/web/src/__tests__/invite.test.tsx > InvitePage > shows error banner when acceptInvite fails` failed CI on `main` at `75c822c` (run 31342603509: 1 failed / 1669 passed) with `TestingLibraryElementError: Unable to find an element with the text: This invite link has already been used`. The test file was not modified afterwards and now passes locally and in later CI runs — i.e. it is **flaky**, and a red commit landed on `main` | **Medium** | web |
 | **F7** | `README.md:21` still reads "Status: M0–M2 complete; M3 (export, docs) in progress" — accurate today, but it must be updated as part of cutting the release | **Low** | docs / release |
 | **F8** | The OKF renderer prefixes each page with its type directory *and* then its full `path`, so a concept whose path already starts with a type-like segment renders at a doubled location — the dogfooding bundle emits `decisions/decisions/expose-v1-search-route.md` for `path: decisions/expose-v1-search-route`. Links stay internally consistent (0 broken of 45) and the validator passes, so this is readability, not correctness — but it is visible in the flagship public artifact | **Low** | export |
+| **F9** | The integration suite is **order-dependent and not stable**: `job-retry.integration.test.ts:97` `afterEach` runs blanket unscoped `DELETE FROM web_sessions / memberships / users` that are not confined to its own `teamId`, and does not clear `invites`, whose `invites_invited_by_user_id_users_id_fk` (`ON DELETE no action`) then blocks the delete when a parallel suite holds an invite. Reproduced: back-to-back full runs gave `58 passed` then `6 files / 32 tests failed`; the implicated pair fails 3 of 5 attempts. `docs/release-checklist.md` §2 gates the release on this suite being green, so the gate is currently unreliable | **High** | server / test-infra |
 
 ---
 
@@ -425,25 +502,34 @@ only, never as placeholder UI or endpoints that imply an implementation:
 4. **6 GitHub commit→PR discovery integration tests** — GitHub Search API rate limiting.
 5. **1 `llm-config` integration test** — skipped for a missing external resource.
 6. **A design-partner 30-minute self-hosting run** — that is M2 behavioral evidence and requires a real partner; not attempted here.
+7. **A stably green integration suite** — the suite passes on a clean run but fails on re-run (§2.10.1, F9). "Integration green" is therefore *not* an established property of this codebase, only of a fresh-database run.
 
 ---
 
 ## 6. Conclusion
 
-M3's substance is in place and its red lines hold: the OKF export round-trip
-is proven against a real validator and a real GitHub repository, the
-distribution loop works with zero server changes and no capture hooks, the
+M3's substance is in place and its product red lines hold: the OKF export
+round-trip is proven against a real validator and a real GitHub repository,
+the distribution loop works with zero server changes and no capture hooks, the
 documentation quartet is complete with a genuinely dogfooded architecture
-page, the license boundary is intact in both the repository and the published
-artifact, and the full check battery is green apart from one gate.
+page, and the license boundary is intact in both the repository and the
+published artifact.
 
 **M3 is not closed.** One exit item failed — the CLI has not switched to
-`contextResponse.parse()` (F1) — and five more are conditional on resources
-rather than code: an LLM provider key for the one-command E2E, an npm
-publication for the CLI, an interactive IDE session, and the founder-owned
-release media. The adoption-metrics collection is **wired and exercised**, not
-met, with its question-quality landing points still incomplete.
+`contextResponse.parse()` (F1). Five more are conditional on resources rather
+than code: an LLM provider key for the one-command E2E, an npm publication for
+the CLI, an interactive IDE session, and the founder-owned release media. The
+adoption-metrics collection is **wired and exercised**, not met, with its
+question-quality landing points still incomplete.
+
+One further gate is weaker than it appeared: the **integration suite is
+order-dependent and not stably green** (F9). It passes from a fresh database —
+which is why CI is green — but re-running it locally reproduces foreign-key
+failures caused by unscoped cross-file cleanup. Since
+`docs/release-checklist.md` §2 makes "integration suite green" a pre-tag gate,
+that gate should be repaired before it is relied on.
 
 To close M3: merge `teamem-ai/cli#10`, run `scripts/e2e.sh` green with a
-provider key, publish the CLI to npm, fix or remove the dead Discussions link,
-decide the Discord question, and produce the GIF, launch post and tag.
+provider key, fix the F9 test-isolation defect, publish the CLI to npm, fix or
+remove the dead Discussions link, decide the Discord question, and produce the
+GIF, launch post and tag.
