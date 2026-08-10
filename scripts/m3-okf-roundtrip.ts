@@ -43,14 +43,15 @@
  *   M3_OKF_RESULTS_DIR             results directory (default scripts/m3-okf-roundtrip-results)
  */
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { readdirSync } from 'node:fs';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import {
   OKF_BUNDLE_INDEX_FILE,
   OKF_BUNDLE_LOG_FILE,
   parseConceptPage,
 } from '@teamem/schema';
-import { createDbHandle } from '../apps/server/src/db/client.js';
+import { createDbHandle, type AppDb } from '../apps/server/src/db/client.js';
 import { renderOkfBundle, type OkfBundleFile } from '../apps/server/src/export/render-okf-bundle.js';
 import { allProjectsScope, projectScope } from '../apps/server/src/auth/scope.js';
 import { runBootstrap } from '../apps/server/src/commands/bootstrap.js';
@@ -101,7 +102,58 @@ function resolveFrom(fromRel: string, target: string): string {
   return rel.startsWith('/') ? rel.slice(1) : rel;
 }
 
+/** Delete the seeded tenants (read-only acceptance leaves no residue). */
+async function cleanupTenants(
+  db: AppDb,
+  projectIds: readonly string[],
+  teamIds: readonly string[],
+): Promise<void> {
+  for (const pid of projectIds) {
+    await db.execute(`DELETE FROM concept_contributors WHERE project_id = '${pid}'`);
+    await db.execute(`DELETE FROM concept_evidence      WHERE project_id = '${pid}'`);
+    await db.execute(`DELETE FROM concept_paths         WHERE project_id = '${pid}'`);
+    await db.execute(`DELETE FROM concepts              WHERE project_id = '${pid}'`);
+    await db.execute(`DELETE FROM job_events            WHERE project_id = '${pid}'`);
+    await db.execute(`DELETE FROM events                WHERE project_id = '${pid}'`);
+    await db.execute(`DELETE FROM jobs                  WHERE project_id = '${pid}'`);
+    await db.execute(`DELETE FROM api_keys              WHERE project_id = '${pid}'`);
+    await db.execute(`DELETE FROM projects              WHERE id = '${pid}'`);
+  }
+  for (const tid of teamIds) {
+    await db.execute(`DELETE FROM principals WHERE team_id = '${tid}'`);
+    await db.execute(`DELETE FROM teams WHERE id = '${tid}'`);
+  }
+}
+
+const SEED_INFO_FILE = 'seed-info.json';
+
+/** Latest run directory under RESULTS_DIR (fallback for --clean). */
+function latestRunDir(): string {
+  const dirs = readdirSync(RESULTS_DIR)
+    .filter((d) => d.startsWith('run-'))
+    .sort()
+    .reverse();
+  if (dirs.length === 0) throw new Error(`no run dirs under ${RESULTS_DIR}`);
+  return join(RESULTS_DIR, dirs[0]!);
+}
+
 async function main(): Promise<void> {
+  // ── --clean <runDir>: delete the seeded tenants of a previous run ──────
+  if (process.argv[2] === '--clean') {
+    const cleanRun = process.argv[3] ?? latestRunDir();
+    const seedInfo = JSON.parse(await readFile(join(cleanRun, SEED_INFO_FILE), 'utf8')) as {
+      teamA: string;
+      projectA: string;
+      teamB: string;
+      projectB: string;
+    };
+    const { db, close } = createDbHandle(DATABASE_URL, {});
+    await cleanupTenants(db, [seedInfo.projectA, seedInfo.projectB], [seedInfo.teamA, seedInfo.teamB]);
+    await close();
+    console.log(`Cleaned seeded tenants from ${cleanRun}`);
+    return;
+  }
+
   await mkdir(BUNDLE_DIR, { recursive: true });
 
   const { db, close } = createDbHandle(DATABASE_URL, {});
@@ -234,10 +286,21 @@ async function main(): Promise<void> {
   // ── 3. Real okf-skills validator ──────────────────────────────────────
   let validatorVerdict = 'SKIP';
   let validatorErrors: readonly string[] = [];
+  let validatorScriptPath: string | null = null;
   const validator = await acquireOkfSkillsValidator();
   if (!validator.ready) {
     bad('real okf-skills validator is available', validator.reason ?? 'unavailable');
   } else {
+    // Persist the pinned validator script into the run dir so the shell
+    // driver's HTTP phase can re-validate the curl-downloaded bundle with
+    // the EXACT same real validator.
+    if (validator.scriptPath) {
+      await writeFile(
+        join(RUN_DIR, 'okf_validate.py'),
+        await readFile(validator.scriptPath, 'utf8'),
+      );
+      validatorScriptPath = join(RUN_DIR, 'okf_validate.py');
+    }
     const result = await validator.run(BUNDLE_DIR);
     await writeFile(join(RUN_DIR, 'validator-report.json'), JSON.stringify(result.report, null, 2));
     await writeFile(join(RUN_DIR, 'validator.stdout.txt'), result.stdout);
@@ -372,24 +435,38 @@ async function main(): Promise<void> {
     results: { pass: [...pass], fail: [...fail] },
   };
   await writeFile(join(RUN_DIR, 'summary.json'), JSON.stringify(summary, null, 2));
+  // Seed info for the shell driver's REAL HTTP-download phase (a live server
+  // reads these rows, so the seeded tenant is not deleted until that phase
+  // has run). Contains the bootstrap key token needed for the Bearer call.
+  await writeFile(
+    join(RUN_DIR, SEED_INFO_FILE),
+    JSON.stringify(
+      {
+        teamA,
+        projectA,
+        projectAName,
+        teamB,
+        projectB,
+        bootstrapToken: a.key.token ?? null,
+        validatorScriptPath,
+        unresolvedUuid,
+        payloadSecret,
+        runDir: RUN_DIR,
+        bundleDir: BUNDLE_DIR,
+      },
+      null,
+      2,
+    ),
+  );
   console.log(`\nSummary written to ${RUN_DIR}/summary.json`);
+  console.log(`Seed info written to ${RUN_DIR}/${SEED_INFO_FILE}`);
   console.log(`Passed: ${pass.length}  Failed: ${fail.length}`);
 
-  // ── Cleanup the seeded tenants (read-only acceptance leaves no residue) ─
-  for (const pid of [projectA, projectB]) {
-    await db.execute(`DELETE FROM concept_contributors WHERE project_id = '${pid}'`);
-    await db.execute(`DELETE FROM concept_evidence      WHERE project_id = '${pid}'`);
-    await db.execute(`DELETE FROM concept_paths         WHERE project_id = '${pid}'`);
-    await db.execute(`DELETE FROM concepts              WHERE project_id = '${pid}'`);
-    await db.execute(`DELETE FROM job_events            WHERE project_id = '${pid}'`);
-    await db.execute(`DELETE FROM events                WHERE project_id = '${pid}'`);
-    await db.execute(`DELETE FROM jobs                  WHERE project_id = '${pid}'`);
-    await db.execute(`DELETE FROM api_keys              WHERE project_id = '${pid}'`);
-    await db.execute(`DELETE FROM projects              WHERE id = '${pid}'`);
-  }
-  for (const tid of [teamA, teamB]) {
-    await db.execute(`DELETE FROM principals WHERE team_id = '${tid}'`);
-    await db.execute(`DELETE FROM teams WHERE id = '${tid}'`);
+  // ── Cleanup the seeded tenants unless the HTTP phase still needs them ──
+  if (process.env['M3_OKF_SKIP_CLEANUP'] !== '1') {
+    await cleanupTenants(db, [projectA, projectB], [teamA, teamB]);
+  } else {
+    console.log('SKIP_CLEANUP=1: seeded tenant left in place for the HTTP-download phase.');
   }
   await close();
 

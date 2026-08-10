@@ -11,13 +11,15 @@
 > okf-skills validator** passes → **push to a real GitHub repo** → markdown
 > renders, `teamem://` links resolve to clickable relative links, and
 > frontmatter preserves the canonical UUID (round-trip). No production code
-> was changed. The acceptance is driven by two committed, reproducible
-> artifacts added by this task:
+> was changed. The bundle fetched for the push is pulled over the **real
+> HTTP endpoint** `GET /v1/export` from a live server with a real Bearer
+> token — the exact bytes a portal user downloads. The acceptance is driven
+> by two committed, reproducible artifacts added by this task:
 >
 > - `scripts/m3-okf-roundtrip.ts` — the live helper (seed → real render →
->   real validator → negative-case probes)
-> - `scripts/m3-okf-roundtrip.sh` — the shell driver (prereqs, helper, real
->   GitHub push, evidence summary)
+>   real validator → negative-case probes → cleanup)
+> - `scripts/m3-okf-roundtrip.sh` — the shell driver (prereqs, helper, live
+>   real server + curl HTTP download, real GitHub push, evidence summary)
 >
 > Everything below was actually run; nothing was skipped except where the
 > environment (GitHub rate-limiting on commit-discovery) forced it, and that
@@ -52,9 +54,12 @@ server's **own** bootstrap + concept repositories (4 concepts across
 `conventions/migrations/…` path, evidence, cross-links and one deliberately
 unresolved UUID), renders the **real** OKF bundle via `renderOkfBundle`
 (M3-EXPORT-03), materializes it to disk, runs the **real okf-skills
-validator**, pushes the bundle to a real GitHub repo, and prints the
+validator**, then boots the **real server process**, downloads the bundle
+over the **real HTTP endpoint** `GET /v1/export` with a real Bearer token,
+extracts it with system `tar`, re-validates the HTTP bytes with the same real
+validator, pushes the artifact to a real GitHub repo, and prints the
 evidence. Full helper output was written to
-`scripts/m3-okf-roundtrip-results/run-1786323412952/`.
+`scripts/m3-okf-roundtrip-results/run-1786325749032/`.
 
 All nine live checks **PASSED**:
 
@@ -117,41 +122,77 @@ pass/fail is the hard §11 rule set, which is clean.
 
 ---
 
+## 2.5 — Real HTTP Endpoint Download (GET /v1/export)
+
+In addition to the in-process render evidence above, the bundle was fetched
+over the **real HTTP endpoint** exactly as a portal user downloads it. The
+live server process was booted (`tsx src/index.ts`) against the seeded real
+Postgres with `TEAMEM_ALL_IN_ONE=false`; `GET /healthz` returned
+`{"status":"ok"}` on `127.0.0.1:18713` (real HTTP). A real `curl` request
+with the seeded bootstrap **Bearer token** hit the scoped export endpoint:
+
+```bash
+curl -D headers.txt -o bundle.tar.gz \
+  -H "Authorization: Bearer <bootstrap-token>" \
+  "http://127.0.0.1:18713/v1/export?projectId=<project>"
+```
+
+Real response headers (`http/headers.txt` in the run dir):
+
+```
+HTTP/1.1 200
+content-type: application/gzip
+content-disposition: attachment; filename="roundtrip-4e781077-okf-0.1.tar.gz"
+```
+
+The `tar.gz` was extracted with **system `tar`** and re-checked with the
+**real okf-skills validator** (`uv run --script okf_validate.py … --json`):
+
+```
+passed=true conformant=true errors=0
+```
+
+That HTTP-fetched artifact — not the in-process render — is the bundle pushed
+to GitHub in §3: the exact bytes a portal user's one-click export returns.
+
+---
+
 ## 3. Push to a Real GitHub Repo — Markdown Renders, Links Clickable
 
-The bundle was pushed to a real GitHub repository via `gh`:
+The **HTTP-downloaded** bundle was pushed to a real GitHub repository via
+`gh`:
 
-> **https://github.com/duan-li/teamem-m3-okf-roundtrip-20260810105654**
+> **https://github.com/duan-li/teamem-m3-okf-roundtrip-20260810113552**
 
 Remote git tree confirms the directory structure survived the push
 (`index.md`, `log.md`, and the `decisions/` `gotchas/` `conventions/migrations/`
 `services/` pages):
 
 ```
-conventions/migrations/sql-up-344d5424.md
-decisions/use-postgres-344d5424.md
-gotchas/pg-timezone-cast-344d5424.md
+conventions/migrations/sql-up-4e781077.md
+decisions/use-postgres-4e781077.md
+gotchas/pg-timezone-cast-4e781077.md
 index.md
 log.md
-services/auth-api-344d5424.md
+services/auth-api-4e781077.md
 ```
 
 GitHub serves every page as **rendered markdown over HTTP 200** (confirmed
 with real requests):
 
-- `index.md` → HTTP 200 — https://github.com/duan-li/teamem-m3-okf-roundtrip-20260810105654/blob/main/index.md
-- decision → HTTP 200 — https://github.com/duan-li/teamem-m3-okf-roundtrip-20260810105654/blob/main/decisions/use-postgres-344d5424.md
-- gotcha → HTTP 200 — https://github.com/duan-li/teamem-m3-okf-roundtrip-20260810105654/blob/main/gotchas/pg-timezone-cast-344d5424.md
+- `index.md` → HTTP 200 — https://github.com/duan-li/teamem-m3-okf-roundtrip-20260810113552/blob/main/index.md
+- decision → HTTP 200 — https://github.com/duan-li/teamem-m3-okf-roundtrip-20260810113552/blob/main/decisions/use-postgres-4e781077.md
+- gotcha → HTTP 200 — https://github.com/duan-li/teamem-m3-okf-roundtrip-20260810113552/blob/main/gotchas/pg-timezone-cast-4e781077.md
 
 The **relative links are clickable**: the committed decision page contains
 
 ```markdown
-We decided in [ADR-7](../decisions/use-postgres-344d5424.md). After this we hit
-[a timezone gotcha](../gotchas/pg-timezone-cast-344d5424.md) …
+We decided in [ADR-7](../decisions/use-postgres-4e781077.md). After this we hit
+[a timezone gotcha](../gotchas/pg-timezone-cast-4e781077.md) …
 ```
 
-and both `../decisions/use-postgres-344d5424.md` and
-`../gotchas/pg-timezone-cast-344d5424.md` are present in the repo tree, so the
+and both `../decisions/use-postgres-4e781077.md` and
+`../gotchas/pg-timezone-cast-4e781077.md` are present in the repo tree, so the
 links resolve to real, rendered target pages on GitHub (round-trip in the
 "readable + clickable" sense this exit criterion asks for).
 
@@ -165,8 +206,8 @@ page carries the same UUID that was persisted, plus its evidence anchors:
 ```markdown
 ---
 type: decision
-uuid: 88c7a800-7eb3-4b09-b428-b28cad217465
-path: use-postgres-344d5424
+uuid: f453971b-3a9e-45ad-a817-3efe7541856c
+path: use-postgres-4e781077
 status: active
 confidence: high
 title: Use Postgres
@@ -232,8 +273,12 @@ skips**.
   its runtime artifacts, and this report.
 - **Real dependencies used, not substitutes:** the actual okf-skills
   validator (`uv` + pinned upstream script), a real GitHub repository, real
-  Postgres, and the server's own repositories/renderer. No local
-  re-implementation or preview masqueraded as the real thing.
+  Postgres, and the server's own repositories/renderer. The bundle pushed
+  to GitHub was fetched over the **real `GET /v1/export` HTTP endpoint**
+  (live server + `curl` + Bearer token) — not the in-process render — then
+  extracted with system `tar` and re-validated with the same real
+  validator. No local re-implementation or preview masqueraded as the real
+  thing.
 - **Not verified (honestly reported):** a live F1/F2 LLM compilation run was
   not part of this round-trip acceptance — export consumes already-persisted,
   redacted concepts, so no LLM provider key was required; the GitHub
