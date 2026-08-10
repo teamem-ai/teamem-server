@@ -8,6 +8,11 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { CommandBlock } from "@/components/ui/command-block";
+import {
+  codexMcpAddCommand,
+  codexConfigTomlSnippet,
+  codexTokenExportCommand,
+} from "@/lib/codex-mcp";
 import { PermissionDenied, ViewerInfoBanner } from "@/components/ui/permission-denied";
 import type { KeyEntry, ConnectorStatusResponse, MintKeyResponse } from "@teamem/schema";
 import { useSession } from "@/lib/session";
@@ -396,6 +401,24 @@ export function SettingsSourcesPage() {
                 command={mcpCommand}
                 description="Connect Claude Code:"
               />
+              <div className="flex flex-col gap-2">
+                <CommandBlock
+                  command={codexMcpAddCommand(serverBaseUrl)}
+                  description="Connect Codex (same /mcp endpoint, zero server changes):"
+                />
+                <p className="hint" style={{ margin: 0 }}>
+                  Codex reads the token from{" "}
+                  <code className="mono">TEAMEM_MCP_TOKEN</code>. Save your key
+                  so Codex can read it — add this to{" "}
+                  <code className="mono">~/.zshrc</code> / your shell profile:
+                </p>
+                <CommandBlock command={codexTokenExportCommand(selectedToken)} />
+                <p className="hint" style={{ margin: 0 }}>
+                  …or paste this block into{" "}
+                  <code className="mono">~/.codex/config.toml</code> instead:
+                </p>
+                <CommandBlock command={codexConfigTomlSnippet(serverBaseUrl)} />
+              </div>
               <hr className="divider" />
               <div className="flex items-center gap-2 text-[12.5px]">
                 <span className="pill green">
