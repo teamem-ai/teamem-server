@@ -59,12 +59,12 @@ inc_skip() { SKIP_CNT=$((SKIP_CNT+1)); }
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
-BASE_URL="${TEEMEM_BASE_URL:-http://127.0.0.1:8080}"
+BASE_URL="${TEAMEM_BASE_URL:-http://127.0.0.1:8080}"
 MCP_URL="${BASE_URL%/}/mcp"
-API_KEY="${TEEMEM_MCP_API_KEY:-}"
-PROJECT_ID="${TEEMEM_MCP_PROJECT_ID:-}"
-CONCEPT_UUID="${TEEMEM_MCP_CONCEPT_UUID:-}"
-DATABASE_URL="${TEEMEM_DATABASE_URL:-}"
+API_KEY="${TEAMEM_MCP_API_KEY:-}"
+PROJECT_ID="${TEAMEM_MCP_PROJECT_ID:-}"
+CONCEPT_UUID="${TEAMEM_MCP_CONCEPT_UUID:-}"
+DATABASE_URL="${TEAMEM_DATABASE_URL:-}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -87,7 +87,7 @@ phase_provision() {
   header "0. PROVISION — Resolve API key + project"
   local missing=0
 
-  if [[ -z "$BASE_URL" ]]; then info "TEEMEM_BASE_URL unset (defaulting to http://127.0.0.1:8080)"; fi
+  if [[ -z "$BASE_URL" ]]; then info "TEAMEM_BASE_URL unset (defaulting to http://127.0.0.1:8080)"; fi
 
   if [[ -n "$API_KEY" && -n "$PROJECT_ID" ]]; then
     info "Using provided key + project (path A)."
@@ -95,7 +95,7 @@ phase_provision() {
   fi
 
   if [[ -n "$DATABASE_URL" ]]; then
-    info "TEEMEM_MCP_API_KEY/PROJECT_ID not set — bootstrapping fresh isolated team/project/key from DB (path B)."
+    info "TEAMEM_MCP_API_KEY/PROJECT_ID not set — bootstrapping fresh isolated team/project/key from DB (path B)."
     local entrypoint bootstrap_cmd bootstrap_dir out
     if [[ -f "$REPO_ROOT/apps/server/src/index.ts" ]]; then
       entrypoint="src/index.ts"; bootstrap_cmd="npx tsx"; bootstrap_dir="$REPO_ROOT/apps/server"
@@ -130,9 +130,9 @@ phase_provision() {
     return 0
   fi
 
-  fail "Neither TEEMEM_MCP_API_KEY+TEEMEM_MCP_PROJECT_ID nor TEEMEM_DATABASE_URL is set — cannot provision."
-  info "  Path A: TEEMEM_MCP_API_KEY=tok_... TEEMEM_MCP_PROJECT_ID=prj_..."
-  info "  Path B: TEEMEM_DATABASE_URL=postgres://..."
+  fail "Neither TEAMEM_MCP_API_KEY+TEAMEM_MCP_PROJECT_ID nor TEAMEM_DATABASE_URL is set — cannot provision."
+  info "  Path A: TEAMEM_MCP_API_KEY=tok_... TEAMEM_MCP_PROJECT_ID=prj_..."
+  info "  Path B: TEAMEM_DATABASE_URL=postgres://..."
   inc_fail
   return 1
 }

@@ -253,6 +253,18 @@ describe("SettingsKeysPage", () => {
       expect(screen.getByTestId("key-token")).toHaveTextContent(token);
     });
 
+    // The mint modal also shows the Codex connect command AND the token
+    // export wiring so the operator can put the key into TEAMEM_MCP_TOKEN
+    // (DUA-255) — a command referencing an env var with no wiring is unusable.
+    expect(
+      screen.getByText(
+        /codex mcp add teamem --url http:\/\/localhost:3000\/mcp --bearer-token-env-var TEAMEM_MCP_TOKEN/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(`export TEAMEM_MCP_TOKEN="${token}"`),
+    ).toBeInTheDocument();
+
     // Close the reveal modal
     screen.getByText("Done — I've saved the key").click();
 
