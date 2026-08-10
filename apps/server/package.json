@@ -22,12 +22,12 @@
     "m1:f1-signal": "vitest run --config vitest.f1.config.ts"
   },
   "devDependencies": {
-    "@types/node": "^26.1.1",
-    "@types/pg": "^8.20.0",
+    "@types/node": "^26.1.2",
+    "@types/pg": "^8.20.4",
     "drizzle-kit": "^0.31.10",
     "pg": "^8.22.0",
     "tsup": "^8.4.0",
-    "tsx": "^4.20.0",
+    "tsx": "^4.23.9",
     "typescript": "^5.8.3",
     "vitest": "^3.2.7"
   },
